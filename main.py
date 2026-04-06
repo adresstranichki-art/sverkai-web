@@ -944,16 +944,17 @@ async def get_history():
     return JSONResponse(_load_history())
 
 
-@app.get("/api/health")
-async def health():
-    return {"status": "ok", "api_key_set": bool(ANTHROPIC_API_KEY)}
-
-
 # ── Статика ──────────────────────────────────────────────────────────────────
 _static = Path(__file__).parent / "static"
 _static.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(_static)), name="static")
 
 @app.get("/")
+@app.head("/")
 async def root():
     return FileResponse(str(_static / "index.html"))
+
+@app.head("/api/health")
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "api_key_set": bool(ANTHROPIC_API_KEY)}
