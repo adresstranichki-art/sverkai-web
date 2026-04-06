@@ -6,4 +6,4 @@ openpyxl==3.1.5
 xlrd==2.0.1
 xlsxwriter==3.2.0
 pdfplumber==0.11.4
-anthropic==0.39.0
+anthropic>=0.50.0
