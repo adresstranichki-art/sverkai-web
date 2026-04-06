@@ -616,12 +616,12 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                 'row_company':r1.get('raw_row',0),'row_supplier':r2.get('raw_row',0),'date':r1.get('date_str','')})
 
     if cfg.get('find_date_diff', True):
+        fuzzy_rr_pairs = {(a['raw_row'], b['raw_row']) for a, b in fuzzy_matches}
         for r1, r2 in exact_pairs + fuzzy_matches:
             d1, d2 = r1.get('date'), r2.get('date')
             if pd.notna(d1) and pd.notna(d2) and abs((d1 - d2).days) > 0:
                 dd = abs((d1 - d2).days)
-                fuzzy_raw_pairs = {(a['raw_row'], b['raw_row']) for a, b in fuzzy_matches}
-                pfx = 'Нечёткое совпадение: ' if (r1['raw_row'], r2['raw_row']) in fuzzy_raw_pairs else ''
+                pfx = 'Нечёткое совпадение: ' if (r1['raw_row'], r2['raw_row']) in fuzzy_rr_pairs else ''
                 discrepancies.append({'type':'date_diff','document_number':r1.get('document',''),
                     'description':f'{pfx}Даты расходятся на {dd} дн.',
                     'company_value':r1.get('date_str',''),'supplier_value':r2.get('date_str',''),
@@ -841,11 +841,8 @@ async def reconcile(
         logs.append(f"Файл 2: {file2.filename} → {lb2} ({len(df2p)} строк)")
 
         client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-        import asyncio
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, lambda: hybrid_reconcile(
-            df1p, df2p, ft1, ft2, client,
-            progress_cb=lambda t: logs.append(t), settings=cfg))
+        result = hybrid_reconcile(df1p, df2p, ft1, ft2, client,
+                                  progress_cb=lambda t: logs.append(t), settings=cfg)
 
         DCOLS = ['date_str','document','doc_num','debit','credit']
         COL_RU = {'date_str':'Дата','document':'Документ','doc_num':'Номер','debit':'Дебет','credit':'Кредит'}
