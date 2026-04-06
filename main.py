@@ -841,8 +841,15 @@ async def reconcile(
         logs.append(f"Файл 2: {file2.filename} → {lb2} ({len(df2p)} строк)")
 
         client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
-        result = hybrid_reconcile(df1p, df2p, ft1, ft2, client,
-                                  progress_cb=lambda t: logs.append(t), settings=cfg)
+
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            ThreadPoolExecutor(max_workers=1),
+            lambda: hybrid_reconcile(df1p, df2p, ft1, ft2, client,
+                                     progress_cb=lambda t: logs.append(t), settings=cfg)
+        )
 
         DCOLS = ['date_str','document','doc_num','debit','credit']
         COL_RU = {'date_str':'Дата','document':'Документ','doc_num':'Номер','debit':'Дебет','credit':'Кредит'}
