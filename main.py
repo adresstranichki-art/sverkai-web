@@ -620,7 +620,8 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             d1, d2 = r1.get('date'), r2.get('date')
             if pd.notna(d1) and pd.notna(d2) and abs((d1 - d2).days) > 0:
                 dd = abs((d1 - d2).days)
-                pfx = 'Нечёткое совпадение: ' if (r1,r2) in fuzzy_matches else ''
+                fuzzy_raw_pairs = {(a['raw_row'], b['raw_row']) for a, b in fuzzy_matches}
+                pfx = 'Нечёткое совпадение: ' if (r1['raw_row'], r2['raw_row']) in fuzzy_raw_pairs else ''
                 discrepancies.append({'type':'date_diff','document_number':r1.get('document',''),
                     'description':f'{pfx}Даты расходятся на {dd} дн.',
                     'company_value':r1.get('date_str',''),'supplier_value':r2.get('date_str',''),
