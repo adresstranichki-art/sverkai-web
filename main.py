@@ -884,6 +884,83 @@ async def reconcile(
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+
+@app.post("/api/preview")
+async def preview_file(file: UploadFile = File(...)):
+    """Парсит один файл и возвращает таблицу для предпросмотра + статус детекта."""
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp()
+        ext = Path(file.filename).suffix.lower()
+        path = os.path.join(tmpdir, f"preview{ext}")
+        with open(path, "wb") as f: f.write(await file.read())
+
+        ftype = detect_file_type(path)
+        profile = None
+        label = ""
+        needs_manual = False
+
+        if ftype == "proopt":
+            df = parse_proopt(path); label = "ПРООПТ"
+        elif ftype == "emex":
+            df = parse_emex(path); label = "ЭМЕКС"
+        elif ftype == "counterparty":
+            df = parse_counterparty(path); label = "Акт сверки (контрагент)"; ftype = "generic_detected"
+        elif ftype == "pdf_act":
+            df = parse_pdf_act_to_structured(path); label = "PDF акт сверки"; ftype = "generic_detected"
+        else:
+            if ANTHROPIC_API_KEY:
+                profile = claude_detect_columns(path, ANTHROPIC_API_KEY)
+                if profile and profile.get("confidence") != "low":
+                    df = parse_with_profile(path, profile); label = "Автодетект AI"; ftype = "generic_detected"
+                else:
+                    df = parse_generic(path); label = "Требуется настройка"; needs_manual = True
+            else:
+                df = parse_generic(path); label = "Требуется настройка"; needs_manual = True
+
+        DCOLS = ["date_str", "document", "doc_num", "debit", "credit"]
+        COL_RU = {"date_str": "Дата", "document": "Документ", "doc_num": "Номер", "debit": "Дебет", "credit": "Кредит"}
+        if all(c in df.columns for c in ["date_str", "document"]):
+            cols = [c for c in DCOLS if c in df.columns]
+            display_df = df[cols].rename(columns=COL_RU)
+        else:
+            display_df = df.head(200)
+
+        # Получаем превью сырого файла для диалога ручной настройки
+        raw_preview = []
+        try:
+            raw_ext = Path(path).suffix.lower()
+            engine = "openpyxl" if raw_ext == ".xlsx" else ("xlrd" if raw_ext == ".xls" else None)
+            if engine:
+                raw = pd.read_excel(path, engine=engine, header=None, dtype=str, nrows=20)
+                raw_preview = {
+                    "columns": [str(i) for i in range(len(raw.columns))],
+                    "rows": [[str(v).strip() if pd.notna(v) else "" for v in row] for _, row in raw.iterrows()]
+                }
+        except Exception:
+            pass
+
+        return JSONResponse({
+            "ok": True,
+            "label": label,
+            "file_type": ftype,
+            "needs_manual": needs_manual,
+            "profile": profile,
+            "raw_rows": list(df["raw_row"]) if "raw_row" in df.columns else list(range(len(display_df))),
+            "table": {
+                "columns": list(display_df.columns),
+                "rows": _df_to_records(display_df),
+            },
+            "raw_preview": raw_preview,
+            "n_cols": len(pd.read_excel(path, engine=("openpyxl" if ext==".xlsx" else "xlrd") if ext in (".xlsx",".xls") else "openpyxl", header=None, dtype=str, nrows=1).columns) if ext in (".xlsx",".xls") else 0,
+        })
+    except HTTPException: raise
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e), "needs_manual": True, "table": None, "raw_preview": {}})
+    finally:
+        if tmpdir and os.path.exists(tmpdir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
 @app.post("/api/export")
 async def export_report(payload: dict):
     report_id = str(uuid.uuid4())[:8]

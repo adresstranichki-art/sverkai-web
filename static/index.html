@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>sverkAI — Сверка актов</title>
+<title>SverkAI — Сверка актов</title>
 <style>
   :root {
     --green:    #00a854;
@@ -22,14 +22,14 @@
     --shadow:   0 1px 4px rgba(0,0,0,.08);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg);
-         color: var(--text); min-height: 100vh; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
-  header { background: var(--black); border-bottom: 3px solid var(--green);
-           padding: 0 24px; height: 54px; display: flex; align-items: center;
-           justify-content: space-between; position: sticky; top: 0; z-index: 100;
-           box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-  .logo { font-size: 20px; font-weight: 700; color: var(--green); letter-spacing: 1px; }
+  /* Header */
+  header { background: var(--black); border-bottom: 3px solid var(--green); padding: 0 24px; height: 54px;
+           display: flex; align-items: center; justify-content: space-between;
+           position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  .logo { font-size: 20px; font-weight: 700; color: var(--green); letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
+  .logo-icon { font-size: 22px; }
   .logo span { color: var(--white); }
   .header-right { display: flex; align-items: center; gap: 10px; }
   .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #aaa; }
@@ -38,86 +38,76 @@
 
   main { padding: 18px 24px; max-width: 1800px; margin: 0 auto; }
 
-  .upload-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px;
-                align-items: start; margin-bottom: 14px; }
-  .upload-card { background: var(--panel); border: 1.5px solid var(--border);
-                 border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+  /* Upload */
+  .upload-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: start; margin-bottom: 14px; }
+  .upload-card { background: var(--panel); border: 1.5px solid var(--border); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); transition: border-color .2s; }
   .upload-card:hover { border-color: var(--green); }
-  .card-title { font-size: 11px; font-weight: 700; color: var(--muted);
-                text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
-  .drop-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 16px;
-               text-align: center; cursor: pointer; transition: all .2s; min-height: 82px;
-               display: flex; flex-direction: column; align-items: center;
-               justify-content: center; gap: 5px; background: var(--bg); }
+  .card-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
+  .drop-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 16px; text-align: center;
+               cursor: pointer; transition: all .2s; min-height: 82px; display: flex; flex-direction: column;
+               align-items: center; justify-content: center; gap: 5px; background: var(--bg); }
   .drop-zone:hover, .drop-zone.drag-over { border-color: var(--green); background: var(--green-lt); }
   .drop-zone .icon { font-size: 26px; }
   .drop-zone p { font-size: 12px; color: var(--muted); }
   .drop-zone .hint { font-size: 11px; color: #b2bec3; }
-  .file-chosen { font-size: 12px; color: var(--green); margin-top: 8px;
-                 display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  .file-status { font-size: 12px; margin-top: 8px; display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  .file-status.ok { color: var(--green); }
+  .file-status.warn { color: var(--yellow); }
+  .file-status.loading { color: var(--muted); }
   .fname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
-  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px;
-         border: none; border-radius: 7px; cursor: pointer; font-size: 13px;
-         font-weight: 600; transition: all .15s; }
+
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: none;
+         border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; }
   .btn-green { background: var(--green); color: white; }
   .btn-green:hover { background: var(--green-dk); }
   .btn-green:disabled { background: #b2d8c4; color: white; cursor: not-allowed; }
   .btn-ghost { background: var(--panel); color: var(--text); border: 1.5px solid var(--border); }
   .btn-ghost:hover { border-color: var(--green); color: var(--green); }
   .btn-ghost:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-warn { background: #fff8e1; color: #e65100; border: 1.5px solid var(--yellow); }
+  .btn-warn:hover { background: #fff3cd; }
   .actions-col { display: flex; flex-direction: column; gap: 10px; padding-top: 26px; }
   #btn-run { width: 200px; height: 44px; font-size: 14px; box-shadow: 0 2px 8px rgba(0,168,84,.3); }
   #btn-export { width: 200px; height: 38px; }
 
+  /* Settings */
   .settings-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
                   padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center;
                   gap: 18px; flex-wrap: wrap; box-shadow: var(--shadow); }
   .settings-bar label { font-size: 12px; color: var(--text); display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .settings-bar input[type=checkbox] { accent-color: var(--green); width: 14px; height: 14px; }
-  .settings-bar input[type=number] { background: var(--bg); border: 1px solid var(--border);
-                                      border-radius: 4px; color: var(--text); padding: 2px 6px; width: 52px; font-size: 12px; }
-  .settings-title { font-size: 11px; font-weight: 700; color: var(--green);
-                    text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+  .settings-bar input[type=number] { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 2px 6px; width: 52px; font-size: 12px; }
+  .settings-title { font-size: 11px; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
 
-  #progress-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-                   padding: 8px 14px; margin-bottom: 12px; box-shadow: var(--shadow); }
-  #progress-bar { height: 3px; background: var(--green); width: 0; transition: width .3s;
-                  border-radius: 2px; margin-bottom: 5px; }
+  /* Progress */
+  #progress-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  #progress-bar { height: 3px; background: var(--green); width: 0; transition: width .3s; border-radius: 2px; margin-bottom: 5px; }
   #progress-text { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .spinner { width: 12px; height: 12px; border: 2px solid var(--border);
-             border-top-color: var(--green); border-radius: 50%;
-             animation: spin .6s linear infinite; display: none; }
+  .spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin .6s linear infinite; display: none; }
   .spinner.active { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .tab-bar { display: flex; gap: 2px; border-bottom: 2px solid var(--border);
-             background: var(--panel); border-radius: 8px 8px 0 0; padding: 0 8px;
-             box-shadow: var(--shadow); }
-  .tab { padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
-         color: var(--muted); border-bottom: 2px solid transparent;
-         margin-bottom: -2px; transition: all .15s; user-select: none; }
+  /* Tabs */
+  .tab-bar { display: flex; gap: 2px; border-bottom: 2px solid var(--border); background: var(--panel); border-radius: 8px 8px 0 0; padding: 0 8px; box-shadow: var(--shadow); }
+  .tab { padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; user-select: none; }
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--green); border-bottom-color: var(--green); }
-  .tab-badge { background: var(--red); color: white; border-radius: 10px;
-               padding: 1px 6px; font-size: 10px; margin-left: 5px; }
-  .tab-content { display: none; background: var(--panel); border: 1px solid var(--border);
-                 border-top: none; border-radius: 0 0 8px 8px; box-shadow: var(--shadow); }
+  .tab-badge { background: var(--red); color: white; border-radius: 10px; padding: 1px 6px; font-size: 10px; margin-left: 5px; }
+  .tab-content { display: none; background: var(--panel); border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; box-shadow: var(--shadow); }
   .tab-content.active { display: block; }
 
+  /* Compare tables */
   .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
   .table-panel { border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); }
-  .table-header { background: var(--black); padding: 8px 12px; font-size: 12px; font-weight: 700;
-                  display: flex; align-items: center; justify-content: space-between; gap: 8px; color: white; }
+  .table-header { background: var(--black); padding: 8px 12px; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: white; }
   .table-header .title { display: flex; align-items: center; gap: 8px; }
-  .col-dot { width: 9px; height: 9px; border-radius: 50%; }
-  .search-box { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25);
-                border-radius: 5px; color: white; padding: 4px 10px; font-size: 12px; width: 170px; }
+  .col-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .search-box { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25); border-radius: 5px; color: white; padding: 4px 10px; font-size: 12px; width: 160px; }
   .search-box::placeholder { color: rgba(255,255,255,.5); }
   .search-box:focus { outline: none; border-color: var(--green); }
   .table-wrap { overflow: auto; max-height: 380px; background: white; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
-  th { background: #f0f4f8; color: var(--muted); font-weight: 700; padding: 7px 10px;
-       text-align: left; position: sticky; top: 0; z-index: 2; border-bottom: 2px solid var(--border); }
+  th { background: #f0f4f8; color: var(--muted); font-weight: 700; padding: 7px 10px; text-align: left; position: sticky; top: 0; z-index: 2; border-bottom: 2px solid var(--border); }
   td { padding: 5px 10px; border-bottom: 1px solid #f0f0f0; }
   tr:hover td { background: #f8fffe; }
   tr.row-missing td { background: #ffebee; }
@@ -126,25 +116,19 @@
   tr.row-date td    { background: #f5f5f5; }
   .empty-state { padding: 36px; text-align: center; color: var(--muted); font-size: 13px; background: white; }
 
-  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px;
-            color: var(--muted); padding: 8px 12px 0; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 8px 12px 0; }
   .legend-item { display: flex; align-items: center; gap: 5px; }
   .legend-box { width: 12px; height: 12px; border-radius: 3px; }
 
-  .disc-filter { padding: 10px 12px; display: flex; gap: 8px; flex-wrap: wrap;
-                 border-bottom: 1px solid var(--border); background: #fafafa; }
-  .filter-btn { padding: 4px 12px; border-radius: 20px; border: 1.5px solid var(--border);
-                background: white; color: var(--muted); font-size: 11px; font-weight: 600;
-                cursor: pointer; transition: all .15s; }
+  /* Discrepancies */
+  .disc-filter { padding: 10px 12px; display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: #fafafa; }
+  .filter-btn { padding: 4px 12px; border-radius: 20px; border: 1.5px solid var(--border); background: white; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: all .15s; }
   .filter-btn:hover { border-color: var(--text); color: var(--text); }
   .filter-btn.active { border-color: var(--green); color: var(--green); background: var(--green-lt); }
   .disc-wrap { overflow: auto; }
   .disc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .disc-table th { background: #f0f4f8; color: var(--muted); font-weight: 700;
-                   padding: 8px 12px; text-align: left; position: sticky; top: 0;
-                   border-bottom: 2px solid var(--border); white-space: nowrap; }
-  .disc-table td { padding: 7px 12px; border-bottom: 1px solid #f0f0f0;
-                   max-width: 320px; word-break: break-word; }
+  .disc-table th { background: #f0f4f8; color: var(--muted); font-weight: 700; padding: 8px 12px; text-align: left; position: sticky; top: 0; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  .disc-table td { padding: 7px 12px; border-bottom: 1px solid #f0f0f0; max-width: 320px; word-break: break-word; }
   .disc-table tr:hover td { background: #f8fffe; }
   .disc-table tr.sev-high td   { border-left: 3px solid var(--red); }
   .disc-table tr.sev-medium td { border-left: 3px solid var(--yellow); }
@@ -156,56 +140,88 @@
   .badge-blue   { background: #e3f2fd; color: var(--blue); }
   .badge-gray   { background: #f5f5f5; color: var(--muted); }
 
+  /* Summary */
   .summary-pad { padding: 14px; }
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr));
-                  gap: 12px; margin-bottom: 14px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 12px; margin-bottom: 14px; }
   .stat-card { background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px; padding: 16px 20px; }
-  .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase;
-                      letter-spacing: .6px; margin-bottom: 6px; }
+  .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
   .stat-card .value { font-size: 30px; font-weight: 700; color: var(--green); }
   .stat-card .value.red { color: var(--red); }
   .stat-card .value.dark { color: var(--text); font-size: 20px; }
-  .debt-card { background: var(--green-lt); border: 1.5px solid var(--green);
-               border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; }
+  .debt-card { background: var(--green-lt); border: 1.5px solid var(--green); border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; }
   .debt-card .debt-label { font-size: 14px; font-weight: 700; color: var(--green-dk); }
   .period-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
   .ai-card { background: #f0f7f4; border: 1.5px solid #b2d8c4; border-radius: 10px; padding: 14px 18px; }
-  .ai-card .ai-title { font-size: 11px; color: var(--green-dk); font-weight: 700;
-                       text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
-  .ai-card .ai-text { font-size: 13px; line-height: 1.7; color: var(--text); }
+  .ai-card .ai-title { font-size: 11px; color: var(--green-dk); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
+  /* Markdown styles */
+  .ai-text { font-size: 13px; line-height: 1.7; color: var(--text); }
+  .ai-text h1,.ai-text h2,.ai-text h3 { font-size: 14px; font-weight: 700; margin: 10px 0 4px; color: var(--green-dk); }
+  .ai-text p { margin-bottom: 8px; }
+  .ai-text strong { font-weight: 700; }
+  .ai-text em { font-style: italic; }
+  .ai-text ul,.ai-text ol { padding-left: 20px; margin-bottom: 8px; }
+  .ai-text li { margin-bottom: 3px; }
+  .ai-text code { background: #e8f5e9; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
 
+  /* History */
   .hist-wrap { overflow: auto; }
   .hist-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .hist-table th { background: #f0f4f8; color: var(--muted); font-weight: 700;
-                   padding: 8px 14px; text-align: left; border-bottom: 2px solid var(--border); }
+  .hist-table th { background: #f0f4f8; color: var(--muted); font-weight: 700; padding: 8px 14px; text-align: left; border-bottom: 2px solid var(--border); }
   .hist-table td { padding: 8px 14px; border-bottom: 1px solid #f0f0f0; }
   .hist-table tr:hover td { background: var(--green-lt); cursor: pointer; }
   .empty-hist { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; }
 
+  /* ── Modal ── */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 500; display: flex; align-items: center; justify-content: center; }
+  .modal { background: white; border-radius: 12px; width: 820px; max-width: 96vw; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,.2); }
+  .modal-header { background: var(--black); color: white; padding: 14px 20px; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+  .modal-header .close { background: none; border: none; color: white; font-size: 20px; cursor: pointer; line-height: 1; }
+  .modal-body { overflow: auto; padding: 0; flex: 1; }
+  .modal-preview { overflow: auto; max-height: 200px; border-bottom: 2px solid var(--border); }
+  .modal-preview table { width: 100%; border-collapse: collapse; font-size: 11px; white-space: nowrap; }
+  .modal-preview th { background: #1a2e1a; color: white; padding: 5px 8px; position: sticky; top: 0; }
+  .modal-preview td { padding: 4px 8px; border-bottom: 1px solid #f0f0f0; }
+  .modal-preview tr:hover td { background: var(--green-lt); }
+  .modal-fields { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; padding: 14px 20px; }
+  .modal-field { display: flex; flex-direction: column; gap: 4px; }
+  .modal-field label { font-size: 11px; font-weight: 700; color: var(--text); }
+  .modal-field .hint { font-size: 10px; color: var(--muted); }
+  .modal-field select { background: white; border: 1.5px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--text); cursor: pointer; }
+  .modal-field select:focus { outline: none; border-color: var(--green); }
+  .modal-kw { padding: 0 20px 14px; }
+  .modal-kw label { font-size: 11px; font-weight: 700; color: var(--text); display: block; margin-bottom: 4px; }
+  .modal-kw input { width: 100%; border: 1.5px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+  .modal-kw input:focus { outline: none; border-color: var(--green); }
+  .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; background: #fafafa; }
+
+  /* Scrollbars */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: #f5f5f5; }
   ::-webkit-scrollbar-thumb { background: #d0d7de; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #b2bec3; }
 
-  #toast { position: fixed; bottom: 24px; right: 24px; background: white;
-           border: 1.5px solid var(--border); border-radius: 8px; padding: 12px 18px;
-           font-size: 13px; max-width: 360px; z-index: 999; display: none;
-           box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+  /* Toast */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: white; border: 1.5px solid var(--border); border-radius: 8px; padding: 12px 18px; font-size: 13px; max-width: 380px; z-index: 999; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
   #toast.show { display: block; }
   #toast.error { border-color: var(--red); color: var(--red); }
   #toast.success { border-color: var(--green); color: var(--green-dk); }
+  #toast.warn { border-color: var(--yellow); color: #e65100; }
 
   @media (max-width: 900px) {
     .upload-row { grid-template-columns: 1fr; }
     .compare-grid { grid-template-columns: 1fr; }
     .actions-col { flex-direction: row; padding-top: 0; }
+    .modal-fields { grid-template-columns: 1fr 1fr; }
   }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="logo">⚖ sverk<span>AI</span></div>
+  <div class="logo">
+    <span class="logo-icon">🔍</span>
+    Sverk<span>AI</span>
+  </div>
   <div class="header-right">
     <div class="status-dot" id="status-dot"></div>
     <span class="status-text" id="status-text">Проверка...</span>
@@ -213,6 +229,7 @@
 </header>
 
 <main>
+  <!-- Upload -->
   <div class="upload-row">
     <div class="upload-card">
       <div class="card-title">📄 Документ организации</div>
@@ -220,7 +237,8 @@
         <div class="icon">📁</div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls, .pdf</p>
       </div>
       <input type="file" id="input1" accept=".xlsx,.xls,.pdf" style="display:none">
-      <div class="file-chosen" id="file1-info" style="display:none">✓ <span class="fname" id="file1-name"></span></div>
+      <div class="file-status loading" id="file1-status" style="display:none"></div>
+      <button class="btn btn-warn" id="btn-manual1" style="display:none; margin-top:8px; font-size:11px; padding:5px 10px;" onclick="openManualDialog(1)">⚙ Настроить колонки вручную</button>
     </div>
     <div class="upload-card">
       <div class="card-title">📄 Документ контрагента</div>
@@ -228,7 +246,8 @@
         <div class="icon">📁</div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls, .pdf</p>
       </div>
       <input type="file" id="input2" accept=".xlsx,.xls,.pdf" style="display:none">
-      <div class="file-chosen" id="file2-info" style="display:none">✓ <span class="fname" id="file2-name"></span></div>
+      <div class="file-status loading" id="file2-status" style="display:none"></div>
+      <button class="btn btn-warn" id="btn-manual2" style="display:none; margin-top:8px; font-size:11px; padding:5px 10px;" onclick="openManualDialog(2)">⚙ Настроить колонки вручную</button>
     </div>
     <div class="actions-col">
       <button class="btn btn-green" id="btn-run" onclick="runReconcile()" disabled>🔍 Сверить документы</button>
@@ -236,6 +255,7 @@
     </div>
   </div>
 
+  <!-- Settings -->
   <div class="settings-bar">
     <span class="settings-title">⚙ Настройки</span>
     <label><input type="checkbox" id="cfg-missing" checked> Отсутствующие</label>
@@ -248,11 +268,13 @@
     <label><input type="checkbox" id="cfg-ai" checked> AI-комментарий</label>
   </div>
 
+  <!-- Progress -->
   <div id="progress-wrap">
     <div id="progress-bar"></div>
     <div id="progress-text"><div class="spinner" id="spinner"></div><span id="progress-msg">Готов к работе</span></div>
   </div>
 
+  <!-- Tabs -->
   <div class="tab-bar">
     <div class="tab active" data-tab="compare">Сравнение</div>
     <div class="tab" data-tab="discrepancies">Расхождения <span class="tab-badge" id="badge-disc" style="display:none">0</span></div>
@@ -334,20 +356,48 @@
   </div>
 </main>
 
+<!-- Manual mapping modal -->
+<div class="modal-overlay" id="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <span id="modal-title">Настройка колонок</span>
+      <button class="close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-preview" id="modal-preview"></div>
+      <div class="modal-fields" id="modal-fields"></div>
+      <div class="modal-kw">
+        <label>Слова конца таблицы (через запятую)</label>
+        <input type="text" id="modal-kw-input" value="обороты, сальдо, итого">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">✕ Отмена</button>
+      <button class="btn btn-green" onclick="applyManualMapping()">✓ Применить</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
-let file1=null,file2=null,lastResult=null,allDisc=[];
+// ── State ──────────────────────────────────────────────────────────────
+let file1=null, file2=null, lastResult=null, allDisc=[];
+let preview1=null, preview2=null;   // preview data from server
+let profile1=null, profile2=null;   // manual/auto profiles
+let modalNum=0;                     // which file is being configured
 
+// ── Health ─────────────────────────────────────────────────────────────
 async function checkHealth(){
   try{
-    const r=await fetch('/api/health');const d=await r.json();
-    const dot=document.getElementById('status-dot');const txt=document.getElementById('status-text');
-    if(d.status==='ok'){dot.classList.add('ok');txt.textContent=d.api_key_set?'Готов • AI включён':'Готов • Без AI';}
-  }catch{document.getElementById('status-text').textContent='Сервер недоступен';}
+    const r=await fetch('/api/health'); const d=await r.json();
+    const dot=document.getElementById('status-dot'), txt=document.getElementById('status-text');
+    if(d.status==='ok'){ dot.classList.add('ok'); txt.textContent=d.api_key_set?'Готов • AI включён':'Готов • Без AI'; }
+  }catch{ document.getElementById('status-text').textContent='Сервер недоступен'; }
 }
-checkHealth();loadHistory();
+checkHealth(); loadHistory();
 
+// ── Tabs ───────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -359,30 +409,194 @@ document.querySelectorAll('.tab').forEach(tab=>{
 function switchTab(n){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
-  const t=document.querySelector(`.tab[data-tab="${n}"]`);if(t)t.classList.add('active');
-  const c=document.getElementById('tab-'+n);if(c)c.classList.add('active');
+  const t=document.querySelector(`.tab[data-tab="${n}"]`); if(t)t.classList.add('active');
+  const c=document.getElementById('tab-'+n); if(c)c.classList.add('active');
 }
 
+// ── File upload + preview ──────────────────────────────────────────────
 function setupDrop(dId,iId,num){
-  const drop=document.getElementById(dId),inp=document.getElementById(iId);
-  inp.addEventListener('change',e=>setFile(e.target.files[0],num));
+  const drop=document.getElementById(dId), inp=document.getElementById(iId);
+  inp.addEventListener('change',e=>handleFile(e.target.files[0],num));
   drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag-over');});
   drop.addEventListener('dragleave',()=>drop.classList.remove('drag-over'));
-  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag-over');if(e.dataTransfer.files[0])setFile(e.dataTransfer.files[0],num);});
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag-over');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0],num);});
 }
-setupDrop('drop1','input1',1);setupDrop('drop2','input2',2);
+setupDrop('drop1','input1',1); setupDrop('drop2','input2',2);
 
-function setFile(f,num){
-  if(!f)return;
-  if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){showToast('Поддерживаются: .xlsx, .xls, .pdf','error');return;}
-  if(num===1){file1=f;document.getElementById('file1-name').textContent=f.name;document.getElementById('file1-info').style.display='flex';document.getElementById('t1-title').textContent=f.name;}
-  else{file2=f;document.getElementById('file2-name').textContent=f.name;document.getElementById('file2-info').style.display='flex';document.getElementById('t2-title').textContent=f.name;}
-  document.getElementById('btn-run').disabled=!(file1&&file2);
+async function handleFile(f, num){
+  if(!f) return;
+  if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){ showToast('Поддерживаются: .xlsx, .xls, .pdf','error'); return; }
+
+  if(num===1){ file1=f; profile1=null; preview1=null; }
+  else       { file2=f; profile2=null; preview2=null; }
+
+  const statusEl = document.getElementById(`file${num}-status`);
+  const manualBtn = document.getElementById(`btn-manual${num}`);
+  const titleEl = document.getElementById(`t${num}-title`);
+  const wrapEl = document.getElementById(`table${num}-wrap`);
+
+  statusEl.style.display='flex'; statusEl.className='file-status loading';
+  statusEl.textContent='⏳ Загрузка и анализ...';
+  manualBtn.style.display='none';
+  wrapEl.innerHTML='<div class="empty-state">⏳ Анализ структуры...</div>';
+
+  const fd=new FormData(); fd.append('file',f);
+  try{
+    const resp=await fetch('/api/preview',{method:'POST',body:fd});
+    const data=await resp.json();
+
+    if(num===1){ preview1=data; }
+    else       { preview2=data; }
+
+    titleEl.textContent=f.name;
+
+    if(data.ok && !data.needs_manual && data.table){
+      statusEl.className='file-status ok';
+      statusEl.textContent=`✓ ${f.name} • ${data.label}`;
+      manualBtn.style.display='none';
+      renderTable(num, data.table, null, data.raw_rows);
+    } else {
+      statusEl.className='file-status warn';
+      statusEl.textContent=`⚠ Автодетект не смог определить структуру файла. Укажите колонки вручную`;
+      manualBtn.style.display='inline-flex';
+      wrapEl.innerHTML='<div class="empty-state">Нажмите «Настроить колонки вручную»</div>';
+    }
+  }catch(e){
+    statusEl.className='file-status warn';
+    statusEl.textContent=`⚠ Ошибка загрузки: ${e.message}`;
+    manualBtn.style.display='inline-flex';
+  }
+
+  updateRunBtn();
 }
 
+function updateRunBtn(){
+  const ok1 = file1 && (preview1?.ok && !preview1?.needs_manual || profile1);
+  const ok2 = file2 && (preview2?.ok && !preview2?.needs_manual || profile2);
+  document.getElementById('btn-run').disabled = !(ok1 && ok2);
+}
+
+// ── Manual mapping modal ───────────────────────────────────────────────
+function openManualDialog(num){
+  modalNum=num;
+  const p = num===1 ? preview1 : preview2;
+  const f = num===1 ? file1 : file2;
+  document.getElementById('modal-title').textContent=`Настройка колонок — ${f?.name||''}`;
+
+  // Build raw preview table
+  const rawP = p?.raw_preview;
+  const prevEl=document.getElementById('modal-preview');
+  if(rawP && rawP.columns && rawP.rows){
+    let html='<table><thead><tr>';
+    rawP.columns.forEach(c=>html+=`<th>[${c}]</th>`);
+    html+='</tr></thead><tbody>';
+    rawP.rows.forEach(row=>{
+      html+='<tr>';
+      row.forEach(v=>html+=`<td>${esc(String(v||'').slice(0,30))}</td>`);
+      html+='</tr>';
+    });
+    html+='</tbody></table>';
+    prevEl.innerHTML=html;
+  } else {
+    prevEl.innerHTML='<div style="padding:10px;color:var(--muted);font-size:12px">Предпросмотр недоступен для PDF</div>';
+  }
+
+  // Build fields
+  const nCols = p?.n_cols || 10;
+  const colOpts = Array.from({length:nCols},(_,i)=>i);
+  const noneOpt = '<option value="">—</option>';
+  const colOptsHTML = colOpts.map(i=>`<option value="${i}">${i}</option>`).join('');
+  const rowOpts = Array.from({length:40},(_,i)=>`<option value="${i}">${i}</option>`).join('');
+  const pr = p?.profile || {};
+
+  const fields=[
+    ['data_start_row','Строка начала данных','С какой строки начинаются операции',rowOpts,pr.data_start_row??'1',false],
+    ['date_col','Колонка: Дата','Столбец с датой операции',colOptsHTML,pr.date_col??'0',false],
+    ['doc_col','Колонка: Документ','Название/описание документа',colOptsHTML,pr.doc_col??'1',false],
+    ['doc_num_col','Колонка: Номер','Только если номер в отдельном столбце',noneOpt+colOptsHTML,pr.doc_num_col??'',true],
+    ['doc_type_col','Тип операции','Оплата / Поставка / Корректировка',noneOpt+colOptsHTML,pr.doc_type_col??'',true],
+    ['debit_col','Колонка: Дебет','Если есть отдельные Дебет и Кредит',noneOpt+colOptsHTML,pr.debit_col??'',true],
+    ['credit_col','Колонка: Кредит','Парная к Дебету',noneOpt+colOptsHTML,pr.credit_col??'',true],
+    ['amount_col','Колонка: Сумма','Если одна колонка вместо Дебет/Кредит',noneOpt+colOptsHTML,pr.amount_col??'',true],
+  ];
+
+  let html='';
+  fields.forEach(([key,label,hint,opts,val,optional])=>{
+    html+=`<div class="modal-field">
+      <label>${label}${optional?' <span style="color:var(--muted);font-weight:400">(необяз.)</span>':''}</label>
+      <div class="hint">${hint}</div>
+      <select id="mf-${key}">${opts}</select>
+    </div>`;
+  });
+
+  // Amount sign
+  html+=`<div class="modal-field">
+    <label>Знак суммы <span style="color:var(--muted);font-weight:400">(необяз.)</span></label>
+    <div class="hint">Как интерпретировать знак числа в колонке Сумма</div>
+    <select id="mf-amount_sign">
+      <option value="positive_is_credit">+ = кредит (приход)</option>
+      <option value="positive_is_debit">+ = дебет (расход)</option>
+      <option value="signed">знак в числе</option>
+      <option value="unknown">не знаю</option>
+    </select>
+  </div>`;
+
+  document.getElementById('modal-fields').innerHTML=html;
+
+  // Set values
+  fields.forEach(([key,,,, val])=>{
+    const el=document.getElementById(`mf-${key}`);
+    if(el && val!=='' && val!==null && val!==undefined) el.value=String(val);
+  });
+  if(pr.amount_sign) document.getElementById('mf-amount_sign').value=pr.amount_sign;
+
+  document.getElementById('modal-overlay').style.display='flex';
+}
+
+function closeModal(){ document.getElementById('modal-overlay').style.display='none'; }
+
+function applyManualMapping(){
+  const get=id=>{ const el=document.getElementById(id); return el?el.value:''; };
+  const toInt=v=>v===''||v===null?null:parseInt(v);
+  const profile={
+    data_start_row: parseInt(get('mf-data_start_row'))||1,
+    date_col:    toInt(get('mf-date_col')),
+    doc_col:     toInt(get('mf-doc_col')),
+    doc_num_col: toInt(get('mf-doc_num_col')),
+    doc_type_col:toInt(get('mf-doc_type_col')),
+    debit_col:   toInt(get('mf-debit_col')),
+    credit_col:  toInt(get('mf-credit_col')),
+    amount_col:  toInt(get('mf-amount_col')),
+    amount_sign: get('mf-amount_sign')||'unknown',
+    footer_keywords: document.getElementById('modal-kw-input').value.split(',').map(s=>s.trim()).filter(Boolean),
+    confidence: 'manual',
+  };
+
+  if(modalNum===1){ profile1=profile; }
+  else            { profile2=profile; }
+
+  // Update status
+  const f = modalNum===1 ? file1 : file2;
+  const statusEl=document.getElementById(`file${modalNum}-status`);
+  statusEl.className='file-status ok';
+  statusEl.textContent=`✓ ${f?.name||''} • Ручная настройка`;
+  document.getElementById(`btn-manual${modalNum}`).style.display='inline-flex';
+
+  // Update table preview using raw_preview as placeholder
+  const p = modalNum===1 ? preview1 : preview2;
+  if(p?.table){
+    renderTable(modalNum, p.table, null, p.raw_rows);
+  }
+
+  closeModal();
+  updateRunBtn();
+  showToast('✓ Настройка колонок применена','success');
+}
+
+// ── Reconcile ──────────────────────────────────────────────────────────
 async function runReconcile(){
-  if(!file1||!file2)return;
-  const btn=document.getElementById('btn-run');btn.disabled=true;
+  if(!file1||!file2) return;
+  const btn=document.getElementById('btn-run'); btn.disabled=true;
   setProgress(10,'Загрузка файлов...');
   const settings={
     find_missing:document.getElementById('cfg-missing').checked,
@@ -394,58 +608,67 @@ async function runReconcile(){
     min_amount:parseFloat(document.getElementById('cfg-min-amt').value)||0,
     ai_comment:document.getElementById('cfg-ai').checked,
   };
-  const fd=new FormData();fd.append('file1',file1);fd.append('file2',file2);fd.append('settings',JSON.stringify(settings));
+  const fd=new FormData();
+  fd.append('file1',file1); fd.append('file2',file2);
+  fd.append('settings',JSON.stringify(settings));
+  if(profile1) fd.append('profile1',JSON.stringify(profile1));
+  if(profile2) fd.append('profile2',JSON.stringify(profile2));
+
   try{
     setProgress(30,'Анализ структуры файлов...');
     const resp=await fetch('/api/reconcile',{method:'POST',body:fd});
     setProgress(70,'Сверка документов...');
     const data=await resp.json();
-    if(!resp.ok){showToast(data.detail||'Ошибка сервера','error');setProgress(0,'Ошибка');btn.disabled=false;return;}
-    if(data.logs)data.logs.forEach(l=>setProgress(null,l));
+    if(!resp.ok){ showToast(data.detail||'Ошибка сервера','error'); setProgress(0,'Ошибка'); btn.disabled=false; return; }
+    if(data.logs) data.logs.forEach(l=>setProgress(null,l));
     setProgress(100,'✓ Сверка завершена');
-    lastResult=data;allDisc=data.discrepancies||[];
+    lastResult=data; allDisc=data.discrepancies||[];
     renderTable(1,data.table1,data.highlight);
     renderTable(2,data.table2,data.highlight);
     renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
-    renderSummary(data.summary);loadHistory();
+    renderSummary(data.summary); loadHistory();
     document.getElementById('btn-export').disabled=false;
     const cnt=data.summary.total_discrepancies;
-    const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
-    if(cnt===0)showToast('✓ Расхождений не обнаружено','success');
+    const badge=document.getElementById('badge-disc'); badge.textContent=cnt; badge.style.display=cnt?'inline':'none';
+    if(cnt===0) showToast('✓ Расхождений не обнаружено','success');
     else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
     switchTab('discrepancies');
-  }catch(err){showToast('Ошибка: '+err.message,'error');setProgress(0,'Ошибка');}
+  }catch(err){ showToast('Ошибка: '+err.message,'error'); setProgress(0,'Ошибка'); }
   btn.disabled=false;
 }
 
 function setProgress(pct,msg){
   const bar=document.getElementById('progress-bar'),txt=document.getElementById('progress-msg'),spin=document.getElementById('spinner');
-  if(pct!==null)bar.style.width=pct+'%';if(msg)txt.textContent=msg;
+  if(pct!==null) bar.style.width=pct+'%';
+  if(msg) txt.textContent=msg;
   spin.classList.toggle('active',pct!==null&&pct>0&&pct<100);
 }
 
-function renderTable(num,td,hl){
+// ── Render table ──────────────────────────────────────────────────────
+function renderTable(num, td, hl, rawRowsOverride){
   const wrap=document.getElementById(`table${num}-wrap`);
-  if(!td||!td.rows||!td.rows.length){wrap.innerHTML='<div class="empty-state">Нет данных</div>';return;}
+  if(!td||!td.rows||!td.rows.length){ wrap.innerHTML='<div class="empty-state">Нет данных</div>'; return; }
   const h=hl||{};
-  const missing=new Set(num===1?h.missing1:h.missing2),amt=new Set(num===1?h.amt_diff1:h.amt_diff2);
-  const sign=new Set(num===1?h.sign1:h.sign2),date=new Set(num===1?h.date1:h.date2);
-  const rr=td.raw_rows||[];
+  const missing=new Set(num===1?h.missing1:h.missing2), amt=new Set(num===1?h.amt_diff1:h.amt_diff2);
+  const sign=new Set(num===1?h.sign1:h.sign2), date=new Set(num===1?h.date1:h.date2);
+  const rr=rawRowsOverride||td.raw_rows||[];
   let html='<table><thead><tr>';
   td.columns.forEach(c=>html+=`<th>${esc(c)}</th>`);
   html+='</tr></thead><tbody>';
   td.rows.forEach((row,i)=>{
     const r=rr[i]!==undefined?rr[i]:i;
     let cls='';
-    if(missing.has(r))cls='row-missing';else if(sign.has(r))cls='row-sign';
-    else if(amt.has(r))cls='row-amount';else if(date.has(r))cls='row-date';
+    if(missing.has(r)) cls='row-missing'; else if(sign.has(r)) cls='row-sign';
+    else if(amt.has(r)) cls='row-amount'; else if(date.has(r)) cls='row-date';
     html+=`<tr class="${cls}">`;
     td.columns.forEach(c=>html+=`<td title="${esc(row[c]||'')}">${esc(trunc(row[c]||'',60))}</td>`);
     html+='</tr>';
   });
-  html+='</tbody></table>';wrap.innerHTML=html;
+  html+='</tbody></table>';
+  wrap.innerHTML=html;
 }
 
+// ── Discrepancies ─────────────────────────────────────────────────────
 const TYPE_MAP={missing_in_counterparty:['❌ Нет у контрагента','badge-red'],missing_in_company:['❌ Нет у организации','badge-red'],amount_diff:['💰 Разница в суммах','badge-yellow'],date_diff:['📅 Разница в датах','badge-gray'],sign_mismatch:['🔀 Зеркальная КСФ','badge-blue']};
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray']};
 
@@ -453,7 +676,7 @@ function renderDiscrepancies(discs,f1='',f2=''){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
   document.getElementById('disc-col-ctr').textContent=f2?`У контрагента (${sn(f2)})`:'У контрагента';
   const body=document.getElementById('disc-body');
-  if(!discs||!discs.length){body.innerHTML='<tr><td colspan="8" class="empty-state" style="color:var(--green)">✓ Расхождений не обнаружено</td></tr>';return;}
+  if(!discs||!discs.length){ body.innerHTML='<tr><td colspan="8" class="empty-state" style="color:var(--green)">✓ Расхождений не обнаружено</td></tr>'; return; }
   body.innerHTML=discs.map((d,i)=>{
     const[tl,tb]=TYPE_MAP[d.type]||[d.type,'badge-gray'];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
@@ -463,10 +686,11 @@ function renderDiscrepancies(discs,f1='',f2=''){
 }
 
 function filterDisc(type,btn){
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
   document.querySelectorAll('#disc-body tr[data-type]').forEach(r=>r.style.display=(type==='all'||r.dataset.type===type)?'':'none');
 }
 
+// ── Summary with Markdown ─────────────────────────────────────────────
 function renderSummary(s){
   const critical=s.critical_count||0;
   document.getElementById('summary-cards').innerHTML=`
@@ -475,42 +699,67 @@ function renderSummary(s){
     <div class="stat-card"><div class="label">Точных совпадений</div><div class="value">${s.exact_matches||0}</div></div>
     <div class="stat-card"><div class="label">Нечётких совпадений</div><div class="value">${s.fuzzy_count||0}</div></div>`;
   const dc=document.getElementById('debt-card');
-  if(s.debt_label){dc.style.display='block';document.getElementById('debt-label').textContent=s.debt_label;document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:'';}
+  if(s.debt_label){ dc.style.display='block'; document.getElementById('debt-label').textContent=s.debt_label; document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:''; }
   const ac=document.getElementById('ai-card');
-  if(s.ai_comment){ac.style.display='block';document.getElementById('ai-text').textContent=s.ai_comment;}else ac.style.display='none';
+  if(s.ai_comment){ ac.style.display='block'; document.getElementById('ai-text').innerHTML=parseMarkdown(s.ai_comment); }
+  else ac.style.display='none';
 }
 
+// Simple markdown parser
+function parseMarkdown(text){
+  if(!text) return '';
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g,'<em>$1</em>')
+    .replace(/#{3}\s(.+)/g,'<h3>$1</h3>')
+    .replace(/#{2}\s(.+)/g,'<h2>$1</h2>')
+    .replace(/#{1}\s(.+)/g,'<h1>$1</h1>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/^[-*]\s(.+)/gm,'<li>$1</li>')
+    .replace(/(<li>.*<\/li>)/gs,'<ul>$1</ul>')
+    .replace(/\n\n/g,'</p><p>')
+    .replace(/^(?!<[hup])/gm, '')
+    .replace(/(.+)\n/g,'<p>$1</p>')
+    .replace(/<p><\/p>/g,'')
+    .trim();
+}
+
+// ── Export ────────────────────────────────────────────────────────────
 async function exportReport(){
-  if(!lastResult)return;
+  if(!lastResult) return;
   try{
     const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({discrepancies:lastResult.discrepancies,summary:lastResult.summary,file1_name:lastResult.file1_name,file2_name:lastResult.file2_name})});
-    if(!resp.ok){showToast('Ошибка экспорта','error');return;}
-    const blob=await resp.blob();const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=`sverkAI_${today()}.xlsx`;a.click();
-    URL.revokeObjectURL(url);showToast('✓ Отчёт скачан','success');
-  }catch(e){showToast('Ошибка: '+e.message,'error');}
+    if(!resp.ok){ showToast('Ошибка экспорта','error'); return; }
+    const blob=await resp.blob(); const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=`SverkAI_${today()}.xlsx`; a.click();
+    URL.revokeObjectURL(url); showToast('✓ Отчёт скачан','success');
+  }catch(e){ showToast('Ошибка: '+e.message,'error'); }
 }
 
+// ── History ───────────────────────────────────────────────────────────
 async function loadHistory(){
   try{
-    const resp=await fetch('/api/history');const data=await resp.json();
+    const resp=await fetch('/api/history'); const data=await resp.json();
     const body=document.getElementById('hist-body');
-    if(!data||!data.length){body.innerHTML='<tr><td colspan="6" class="empty-hist">История пуста</td></tr>';return;}
+    if(!data||!data.length){ body.innerHTML='<tr><td colspan="6" class="empty-hist">История пуста</td></tr>'; return; }
     body.innerHTML=[...data].reverse().map(h=>`<tr><td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td><td>${h.total||0}</td><td>${h.critical||0}</td><td>${esc(trunc(h.debt_label||'',50))}</td></tr>`).join('');
   }catch{}
 }
 
+// ── Search ────────────────────────────────────────────────────────────
 function searchTable(num,q){
   document.getElementById(`table${num}-wrap`).querySelectorAll('tbody tr').forEach(r=>
     r.style.display=(!q||[...r.cells].some(c=>c.textContent.toLowerCase().includes(q.toLowerCase())))?'':'none');
 }
 
-function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-function trunc(s,n){return s.length>n?s.slice(0,n)+'…':s;}
-function sn(n){const p=n.lastIndexOf('.');return p>0?n.slice(0,p):n;}
-function today(){return new Date().toISOString().slice(0,10).replace(/-/g,'');}
-function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className=`show ${type}`;setTimeout(()=>t.classList.remove('show'),4000);}
+// ── Utils ─────────────────────────────────────────────────────────────
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function trunc(s,n){ return s.length>n?s.slice(0,n)+'…':s; }
+function sn(n){ const p=n.lastIndexOf('.'); return p>0?n.slice(0,p):n; }
+function today(){ return new Date().toISOString().slice(0,10).replace(/-/g,''); }
+function showToast(msg,type=''){ const t=document.getElementById('toast'); t.textContent=msg; t.className=`show ${type}`; setTimeout(()=>t.classList.remove('show'),4500); }
 </script>
 </body>
 </html>
