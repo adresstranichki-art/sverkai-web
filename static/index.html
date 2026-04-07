@@ -11,203 +11,239 @@
     --green-lt: #e8f5e9;
     --black:    #1a2e1a;
     --white:    #ffffff;
-    --bg:       #f5f7fa;
+    --bg:       #f0f2f5;
     --panel:    #ffffff;
-    --border:   #d0d7de;
+    --border:   #c8d0d8;
     --text:     #1a1a2e;
-    --muted:    #636e72;
-    --red:      #e53935;
-    --yellow:   #f59f00;
-    --blue:     #1976d2;
-    --shadow:   0 1px 4px rgba(0,0,0,.08);
+    --muted:    #5a6472;
+    --red:      #d32f2f;
+    --yellow:   #e65100;
+    --blue:     #1565c0;
+    --shadow:   0 1px 5px rgba(0,0,0,.10);
+    --fs:       14px;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  html { font-size: var(--fs); }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: var(--fs); }
 
-  /* Header */
-  header { background: var(--black); border-bottom: 3px solid var(--green); padding: 0 24px; height: 54px;
+  /* ── Header ── */
+  header { background: var(--black); border-bottom: 3px solid var(--green); padding: 0 24px; height: 58px;
            display: flex; align-items: center; justify-content: space-between;
-           position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-  .logo { font-size: 20px; font-weight: 700; color: var(--green); letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-  .logo-icon { font-size: 22px; }
-  .logo span { color: var(--white); }
+           position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .logo-icon { width: 28px; height: 28px; flex-shrink: 0; }
+  .logo-text { font-size: 22px; font-weight: 800; letter-spacing: .5px; color: var(--white); }
+  .logo-text em { color: var(--green); font-style: normal; }
   .header-right { display: flex; align-items: center; gap: 10px; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #aaa; }
-  .status-dot.ok { background: var(--green); box-shadow: 0 0 5px var(--green); }
-  .status-text { font-size: 12px; color: rgba(255,255,255,.7); }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #888; flex-shrink: 0; }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-text { font-size: 13px; color: rgba(255,255,255,.75); }
 
+  /* ── Main ── */
   main { padding: 18px 24px; max-width: 1800px; margin: 0 auto; }
 
-  /* Upload */
+  /* ── Upload ── */
   .upload-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: start; margin-bottom: 14px; }
-  .upload-card { background: var(--panel); border: 1.5px solid var(--border); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); transition: border-color .2s; }
-  .upload-card:hover { border-color: var(--green); }
-  .card-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
+  .upload-card { background: var(--panel); border: 1.5px solid var(--border); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+  .card-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 10px; }
   .drop-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 16px; text-align: center;
-               cursor: pointer; transition: all .2s; min-height: 82px; display: flex; flex-direction: column;
+               cursor: pointer; transition: all .2s; min-height: 80px; display: flex; flex-direction: column;
                align-items: center; justify-content: center; gap: 5px; background: var(--bg); }
   .drop-zone:hover, .drop-zone.drag-over { border-color: var(--green); background: var(--green-lt); }
-  .drop-zone .icon { font-size: 26px; }
-  .drop-zone p { font-size: 12px; color: var(--muted); }
-  .drop-zone .hint { font-size: 11px; color: #b2bec3; }
-  .file-status { font-size: 12px; margin-top: 8px; display: flex; align-items: center; gap: 6px; font-weight: 600; }
-  .file-status.ok { color: var(--green); }
+  .drop-zone .icon { font-size: 28px; }
+  .drop-zone p { font-size: 13px; color: var(--muted); }
+  .drop-zone .hint { font-size: 11px; color: #aaa; }
+  .file-status { font-size: 12px; margin-top: 8px; display: flex; align-items: center; gap: 6px; font-weight: 600; min-height: 20px; }
+  .file-status.ok   { color: var(--green); }
   .file-status.warn { color: var(--yellow); }
   .file-status.loading { color: var(--muted); }
-  .fname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .fname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+  .card-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
   .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: none;
-         border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; }
+         border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; white-space: nowrap; }
   .btn-green { background: var(--green); color: white; }
   .btn-green:hover { background: var(--green-dk); }
   .btn-green:disabled { background: #b2d8c4; color: white; cursor: not-allowed; }
   .btn-ghost { background: var(--panel); color: var(--text); border: 1.5px solid var(--border); }
   .btn-ghost:hover { border-color: var(--green); color: var(--green); }
   .btn-ghost:disabled { opacity: .5; cursor: not-allowed; }
-  .btn-warn { background: #fff8e1; color: #e65100; border: 1.5px solid var(--yellow); }
-  .btn-warn:hover { background: #fff3cd; }
-  .actions-col { display: flex; flex-direction: column; gap: 10px; padding-top: 26px; }
-  #btn-run { width: 200px; height: 44px; font-size: 14px; box-shadow: 0 2px 8px rgba(0,168,84,.3); }
-  #btn-export { width: 200px; height: 38px; }
+  .btn-outline { background: transparent; color: var(--muted); border: 1.5px solid var(--border); font-size: 12px; padding: 5px 12px; }
+  .btn-outline:hover { border-color: var(--green-dk); color: var(--green-dk); }
+  .actions-col { display: flex; flex-direction: column; gap: 10px; padding-top: 30px; }
+  #btn-run { width: 210px; height: 46px; font-size: 15px; box-shadow: 0 2px 10px rgba(0,168,84,.3); }
+  #btn-export { width: 210px; height: 40px; }
 
-  /* Settings */
+  /* ── Settings ── */
   .settings-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
                   padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center;
-                  gap: 18px; flex-wrap: wrap; box-shadow: var(--shadow); }
-  .settings-bar label { font-size: 12px; color: var(--text); display: flex; align-items: center; gap: 6px; cursor: pointer; }
-  .settings-bar input[type=checkbox] { accent-color: var(--green); width: 14px; height: 14px; }
-  .settings-bar input[type=number] { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 2px 6px; width: 52px; font-size: 12px; }
-  .settings-title { font-size: 11px; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+                  gap: 16px; flex-wrap: wrap; box-shadow: var(--shadow); }
+  .settings-title { font-size: 12px; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+  .settings-bar label { font-size: 13px; color: var(--text); display: flex; align-items: center; gap: 6px; cursor: pointer; position: relative; }
+  .settings-bar label:hover .tooltip { display: block; }
+  .settings-bar input[type=checkbox] { accent-color: var(--green); width: 15px; height: 15px; }
+  .settings-bar input[type=number] { background: var(--bg); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 3px 8px; width: 56px; font-size: 13px; }
+  .tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+             background: #1a1a2e; color: white; font-size: 11px; padding: 5px 9px; border-radius: 5px;
+             white-space: nowrap; z-index: 50; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  .tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+                    border: 5px solid transparent; border-top-color: #1a1a2e; }
 
-  /* Progress */
-  #progress-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  /* ── Progress ── */
+  #progress-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+                   padding: 8px 14px; margin-bottom: 12px; box-shadow: var(--shadow); }
   #progress-bar { height: 3px; background: var(--green); width: 0; transition: width .3s; border-radius: 2px; margin-bottom: 5px; }
-  #progress-text { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  .spinner { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin .6s linear infinite; display: none; }
+  #progress-text { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .spinner { width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin .6s linear infinite; display: none; }
   .spinner.active { display: inline-block; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Tabs */
+  /* ── Tabs ── */
   .tab-bar { display: flex; gap: 2px; border-bottom: 2px solid var(--border); background: var(--panel); border-radius: 8px 8px 0 0; padding: 0 8px; box-shadow: var(--shadow); }
-  .tab { padding: 10px 16px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; user-select: none; }
+  .tab { padding: 11px 18px; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; user-select: none; }
   .tab:hover { color: var(--text); }
   .tab.active { color: var(--green); border-bottom-color: var(--green); }
-  .tab-badge { background: var(--red); color: white; border-radius: 10px; padding: 1px 6px; font-size: 10px; margin-left: 5px; }
+  .tab-badge { background: var(--red); color: white; border-radius: 10px; padding: 1px 7px; font-size: 11px; margin-left: 5px; }
   .tab-content { display: none; background: var(--panel); border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; box-shadow: var(--shadow); }
   .tab-content.active { display: block; }
 
-  /* Compare tables */
+  /* ── Compare tables ── */
   .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
   .table-panel { border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); }
-  .table-header { background: var(--black); padding: 8px 12px; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: white; }
-  .table-header .title { display: flex; align-items: center; gap: 8px; }
-  .col-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-  .search-box { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25); border-radius: 5px; color: white; padding: 4px 10px; font-size: 12px; width: 160px; }
+  .table-header { background: var(--black); padding: 9px 12px; font-size: 13px; font-weight: 700;
+                  display: flex; align-items: center; justify-content: space-between; gap: 8px; color: white; }
+  .table-header .title { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+  .table-header .title span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+  .col-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .search-box { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); border-radius: 5px; color: white; padding: 5px 10px; font-size: 12px; width: 160px; flex-shrink: 0; }
   .search-box::placeholder { color: rgba(255,255,255,.5); }
   .search-box:focus { outline: none; border-color: var(--green); }
-  .table-wrap { overflow: auto; max-height: 380px; background: white; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
-  th { background: #f0f4f8; color: var(--muted); font-weight: 700; padding: 7px 10px; text-align: left; position: sticky; top: 0; z-index: 2; border-bottom: 2px solid var(--border); }
-  td { padding: 5px 10px; border-bottom: 1px solid #f0f0f0; }
-  tr:hover td { background: #f8fffe; }
-  tr.row-missing td { background: #ffebee; }
-  tr.row-amount td  { background: #fff8e1; }
-  tr.row-sign td    { background: #e3f2fd; }
-  tr.row-date td    { background: #f5f5f5; }
-  .empty-state { padding: 36px; text-align: center; color: var(--muted); font-size: 13px; background: white; }
 
-  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--muted); padding: 8px 12px 0; }
-  .legend-item { display: flex; align-items: center; gap: 5px; }
-  .legend-box { width: 12px; height: 12px; border-radius: 3px; }
+  /* Resizable columns + horizontal scroll */
+  .table-wrap { overflow-x: auto; overflow-y: auto; max-height: 400px; background: white; }
+  table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #eef1f5; color: var(--muted); font-weight: 700; padding: 8px 12px; text-align: left;
+       position: sticky; top: 0; z-index: 2; border-bottom: 2px solid var(--border);
+       white-space: nowrap; resize: horizontal; overflow: auto; min-width: 60px; cursor: col-resize; user-select: none; }
+  td { padding: 6px 12px; border-bottom: 1px solid #eee; white-space: nowrap; }
+  tr:hover td { background: rgba(0,168,84,.04); }
 
-  /* Discrepancies */
-  .disc-filter { padding: 10px 12px; display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: #fafafa; }
-  .filter-btn { padding: 4px 12px; border-radius: 20px; border: 1.5px solid var(--border); background: white; color: var(--muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: all .15s; }
+  /* Brighter row colors */
+  tr.row-missing td { background: #ffc9c9 !important; }
+  tr.row-amount td  { background: #ffe09a !important; }
+  tr.row-sign td    { background: #a8d4ff !important; }
+  tr.row-date td    { background: #e0e0e0 !important; }
+  tr.row-missing:hover td { background: #ffb3b3 !important; }
+  tr.row-amount:hover td  { background: #ffd06e !important; }
+  tr.row-sign:hover td    { background: #8ec4ff !important; }
+  tr.row-date:hover td    { background: #d0d0d0 !important; }
+
+  .empty-state { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; background: white; }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding: 10px 14px 0; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-box { width: 14px; height: 14px; border-radius: 3px; }
+
+  /* ── Discrepancies ── */
+  .disc-filter { padding: 10px 12px; display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: #fafafa; align-items: center; }
+  .disc-filter-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 4px; }
+  .filter-btn { padding: 5px 13px; border-radius: 20px; border: 1.5px solid var(--border); background: white; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; }
   .filter-btn:hover { border-color: var(--text); color: var(--text); }
-  .filter-btn.active { border-color: var(--green); color: var(--green); background: var(--green-lt); }
+  .filter-btn.active { border-color: var(--green); color: var(--green-dk); background: var(--green-lt); }
+  .filter-btn-all { background: var(--black); color: white; border-color: var(--black); }
+  .filter-btn-all:hover { background: #2d3a2d; border-color: #2d3a2d; color: white; }
+  .filter-btn-all.active { background: var(--green); border-color: var(--green); color: white; }
+
   .disc-wrap { overflow: auto; }
-  .disc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .disc-table th { background: #f0f4f8; color: var(--muted); font-weight: 700; padding: 8px 12px; text-align: left; position: sticky; top: 0; border-bottom: 2px solid var(--border); white-space: nowrap; }
-  .disc-table td { padding: 7px 12px; border-bottom: 1px solid #f0f0f0; max-width: 320px; word-break: break-word; }
-  .disc-table tr:hover td { background: #f8fffe; }
+  .disc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .disc-table th { background: #eef1f5; color: var(--muted); font-weight: 700; padding: 9px 13px; text-align: left; position: sticky; top: 0; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  .disc-table td { padding: 8px 13px; border-bottom: 1px solid #eee; max-width: 340px; word-break: break-word; }
+  .disc-table tr:hover td { background: rgba(0,168,84,.04); }
   .disc-table tr.sev-high td   { border-left: 3px solid var(--red); }
-  .disc-table tr.sev-medium td { border-left: 3px solid var(--yellow); }
+  .disc-table tr.sev-medium td { border-left: 3px solid #f59f00; }
   .disc-table tr.sev-low td    { border-left: 3px solid #b2bec3; }
   .disc-table tr.type-sign td  { border-left: 3px solid var(--blue); }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
   .badge-red    { background: #ffebee; color: var(--red); }
-  .badge-yellow { background: #fff8e1; color: #e65100; }
+  .badge-yellow { background: #fff8e1; color: var(--yellow); }
   .badge-blue   { background: #e3f2fd; color: var(--blue); }
-  .badge-gray   { background: #f5f5f5; color: var(--muted); }
+  .badge-gray   { background: #f0f0f0; color: var(--muted); }
 
-  /* Summary */
-  .summary-pad { padding: 14px; }
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 12px; margin-bottom: 14px; }
+  /* ── Summary ── */
+  .summary-pad { padding: 16px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 12px; margin-bottom: 14px; }
   .stat-card { background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px; padding: 16px 20px; }
-  .stat-card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
-  .stat-card .value { font-size: 30px; font-weight: 700; color: var(--green); }
+  .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: var(--green); }
   .stat-card .value.red { color: var(--red); }
-  .stat-card .value.dark { color: var(--text); font-size: 20px; }
+  .stat-card .value.dark { color: var(--text); font-size: 22px; }
   .debt-card { background: var(--green-lt); border: 1.5px solid var(--green); border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; }
-  .debt-card .debt-label { font-size: 14px; font-weight: 700; color: var(--green-dk); }
+  .debt-card .debt-label { font-size: 15px; font-weight: 700; color: var(--green-dk); }
   .period-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
-  .ai-card { background: #f0f7f4; border: 1.5px solid #b2d8c4; border-radius: 10px; padding: 14px 18px; }
-  .ai-card .ai-title { font-size: 11px; color: var(--green-dk); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
-  /* Markdown styles */
-  .ai-text { font-size: 13px; line-height: 1.7; color: var(--text); }
-  .ai-text h1,.ai-text h2,.ai-text h3 { font-size: 14px; font-weight: 700; margin: 10px 0 4px; color: var(--green-dk); }
+  .ai-card { background: #f0f7f4; border: 1.5px solid #a8d4bc; border-radius: 10px; padding: 14px 18px; }
+  .ai-card .ai-title { font-size: 12px; color: var(--green-dk); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
+  .ai-text { font-size: 14px; line-height: 1.7; color: var(--text); }
+  .ai-text h1,.ai-text h2,.ai-text h3 { font-size: 15px; font-weight: 700; margin: 10px 0 5px; color: var(--green-dk); }
   .ai-text p { margin-bottom: 8px; }
   .ai-text strong { font-weight: 700; }
   .ai-text em { font-style: italic; }
-  .ai-text ul,.ai-text ol { padding-left: 20px; margin-bottom: 8px; }
-  .ai-text li { margin-bottom: 3px; }
+  .ai-text ul,.ai-text ol { padding-left: 22px; margin-bottom: 8px; }
+  .ai-text li { margin-bottom: 4px; }
   .ai-text code { background: #e8f5e9; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
 
-  /* History */
+  /* ── History ── */
   .hist-wrap { overflow: auto; }
-  .hist-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .hist-table th { background: #f0f4f8; color: var(--muted); font-weight: 700; padding: 8px 14px; text-align: left; border-bottom: 2px solid var(--border); }
-  .hist-table td { padding: 8px 14px; border-bottom: 1px solid #f0f0f0; }
+  .hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .hist-table th { background: #eef1f5; color: var(--muted); font-weight: 700; padding: 9px 14px; text-align: left; border-bottom: 2px solid var(--border); }
+  .hist-table td { padding: 9px 14px; border-bottom: 1px solid #eee; }
   .hist-table tr:hover td { background: var(--green-lt); cursor: pointer; }
-  .empty-hist { padding: 40px; text-align: center; color: var(--muted); font-size: 13px; }
+  .empty-hist { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; }
 
   /* ── Modal ── */
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 500; display: flex; align-items: center; justify-content: center; }
-  .modal { background: white; border-radius: 12px; width: 820px; max-width: 96vw; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,.2); }
-  .modal-header { background: var(--black); color: white; padding: 14px 20px; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
-  .modal-header .close { background: none; border: none; color: white; font-size: 20px; cursor: pointer; line-height: 1; }
-  .modal-body { overflow: auto; padding: 0; flex: 1; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 500; display: flex; align-items: center; justify-content: center; }
+  .modal { background: white; border-radius: 12px; width: 860px; max-width: 96vw; max-height: 92vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,.25); }
+  .modal-header { background: var(--black); color: white; padding: 14px 20px; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+  .modal-header .close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; line-height: 1; }
+  .modal-body { overflow: auto; flex: 1; }
   .modal-preview { overflow: auto; max-height: 200px; border-bottom: 2px solid var(--border); }
-  .modal-preview table { width: 100%; border-collapse: collapse; font-size: 11px; white-space: nowrap; }
-  .modal-preview th { background: #1a2e1a; color: white; padding: 5px 8px; position: sticky; top: 0; }
-  .modal-preview td { padding: 4px 8px; border-bottom: 1px solid #f0f0f0; }
+  .modal-preview table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+  .modal-preview th { background: #1a2e1a; color: white; padding: 5px 9px; position: sticky; top: 0; }
+  .modal-preview td { padding: 4px 9px; border-bottom: 1px solid #f0f0f0; }
   .modal-preview tr:hover td { background: var(--green-lt); }
-  .modal-fields { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; padding: 14px 20px; }
-  .modal-field { display: flex; flex-direction: column; gap: 4px; }
-  .modal-field label { font-size: 11px; font-weight: 700; color: var(--text); }
-  .modal-field .hint { font-size: 10px; color: var(--muted); }
-  .modal-field select { background: white; border: 1.5px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--text); cursor: pointer; }
+  .modal-fields { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 13px; padding: 14px 20px; }
+  .modal-field { display: flex; flex-direction: column; gap: 3px; }
+  .modal-field label { font-size: 12px; font-weight: 700; color: var(--text); }
+  .modal-field .mhint { font-size: 11px; color: var(--muted); line-height: 1.3; margin-bottom: 2px; }
+  .modal-field select { background: white; border: 1.5px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px; color: var(--text); cursor: pointer; }
   .modal-field select:focus { outline: none; border-color: var(--green); }
   .modal-kw { padding: 0 20px 14px; }
-  .modal-kw label { font-size: 11px; font-weight: 700; color: var(--text); display: block; margin-bottom: 4px; }
-  .modal-kw input { width: 100%; border: 1.5px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+  .modal-kw label { font-size: 12px; font-weight: 700; color: var(--text); display: block; margin-bottom: 4px; }
+  .modal-kw input { width: 100%; border: 1.5px solid var(--border); border-radius: 6px; padding: 7px 11px; font-size: 13px; }
   .modal-kw input:focus { outline: none; border-color: var(--green); }
   .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; background: #fafafa; }
 
-  /* Scrollbars */
+  /* ── Export modal ── */
+  .export-modal .modal { width: 480px; }
+  .export-check-list { padding: 14px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .export-check-list label { font-size: 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .export-check-list input[type=checkbox] { accent-color: var(--green); width: 16px; height: 16px; }
+
+  /* ── Scrollbars ── */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: #f5f5f5; }
-  ::-webkit-scrollbar-thumb { background: #d0d7de; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #b2bec3; }
+  ::-webkit-scrollbar-track { background: #f0f0f0; }
+  ::-webkit-scrollbar-thumb { background: #c8d0d8; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a0aab4; }
 
-  /* Toast */
-  #toast { position: fixed; bottom: 24px; right: 24px; background: white; border: 1.5px solid var(--border); border-radius: 8px; padding: 12px 18px; font-size: 13px; max-width: 380px; z-index: 999; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: white; border: 1.5px solid var(--border);
+           border-radius: 8px; padding: 13px 18px; font-size: 14px; max-width: 400px; z-index: 999;
+           display: none; box-shadow: 0 4px 18px rgba(0,0,0,.13); }
   #toast.show { display: block; }
-  #toast.error { border-color: var(--red); color: var(--red); }
-  #toast.success { border-color: var(--green); color: var(--green-dk); }
-  #toast.warn { border-color: var(--yellow); color: #e65100; }
+  #toast.error   { border-color: var(--red);    color: var(--red); }
+  #toast.success { border-color: var(--green);  color: var(--green-dk); }
+  #toast.warn    { border-color: #f59f00;        color: var(--yellow); }
 
-  @media (max-width: 900px) {
+  @media (max-width: 960px) {
     .upload-row { grid-template-columns: 1fr; }
     .compare-grid { grid-template-columns: 1fr; }
     .actions-col { flex-direction: row; padding-top: 0; }
@@ -218,10 +254,21 @@
 <body>
 
 <header>
-  <div class="logo">
-    <span class="logo-icon">🔍</span>
-    Sverk<span>AI</span>
-  </div>
+  <a class="logo" href="/">
+    <!-- Scales SVG icon (white) -->
+    <svg class="logo-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="47" y="8" width="6" height="16" rx="3" fill="white"/>
+      <rect x="10" y="22" width="80" height="7" rx="3.5" fill="white"/>
+      <rect x="48" y="86" width="4" height="6" rx="2" fill="white"/>
+      <rect x="36" y="88" width="28" height="5" rx="2.5" fill="white"/>
+      <path d="M20 29 L5 58 Q5 68 20 68 Q35 68 35 58 Z" fill="white" opacity=".9"/>
+      <path d="M80 29 L65 58 Q65 68 80 68 Q95 68 95 58 Z" fill="white" opacity=".9"/>
+      <line x1="20" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      <line x1="80" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      <line x1="50" y1="25" x2="50" y2="86" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    </svg>
+    <span class="logo-text">Sverk<em>AI</em></span>
+  </a>
   <div class="header-right">
     <div class="status-dot" id="status-dot"></div>
     <span class="status-text" id="status-text">Проверка...</span>
@@ -237,8 +284,10 @@
         <div class="icon">📁</div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls, .pdf</p>
       </div>
       <input type="file" id="input1" accept=".xlsx,.xls,.pdf" style="display:none">
-      <div class="file-status loading" id="file1-status" style="display:none"></div>
-      <button class="btn btn-warn" id="btn-manual1" style="display:none; margin-top:8px; font-size:11px; padding:5px 10px;" onclick="openManualDialog(1)">⚙ Настроить колонки вручную</button>
+      <div class="file-status" id="file1-status"></div>
+      <div class="card-btns">
+        <button class="btn btn-outline" onclick="openManualDialog(1)" title="Указать колонки файла вручную">⚙ Настроить вручную</button>
+      </div>
     </div>
     <div class="upload-card">
       <div class="card-title">📄 Документ контрагента</div>
@@ -246,26 +295,60 @@
         <div class="icon">📁</div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls, .pdf</p>
       </div>
       <input type="file" id="input2" accept=".xlsx,.xls,.pdf" style="display:none">
-      <div class="file-status loading" id="file2-status" style="display:none"></div>
-      <button class="btn btn-warn" id="btn-manual2" style="display:none; margin-top:8px; font-size:11px; padding:5px 10px;" onclick="openManualDialog(2)">⚙ Настроить колонки вручную</button>
+      <div class="file-status" id="file2-status"></div>
+      <div class="card-btns">
+        <button class="btn btn-outline" onclick="openManualDialog(2)" title="Указать колонки файла вручную">⚙ Настроить вручную</button>
+      </div>
     </div>
     <div class="actions-col">
       <button class="btn btn-green" id="btn-run" onclick="runReconcile()" disabled>🔍 Сверить документы</button>
-      <button class="btn btn-ghost" id="btn-export" onclick="exportReport()" disabled>📊 Экспорт в Excel</button>
+      <button class="btn btn-ghost" id="btn-export" onclick="openExportModal()" disabled>📊 Экспорт в Excel</button>
     </div>
   </div>
 
   <!-- Settings -->
   <div class="settings-bar">
     <span class="settings-title">⚙ Настройки</span>
-    <label><input type="checkbox" id="cfg-missing" checked> Отсутствующие</label>
-    <label><input type="checkbox" id="cfg-amount" checked> Разница в суммах</label>
-    <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ</label>
-    <label><input type="checkbox" id="cfg-date" checked> Разница в датах</label>
-    <label>Окно оплат (дн): <input type="number" id="cfg-dw-pay" value="5" min="0" max="30"></label>
-    <label>Окно поставок (дн): <input type="number" id="cfg-dw-del" value="3" min="0" max="30"></label>
-    <label>Мин. сумма: <input type="number" id="cfg-min-amt" value="0" min="0" step="100"></label>
-    <label><input type="checkbox" id="cfg-ai" checked> AI-комментарий</label>
+    <label>
+      <input type="checkbox" id="cfg-missing" checked>
+      Отсутствующие
+      <span class="tooltip">Документ есть у одной стороны, но отсутствует у другой</span>
+    </label>
+    <label>
+      <input type="checkbox" id="cfg-amount" checked>
+      Разница в суммах
+      <span class="tooltip">Один документ у обеих сторон, но суммы не совпадают</span>
+    </label>
+    <label>
+      <input type="checkbox" id="cfg-sign" checked>
+      Зеркальные КСФ
+      <span class="tooltip">Корректировки с противоположным знаком — одна сторона ставит +, другая −</span>
+    </label>
+    <label>
+      <input type="checkbox" id="cfg-date" checked>
+      Разница в датах
+      <span class="tooltip">Документ совпадает по номеру/сумме, но даты отличаются (низкий приоритет)</span>
+    </label>
+    <label>
+      Окно оплат (дн):
+      <input type="number" id="cfg-dw-pay" value="5" min="0" max="30">
+      <span class="tooltip">Максимально допустимое расхождение в датах при поиске пар оплат</span>
+    </label>
+    <label>
+      Окно поставок (дн):
+      <input type="number" id="cfg-dw-del" value="3" min="0" max="30">
+      <span class="tooltip">То же для накладных и КСФ</span>
+    </label>
+    <label>
+      Мин. сумма:
+      <input type="number" id="cfg-min-amt" value="0" min="0" step="100">
+      <span class="tooltip">Расхождения меньше этой суммы не показывать (0 = показывать все)</span>
+    </label>
+    <label>
+      <input type="checkbox" id="cfg-ai" checked>
+      AI-комментарий
+      <span class="tooltip">Генерировать краткий текстовый разбор расхождений с помощью Claude</span>
+    </label>
   </div>
 
   <!-- Progress -->
@@ -282,12 +365,13 @@
     <div class="tab" data-tab="history">История</div>
   </div>
 
+  <!-- Tab: Compare -->
   <div class="tab-content active" id="tab-compare">
     <div class="legend">
-      <span class="legend-item"><span class="legend-box" style="background:#ffcdd2"></span> Отсутствует</span>
-      <span class="legend-item"><span class="legend-box" style="background:#fff9c4"></span> Разница в суммах</span>
-      <span class="legend-item"><span class="legend-box" style="background:#bbdefb"></span> Зеркальная КСФ</span>
-      <span class="legend-item"><span class="legend-box" style="background:#eeeeee"></span> Разница в датах</span>
+      <span class="legend-item"><span class="legend-box" style="background:#ffc9c9"></span> Отсутствует</span>
+      <span class="legend-item"><span class="legend-box" style="background:#ffe09a"></span> Разница в суммах</span>
+      <span class="legend-item"><span class="legend-box" style="background:#a8d4ff"></span> Зеркальная КСФ</span>
+      <span class="legend-item"><span class="legend-box" style="background:#e0e0e0"></span> Разница в датах</span>
     </div>
     <div class="compare-grid">
       <div class="table-panel">
@@ -307,29 +391,32 @@
     </div>
   </div>
 
+  <!-- Tab: Discrepancies -->
   <div class="tab-content" id="tab-discrepancies">
     <div class="disc-filter">
-      <button class="filter-btn active" onclick="filterDisc('all',this)">Все</button>
-      <button class="filter-btn" onclick="filterDisc('missing_in_counterparty',this)">❌ Нет у контрагента</button>
-      <button class="filter-btn" onclick="filterDisc('missing_in_company',this)">❌ Нет у организации</button>
-      <button class="filter-btn" onclick="filterDisc('amount_diff',this)">💰 Разница в суммах</button>
-      <button class="filter-btn" onclick="filterDisc('sign_mismatch',this)">🔀 Зеркальные КСФ</button>
-      <button class="filter-btn" onclick="filterDisc('date_diff',this)">📅 Разница в датах</button>
+      <span class="disc-filter-label">Показать:</span>
+      <button class="filter-btn filter-btn-all active" id="fb-all" onclick="toggleFilter('all',this)">Все</button>
+      <button class="filter-btn" id="fb-missing_in_counterparty" onclick="toggleFilter('missing_in_counterparty',this)">❌ Нет у контрагента</button>
+      <button class="filter-btn" id="fb-missing_in_company"      onclick="toggleFilter('missing_in_company',this)">❌ Нет у организации</button>
+      <button class="filter-btn" id="fb-amount_diff"             onclick="toggleFilter('amount_diff',this)">💰 Разница в суммах</button>
+      <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">🔀 Зеркальные КСФ</button>
+      <button class="filter-btn" id="fb-date_diff"               onclick="toggleFilter('date_diff',this)">📅 Разница в датах</button>
     </div>
     <div class="disc-wrap">
       <table class="disc-table">
         <thead><tr>
-          <th style="width:40px">№</th><th style="min-width:180px">Тип</th>
-          <th style="width:90px">Дата</th><th style="min-width:260px">Документ</th>
-          <th style="min-width:160px" id="disc-col-org">У организации</th>
-          <th style="min-width:160px" id="disc-col-ctr">У контрагента</th>
-          <th style="width:100px">Разница</th><th style="width:80px">Уровень</th>
+          <th style="width:44px">№</th><th style="min-width:190px">Тип</th>
+          <th style="width:95px">Дата</th><th style="min-width:280px">Документ</th>
+          <th style="min-width:170px" id="disc-col-org">У организации</th>
+          <th style="min-width:170px" id="disc-col-ctr">У контрагента</th>
+          <th style="width:110px">Разница</th><th style="width:90px">Уровень</th>
         </tr></thead>
         <tbody id="disc-body"><tr><td colspan="8" class="empty-state">Выполните сверку для просмотра расхождений</td></tr></tbody>
       </table>
     </div>
   </div>
 
+  <!-- Tab: Summary -->
   <div class="tab-content" id="tab-summary">
     <div class="summary-pad">
       <div class="summary-grid" id="summary-cards">
@@ -346,6 +433,7 @@
     </div>
   </div>
 
+  <!-- Tab: History -->
   <div class="tab-content" id="tab-history">
     <div class="hist-wrap">
       <table class="hist-table">
@@ -367,7 +455,7 @@
       <div class="modal-preview" id="modal-preview"></div>
       <div class="modal-fields" id="modal-fields"></div>
       <div class="modal-kw">
-        <label>Слова конца таблицы (через запятую)</label>
+        <label>Слова конца таблицы (через запятую) — при обнаружении строка и ниже игнорируются</label>
         <input type="text" id="modal-kw-input" value="обороты, сальдо, итого">
       </div>
     </div>
@@ -378,26 +466,51 @@
   </div>
 </div>
 
+<!-- Export modal -->
+<div class="modal-overlay export-modal" id="export-modal-overlay" style="display:none" onclick="if(event.target===this)closeExportModal()">
+  <div class="modal" style="width:480px">
+    <div class="modal-header">
+      <span>📊 Экспорт в Excel — выбор типов</span>
+      <button class="close" onclick="closeExportModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="padding:12px 20px 6px;font-size:13px;color:var(--muted)">Выберите типы расхождений для включения в отчёт:</div>
+      <div class="export-check-list">
+        <label><input type="checkbox" id="ex-missing_in_counterparty" checked> ❌ Нет у контрагента</label>
+        <label><input type="checkbox" id="ex-missing_in_company" checked> ❌ Нет у организации</label>
+        <label><input type="checkbox" id="ex-amount_diff" checked> 💰 Разница в суммах</label>
+        <label><input type="checkbox" id="ex-sign_mismatch" checked> 🔀 Зеркальные КСФ</label>
+        <label><input type="checkbox" id="ex-date_diff" checked> 📅 Разница в датах</label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeExportModal()">✕ Отмена</button>
+      <button class="btn btn-green" onclick="doExport()">📥 Скачать отчёт</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
-// ── State ──────────────────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────────────
 let file1=null, file2=null, lastResult=null, allDisc=[];
-let preview1=null, preview2=null;   // preview data from server
-let profile1=null, profile2=null;   // manual/auto profiles
-let modalNum=0;                     // which file is being configured
+let preview1=null, preview2=null;
+let profile1=null, profile2=null;
+let modalNum=0;
+let activeFilters=new Set(['all']); // multi-select
 
-// ── Health ─────────────────────────────────────────────────────────────
+// ── Health ─────────────────────────────────────────────────────────
 async function checkHealth(){
   try{
     const r=await fetch('/api/health'); const d=await r.json();
-    const dot=document.getElementById('status-dot'), txt=document.getElementById('status-text');
+    const dot=document.getElementById('status-dot'),txt=document.getElementById('status-text');
     if(d.status==='ok'){ dot.classList.add('ok'); txt.textContent=d.api_key_set?'Готов • AI включён':'Готов • Без AI'; }
   }catch{ document.getElementById('status-text').textContent='Сервер недоступен'; }
 }
 checkHealth(); loadHistory();
 
-// ── Tabs ───────────────────────────────────────────────────────────────
+// ── Tabs ───────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.addEventListener('click',()=>{
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -413,9 +526,9 @@ function switchTab(n){
   const c=document.getElementById('tab-'+n); if(c)c.classList.add('active');
 }
 
-// ── File upload + preview ──────────────────────────────────────────────
+// ── File drag/drop ─────────────────────────────────────────────────
 function setupDrop(dId,iId,num){
-  const drop=document.getElementById(dId), inp=document.getElementById(iId);
+  const drop=document.getElementById(dId),inp=document.getElementById(iId);
   inp.addEventListener('change',e=>handleFile(e.target.files[0],num));
   drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag-over');});
   drop.addEventListener('dragleave',()=>drop.classList.remove('drag-over'));
@@ -423,177 +536,154 @@ function setupDrop(dId,iId,num){
 }
 setupDrop('drop1','input1',1); setupDrop('drop2','input2',2);
 
-async function handleFile(f, num){
+async function handleFile(f,num){
   if(!f) return;
   if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){ showToast('Поддерживаются: .xlsx, .xls, .pdf','error'); return; }
-
   if(num===1){ file1=f; profile1=null; preview1=null; }
   else       { file2=f; profile2=null; preview2=null; }
-
-  const statusEl = document.getElementById(`file${num}-status`);
-  const manualBtn = document.getElementById(`btn-manual${num}`);
-  const titleEl = document.getElementById(`t${num}-title`);
-  const wrapEl = document.getElementById(`table${num}-wrap`);
-
-  statusEl.style.display='flex'; statusEl.className='file-status loading';
-  statusEl.textContent='⏳ Загрузка и анализ...';
-  manualBtn.style.display='none';
-  wrapEl.innerHTML='<div class="empty-state">⏳ Анализ структуры...</div>';
-
+  const statusEl=document.getElementById(`file${num}-status`);
+  const titleEl=document.getElementById(`t${num}-title`);
+  const wrapEl=document.getElementById(`table${num}-wrap`);
+  statusEl.className='file-status loading'; statusEl.textContent='⏳ Анализ структуры...';
+  wrapEl.innerHTML='<div class="empty-state">⏳ Анализ структуры файла...</div>';
   const fd=new FormData(); fd.append('file',f);
   try{
     const resp=await fetch('/api/preview',{method:'POST',body:fd});
     const data=await resp.json();
-
-    if(num===1){ preview1=data; }
-    else       { preview2=data; }
-
+    if(num===1) preview1=data; else preview2=data;
     titleEl.textContent=f.name;
-
     if(data.ok && !data.needs_manual && data.table){
-      statusEl.className='file-status ok';
-      statusEl.textContent=`✓ ${f.name} • ${data.label}`;
-      manualBtn.style.display='none';
-      renderTable(num, data.table, null, data.raw_rows);
+      statusEl.className='file-status ok'; statusEl.textContent=`✓ ${f.name} • ${data.label}`;
+      renderTable(num,data.table,null,data.raw_rows);
     } else {
       statusEl.className='file-status warn';
-      statusEl.textContent=`⚠ Автодетект не смог определить структуру файла. Укажите колонки вручную`;
-      manualBtn.style.display='inline-flex';
-      wrapEl.innerHTML='<div class="empty-state">Нажмите «Настроить колонки вручную»</div>';
+      statusEl.textContent=`⚠ Автодетект не смог определить структуру. Укажите колонки вручную`;
+      wrapEl.innerHTML='<div class="empty-state">Нажмите «⚙ Настроить вручную»</div>';
     }
   }catch(e){
-    statusEl.className='file-status warn';
-    statusEl.textContent=`⚠ Ошибка загрузки: ${e.message}`;
-    manualBtn.style.display='inline-flex';
+    statusEl.className='file-status warn'; statusEl.textContent=`⚠ Ошибка: ${e.message}`;
+    wrapEl.innerHTML='<div class="empty-state">Ошибка загрузки</div>';
   }
-
   updateRunBtn();
 }
 
 function updateRunBtn(){
-  const ok1 = file1 && (preview1?.ok && !preview1?.needs_manual || profile1);
-  const ok2 = file2 && (preview2?.ok && !preview2?.needs_manual || profile2);
-  document.getElementById('btn-run').disabled = !(ok1 && ok2);
+  const ok1=file1&&(preview1?.ok&&!preview1?.needs_manual||profile1);
+  const ok2=file2&&(preview2?.ok&&!preview2?.needs_manual||profile2);
+  document.getElementById('btn-run').disabled=!(ok1&&ok2);
 }
 
-// ── Manual mapping modal ───────────────────────────────────────────────
+// ── Manual mapping modal ──────────────────────────────────────────
 function openManualDialog(num){
   modalNum=num;
-  const p = num===1 ? preview1 : preview2;
-  const f = num===1 ? file1 : file2;
+  const p=num===1?preview1:preview2;
+  const f=num===1?file1:file2;
+  if(!f){ showToast('Сначала загрузите файл','warn'); return; }
   document.getElementById('modal-title').textContent=`Настройка колонок — ${f?.name||''}`;
 
-  // Build raw preview table
-  const rawP = p?.raw_preview;
+  const rawP=p?.raw_preview;
   const prevEl=document.getElementById('modal-preview');
-  if(rawP && rawP.columns && rawP.rows){
+  if(rawP&&rawP.columns&&rawP.rows){
     let html='<table><thead><tr>';
     rawP.columns.forEach(c=>html+=`<th>[${c}]</th>`);
     html+='</tr></thead><tbody>';
-    rawP.rows.forEach(row=>{
-      html+='<tr>';
-      row.forEach(v=>html+=`<td>${esc(String(v||'').slice(0,30))}</td>`);
-      html+='</tr>';
-    });
+    rawP.rows.forEach(row=>{html+='<tr>';row.forEach(v=>html+=`<td>${esc(String(v||'').slice(0,30))}</td>`);html+='</tr>';});
     html+='</tbody></table>';
     prevEl.innerHTML=html;
   } else {
-    prevEl.innerHTML='<div style="padding:10px;color:var(--muted);font-size:12px">Предпросмотр недоступен для PDF</div>';
+    prevEl.innerHTML='<div style="padding:10px;color:var(--muted);font-size:12px">Предпросмотр недоступен (PDF или файл не загружен)</div>';
   }
 
-  // Build fields
-  const nCols = p?.n_cols || 10;
-  const colOpts = Array.from({length:nCols},(_,i)=>i);
-  const noneOpt = '<option value="">—</option>';
-  const colOptsHTML = colOpts.map(i=>`<option value="${i}">${i}</option>`).join('');
-  const rowOpts = Array.from({length:40},(_,i)=>`<option value="${i}">${i}</option>`).join('');
-  const pr = p?.profile || {};
+  const nCols=p?.n_cols||10;
+  const colOpts=Array.from({length:nCols},(_,i)=>i);
+  const noneOpt='<option value="">—</option>';
+  const colOptsHTML=colOpts.map(i=>`<option value="${i}">${i}</option>`).join('');
+  const rowOpts=Array.from({length:40},(_,i)=>`<option value="${i}">${i}</option>`).join('');
+  const pr=p?.profile||{};
 
   const fields=[
-    ['data_start_row','Строка начала данных','С какой строки начинаются операции',rowOpts,pr.data_start_row??'1',false],
-    ['date_col','Колонка: Дата','Столбец с датой операции',colOptsHTML,pr.date_col??'0',false],
-    ['doc_col','Колонка: Документ','Название/описание документа',colOptsHTML,pr.doc_col??'1',false],
-    ['doc_num_col','Колонка: Номер','Только если номер в отдельном столбце',noneOpt+colOptsHTML,pr.doc_num_col??'',true],
-    ['doc_type_col','Тип операции','Оплата / Поставка / Корректировка',noneOpt+colOptsHTML,pr.doc_type_col??'',true],
-    ['debit_col','Колонка: Дебет','Если есть отдельные Дебет и Кредит',noneOpt+colOptsHTML,pr.debit_col??'',true],
-    ['credit_col','Колонка: Кредит','Парная к Дебету',noneOpt+colOptsHTML,pr.credit_col??'',true],
-    ['amount_col','Колонка: Сумма','Если одна колонка вместо Дебет/Кредит',noneOpt+colOptsHTML,pr.amount_col??'',true],
+    ['data_start_row','Строка начала данных','С какой строки начинаются операции (0-based). Строка с заголовком — не считается.',rowOpts,pr.data_start_row??'1',false],
+    ['date_col','Колонка: Дата','Столбец с датой каждой операции',colOptsHTML,pr.date_col??'0',false],
+    ['doc_col','Колонка: Документ','Название или описание документа (накладная, оплата и т.д.)',colOptsHTML,pr.doc_col??'1',false],
+    ['doc_num_col','Колонка: Номер документа','Только если номер хранится отдельным столбцом как чистое число. Иначе — «—»',noneOpt+colOptsHTML,pr.doc_num_col??'',true],
+    ['doc_type_col','Тип операции','Если есть отдельный столбец «Оплата / Поставка / Корректировка»',noneOpt+colOptsHTML,pr.doc_type_col??'',true],
+    ['debit_col','Колонка: Дебет','Если в файле две колонки сумм — заполнить Дебет и Кредит',noneOpt+colOptsHTML,pr.debit_col??'',true],
+    ['credit_col','Колонка: Кредит','Парная к Дебету. Либо Дебет+Кредит, либо только Сумма — не оба варианта',noneOpt+colOptsHTML,pr.credit_col??'',true],
+    ['amount_col','Колонка: Сумма','Если одна колонка для всех сумм вместо Дебет/Кредит',noneOpt+colOptsHTML,pr.amount_col??'',true],
   ];
-
   let html='';
   fields.forEach(([key,label,hint,opts,val,optional])=>{
     html+=`<div class="modal-field">
       <label>${label}${optional?' <span style="color:var(--muted);font-weight:400">(необяз.)</span>':''}</label>
-      <div class="hint">${hint}</div>
+      <div class="mhint">${hint}</div>
       <select id="mf-${key}">${opts}</select>
     </div>`;
   });
-
-  // Amount sign
   html+=`<div class="modal-field">
     <label>Знак суммы <span style="color:var(--muted);font-weight:400">(необяз.)</span></label>
-    <div class="hint">Как интерпретировать знак числа в колонке Сумма</div>
+    <div class="mhint">Как интерпретировать знак числа в колонке «Сумма»</div>
     <select id="mf-amount_sign">
       <option value="positive_is_credit">+ = кредит (приход)</option>
       <option value="positive_is_debit">+ = дебет (расход)</option>
-      <option value="signed">знак в числе</option>
+      <option value="signed">знак уже в числе</option>
       <option value="unknown">не знаю</option>
     </select>
   </div>`;
-
   document.getElementById('modal-fields').innerHTML=html;
-
-  // Set values
-  fields.forEach(([key,,,, val])=>{
-    const el=document.getElementById(`mf-${key}`);
-    if(el && val!=='' && val!==null && val!==undefined) el.value=String(val);
-  });
+  fields.forEach(([key,,,, val])=>{ const el=document.getElementById(`mf-${key}`); if(el&&val!==''&&val!==null&&val!==undefined) el.value=String(val); });
   if(pr.amount_sign) document.getElementById('mf-amount_sign').value=pr.amount_sign;
-
   document.getElementById('modal-overlay').style.display='flex';
 }
-
 function closeModal(){ document.getElementById('modal-overlay').style.display='none'; }
-
 function applyManualMapping(){
   const get=id=>{ const el=document.getElementById(id); return el?el.value:''; };
   const toInt=v=>v===''||v===null?null:parseInt(v);
   const profile={
-    data_start_row: parseInt(get('mf-data_start_row'))||1,
-    date_col:    toInt(get('mf-date_col')),
-    doc_col:     toInt(get('mf-doc_col')),
-    doc_num_col: toInt(get('mf-doc_num_col')),
-    doc_type_col:toInt(get('mf-doc_type_col')),
-    debit_col:   toInt(get('mf-debit_col')),
-    credit_col:  toInt(get('mf-credit_col')),
-    amount_col:  toInt(get('mf-amount_col')),
-    amount_sign: get('mf-amount_sign')||'unknown',
-    footer_keywords: document.getElementById('modal-kw-input').value.split(',').map(s=>s.trim()).filter(Boolean),
-    confidence: 'manual',
+    data_start_row:parseInt(get('mf-data_start_row'))||1,
+    date_col:toInt(get('mf-date_col')),doc_col:toInt(get('mf-doc_col')),
+    doc_num_col:toInt(get('mf-doc_num_col')),doc_type_col:toInt(get('mf-doc_type_col')),
+    debit_col:toInt(get('mf-debit_col')),credit_col:toInt(get('mf-credit_col')),
+    amount_col:toInt(get('mf-amount_col')),amount_sign:get('mf-amount_sign')||'unknown',
+    footer_keywords:document.getElementById('modal-kw-input').value.split(',').map(s=>s.trim()).filter(Boolean),
+    confidence:'manual',
   };
-
-  if(modalNum===1){ profile1=profile; }
-  else            { profile2=profile; }
-
-  // Update status
-  const f = modalNum===1 ? file1 : file2;
+  if(modalNum===1){ profile1=profile; } else { profile2=profile; }
+  const f=modalNum===1?file1:file2;
   const statusEl=document.getElementById(`file${modalNum}-status`);
-  statusEl.className='file-status ok';
-  statusEl.textContent=`✓ ${f?.name||''} • Ручная настройка`;
-  document.getElementById(`btn-manual${modalNum}`).style.display='inline-flex';
-
-  // Update table preview using raw_preview as placeholder
-  const p = modalNum===1 ? preview1 : preview2;
-  if(p?.table){
-    renderTable(modalNum, p.table, null, p.raw_rows);
-  }
-
-  closeModal();
-  updateRunBtn();
-  showToast('✓ Настройка колонок применена','success');
+  statusEl.className='file-status ok'; statusEl.textContent=`✓ ${f?.name||''} • Ручная настройка`;
+  const p=modalNum===1?preview1:preview2;
+  if(p?.table) renderTable(modalNum,p.table,null,p.raw_rows);
+  closeModal(); updateRunBtn(); showToast('✓ Настройка применена','success');
 }
 
-// ── Reconcile ──────────────────────────────────────────────────────────
+// ── Multi-select filter ───────────────────────────────────────────
+function toggleFilter(type, btn){
+  if(type==='all'){
+    activeFilters=new Set(['all']);
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  } else {
+    // Remove 'all' if specific type selected
+    activeFilters.delete('all');
+    document.getElementById('fb-all').classList.remove('active');
+    if(btn.classList.contains('active')){
+      btn.classList.remove('active');
+      activeFilters.delete(type);
+      if(activeFilters.size===0){ activeFilters.add('all'); document.getElementById('fb-all').classList.add('active'); }
+    } else {
+      btn.classList.add('active');
+      activeFilters.add(type);
+    }
+  }
+  applyDiscFilter();
+}
+function applyDiscFilter(){
+  document.querySelectorAll('#disc-body tr[data-type]').forEach(r=>{
+    r.style.display=(activeFilters.has('all')||activeFilters.has(r.dataset.type))?'':'none';
+  });
+}
+
+// ── Reconcile ──────────────────────────────────────────────────────
 async function runReconcile(){
   if(!file1||!file2) return;
   const btn=document.getElementById('btn-run'); btn.disabled=true;
@@ -609,11 +699,9 @@ async function runReconcile(){
     ai_comment:document.getElementById('cfg-ai').checked,
   };
   const fd=new FormData();
-  fd.append('file1',file1); fd.append('file2',file2);
-  fd.append('settings',JSON.stringify(settings));
+  fd.append('file1',file1); fd.append('file2',file2); fd.append('settings',JSON.stringify(settings));
   if(profile1) fd.append('profile1',JSON.stringify(profile1));
   if(profile2) fd.append('profile2',JSON.stringify(profile2));
-
   try{
     setProgress(30,'Анализ структуры файлов...');
     const resp=await fetch('/api/reconcile',{method:'POST',body:fd});
@@ -623,8 +711,7 @@ async function runReconcile(){
     if(data.logs) data.logs.forEach(l=>setProgress(null,l));
     setProgress(100,'✓ Сверка завершена');
     lastResult=data; allDisc=data.discrepancies||[];
-    renderTable(1,data.table1,data.highlight);
-    renderTable(2,data.table2,data.highlight);
+    renderTable(1,data.table1,data.highlight); renderTable(2,data.table2,data.highlight);
     renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
     renderSummary(data.summary); loadHistory();
     document.getElementById('btn-export').disabled=false;
@@ -639,18 +726,17 @@ async function runReconcile(){
 
 function setProgress(pct,msg){
   const bar=document.getElementById('progress-bar'),txt=document.getElementById('progress-msg'),spin=document.getElementById('spinner');
-  if(pct!==null) bar.style.width=pct+'%';
-  if(msg) txt.textContent=msg;
+  if(pct!==null) bar.style.width=pct+'%'; if(msg) txt.textContent=msg;
   spin.classList.toggle('active',pct!==null&&pct>0&&pct<100);
 }
 
-// ── Render table ──────────────────────────────────────────────────────
-function renderTable(num, td, hl, rawRowsOverride){
+// ── Render table ──────────────────────────────────────────────────
+function renderTable(num,td,hl,rawRowsOverride){
   const wrap=document.getElementById(`table${num}-wrap`);
   if(!td||!td.rows||!td.rows.length){ wrap.innerHTML='<div class="empty-state">Нет данных</div>'; return; }
   const h=hl||{};
-  const missing=new Set(num===1?h.missing1:h.missing2), amt=new Set(num===1?h.amt_diff1:h.amt_diff2);
-  const sign=new Set(num===1?h.sign1:h.sign2), date=new Set(num===1?h.date1:h.date2);
+  const missing=new Set(num===1?h.missing1:h.missing2),amt=new Set(num===1?h.amt_diff1:h.amt_diff2);
+  const sign=new Set(num===1?h.sign1:h.sign2),date=new Set(num===1?h.date1:h.date2);
   const rr=rawRowsOverride||td.raw_rows||[];
   let html='<table><thead><tr>';
   td.columns.forEach(c=>html+=`<th>${esc(c)}</th>`);
@@ -661,17 +747,16 @@ function renderTable(num, td, hl, rawRowsOverride){
     if(missing.has(r)) cls='row-missing'; else if(sign.has(r)) cls='row-sign';
     else if(amt.has(r)) cls='row-amount'; else if(date.has(r)) cls='row-date';
     html+=`<tr class="${cls}">`;
-    td.columns.forEach(c=>html+=`<td title="${esc(row[c]||'')}">${esc(trunc(row[c]||'',60))}</td>`);
+    td.columns.forEach(c=>html+=`<td title="${esc(row[c]||'')}">${esc(trunc(row[c]||'',80))}</td>`);
     html+='</tr>';
   });
   html+='</tbody></table>';
   wrap.innerHTML=html;
 }
 
-// ── Discrepancies ─────────────────────────────────────────────────────
+// ── Render discrepancies ──────────────────────────────────────────
 const TYPE_MAP={missing_in_counterparty:['❌ Нет у контрагента','badge-red'],missing_in_company:['❌ Нет у организации','badge-red'],amount_diff:['💰 Разница в суммах','badge-yellow'],date_diff:['📅 Разница в датах','badge-gray'],sign_mismatch:['🔀 Зеркальная КСФ','badge-blue']};
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray']};
-
 function renderDiscrepancies(discs,f1='',f2=''){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
   document.getElementById('disc-col-ctr').textContent=f2?`У контрагента (${sn(f2)})`:'У контрагента';
@@ -681,16 +766,12 @@ function renderDiscrepancies(discs,f1='',f2=''){
     const[tl,tb]=TYPE_MAP[d.type]||[d.type,'badge-gray'];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
     const tc=d.type==='sign_mismatch'?'type-sign':`sev-${d.severity}`;
-    return`<tr class="${tc}" data-type="${d.type}"><td>${i+1}</td><td><span class="badge ${tb}">${tl}</span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',55))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
+    return`<tr class="${tc}" data-type="${d.type}"><td>${i+1}</td><td><span class="badge ${tb}">${tl}</span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
+  applyDiscFilter();
 }
 
-function filterDisc(type,btn){
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
-  document.querySelectorAll('#disc-body tr[data-type]').forEach(r=>r.style.display=(type==='all'||r.dataset.type===type)?'':'none');
-}
-
-// ── Summary with Markdown ─────────────────────────────────────────────
+// ── Summary ───────────────────────────────────────────────────────
 function renderSummary(s){
   const critical=s.critical_count||0;
   document.getElementById('summary-cards').innerHTML=`
@@ -701,36 +782,41 @@ function renderSummary(s){
   const dc=document.getElementById('debt-card');
   if(s.debt_label){ dc.style.display='block'; document.getElementById('debt-label').textContent=s.debt_label; document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:''; }
   const ac=document.getElementById('ai-card');
-  if(s.ai_comment){ ac.style.display='block'; document.getElementById('ai-text').innerHTML=parseMarkdown(s.ai_comment); }
+  if(s.ai_comment){ ac.style.display='block'; document.getElementById('ai-text').innerHTML=md(s.ai_comment); }
   else ac.style.display='none';
 }
 
-// Simple markdown parser
-function parseMarkdown(text){
-  if(!text) return '';
-  return text
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
-    .replace(/\*([^*]+)\*/g,'<em>$1</em>')
-    .replace(/#{3}\s(.+)/g,'<h3>$1</h3>')
-    .replace(/#{2}\s(.+)/g,'<h2>$1</h2>')
-    .replace(/#{1}\s(.+)/g,'<h1>$1</h1>')
-    .replace(/`([^`]+)`/g,'<code>$1</code>')
-    .replace(/^[-*]\s(.+)/gm,'<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs,'<ul>$1</ul>')
-    .replace(/\n\n/g,'</p><p>')
-    .replace(/^(?!<[hup])/gm, '')
-    .replace(/(.+)\n/g,'<p>$1</p>')
-    .replace(/<p><\/p>/g,'')
-    .trim();
+// Minimal markdown renderer
+function md(t){
+  if(!t) return '';
+  t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  t=t.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+  t=t.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
+  t=t.replace(/^### (.+)$/gm,'<h3>$1</h3>');
+  t=t.replace(/^## (.+)$/gm,'<h2>$1</h2>');
+  t=t.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+  t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
+  t=t.replace(/^[-*] (.+)$/gm,'<li>$1</li>');
+  t=t.replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>');
+  t=t.replace(/\n\n+/g,'</p><p>');
+  return '<p>'+t+'</p>';
 }
 
-// ── Export ────────────────────────────────────────────────────────────
-async function exportReport(){
+// ── Export with type selection ────────────────────────────────────
+function openExportModal(){
   if(!lastResult) return;
+  document.getElementById('export-modal-overlay').style.display='flex';
+}
+function closeExportModal(){ document.getElementById('export-modal-overlay').style.display='none'; }
+async function doExport(){
+  if(!lastResult) return;
+  closeExportModal();
+  const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff']
+    .filter(t=>document.getElementById(`ex-${t}`)?.checked));
+  const filtered=lastResult.discrepancies.filter(d=>allowed.has(d.type));
   try{
     const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({discrepancies:lastResult.discrepancies,summary:lastResult.summary,file1_name:lastResult.file1_name,file2_name:lastResult.file2_name})});
+      body:JSON.stringify({discrepancies:filtered,summary:lastResult.summary,file1_name:lastResult.file1_name,file2_name:lastResult.file2_name})});
     if(!resp.ok){ showToast('Ошибка экспорта','error'); return; }
     const blob=await resp.blob(); const url=URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url; a.download=`SverkAI_${today()}.xlsx`; a.click();
@@ -738,23 +824,23 @@ async function exportReport(){
   }catch(e){ showToast('Ошибка: '+e.message,'error'); }
 }
 
-// ── History ───────────────────────────────────────────────────────────
+// ── History ───────────────────────────────────────────────────────
 async function loadHistory(){
   try{
     const resp=await fetch('/api/history'); const data=await resp.json();
     const body=document.getElementById('hist-body');
     if(!data||!data.length){ body.innerHTML='<tr><td colspan="6" class="empty-hist">История пуста</td></tr>'; return; }
-    body.innerHTML=[...data].reverse().map(h=>`<tr><td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td><td>${h.total||0}</td><td>${h.critical||0}</td><td>${esc(trunc(h.debt_label||'',50))}</td></tr>`).join('');
+    body.innerHTML=[...data].reverse().map(h=>`<tr><td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td><td>${h.total||0}</td><td>${h.critical||0}</td><td>${esc(trunc(h.debt_label||'',55))}</td></tr>`).join('');
   }catch{}
 }
 
-// ── Search ────────────────────────────────────────────────────────────
+// ── Search ────────────────────────────────────────────────────────
 function searchTable(num,q){
   document.getElementById(`table${num}-wrap`).querySelectorAll('tbody tr').forEach(r=>
     r.style.display=(!q||[...r.cells].some(c=>c.textContent.toLowerCase().includes(q.toLowerCase())))?'':'none');
 }
 
-// ── Utils ─────────────────────────────────────────────────────────────
+// ── Utils ─────────────────────────────────────────────────────────
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function trunc(s,n){ return s.length>n?s.slice(0,n)+'…':s; }
 function sn(n){ const p=n.lastIndexOf('.'); return p>0?n.slice(0,p):n; }
