@@ -932,7 +932,7 @@ async def preview_file(file: UploadFile = File(...)):
             raw_ext = Path(path).suffix.lower()
             engine = "openpyxl" if raw_ext == ".xlsx" else ("xlrd" if raw_ext == ".xls" else None)
             if engine:
-                raw = pd.read_excel(path, engine=engine, header=None, dtype=str, nrows=20)
+                raw = pd.read_excel(path, engine=engine, header=None, dtype=str, nrows=50)
                 raw_preview = {
                     "columns": [str(i) for i in range(len(raw.columns))],
                     "rows": [[str(v).strip() if pd.notna(v) else "" for v in row] for _, row in raw.iterrows()]
