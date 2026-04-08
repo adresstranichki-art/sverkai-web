@@ -32,10 +32,20 @@
   .logo-icon { width: 28px; height: 28px; flex-shrink: 0; }
   .logo-text { font-size: 22px; font-weight: 800; letter-spacing: .5px; color: var(--white); }
   .logo-text em { color: var(--green); font-style: normal; }
-  .header-right { display: flex; align-items: center; gap: 10px; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
   .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #888; flex-shrink: 0; }
   .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .status-text { font-size: 13px; color: rgba(255,255,255,.75); }
+
+  /* ── Auth in header ── */
+  .auth-area { display: flex; align-items: center; gap: 8px; border-left: 1px solid rgba(255,255,255,.15); padding-left: 14px; }
+  .auth-badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+  .auth-badge.guest { background: rgba(255,255,255,.1); color: rgba(255,255,255,.6); }
+  .auth-badge.authed { background: rgba(0,168,84,.25); color: #6dffa8; border: 1px solid rgba(0,168,84,.4); }
+  .btn-login  { background: var(--green); color: white; border: none; border-radius: 7px; padding: 7px 14px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s; }
+  .btn-login:hover { background: var(--green-dk); }
+  .btn-logout { background: rgba(255,255,255,.1); color: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.2); border-radius: 7px; padding: 6px 12px; font-size: 12px; cursor: pointer; transition: all .15s; }
+  .btn-logout:hover { background: rgba(211,47,47,.25); border-color: rgba(211,47,47,.4); color: #ff8a8a; }
 
   main { padding: 18px 24px; max-width: 1800px; margin: 0 auto; }
 
@@ -67,6 +77,11 @@
   .actions-col { display: flex; flex-direction: column; gap: 10px; padding-top: 30px; }
   #btn-run { width: 210px; height: 46px; font-size: 15px; box-shadow: 0 2px 10px rgba(0,168,84,.3); }
   #btn-export { width: 210px; height: 40px; }
+
+  /* ── Guest notice ── */
+  .guest-notice { background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px; padding: 10px 16px;
+                  font-size: 13px; color: #7a5800; display: none; margin-bottom: 14px; }
+  .guest-notice a { color: var(--green-dk); font-weight: 700; cursor: pointer; text-decoration: underline; }
 
   /* ── Settings ── */
   .settings-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -112,7 +127,6 @@
   .search-box:focus { outline: none; border-color: var(--green); }
   .table-wrap { overflow-x: auto; overflow-y: auto; max-height: 400px; background: white; }
 
-  /* Resizable table */
   .data-table { table-layout: fixed; width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
   .data-table th {
     background: #eef1f5; color: var(--muted); font-weight: 700;
@@ -121,18 +135,14 @@
     border-bottom: 2px solid var(--border);
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
     min-width: 50px; cursor: default; user-select: none;
-    /* visible right border as resize indicator */
     border-right: 2px solid var(--border);
   }
-  /* Resize handle — only on the right border area */
-  .rh { position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
-        cursor: col-resize; background: transparent; z-index: 3; }
+  .rh { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; background: transparent; z-index: 3; }
   .rh:hover, .rh.dragging { background: var(--green); opacity: .6; }
   .data-table th { position: relative; }
   .data-table td {
     padding: 6px 10px; border-bottom: 1px solid #eee; border-right: 1px solid #f0f0f0;
-    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-    max-width: 0;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 0;
   }
   tr:hover td { background: rgba(0,168,84,.04); }
   tr.row-missing td { background: #ffc9c9 !important; }
@@ -160,7 +170,6 @@
   .filter-btn-all.active { background: var(--green); border-color: var(--green); color: white; }
   .disc-wrap { overflow: auto; }
 
-  /* Disc table also resizable */
   .disc-table { table-layout: fixed; width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
   .disc-table th { background: #eef1f5; color: var(--muted); font-weight: 700; padding: 9px 13px; text-align: left;
                    position: sticky; top: 0; border-bottom: 2px solid var(--border);
@@ -207,16 +216,44 @@
   .hist-table tr.hist-active td { background: #c8e6c9; font-weight: 600; }
   .empty-hist { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; }
 
-  /* ══════════════════════════════════════
+  /* ════════════════════════════════════════
+     LOGIN MODAL
+  ════════════════════════════════════════ */
+  .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 600; display: flex; align-items: center; justify-content: center; }
+  .login-modal { background: white; border-radius: 14px; width: 94vw; max-width: 480px; box-shadow: 0 12px 50px rgba(0,0,0,.3); overflow: hidden; }
+  .login-header { background: var(--black); color: white; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; }
+  .login-header h2 { font-size: 17px; font-weight: 700; }
+  .login-header .close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
+  .login-body { padding: 22px; }
+  .login-info { background: var(--green-lt); border: 1px solid #a8d4bc; border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--green-dk); margin-bottom: 18px; line-height: 1.6; }
+  .login-info strong { font-weight: 700; }
+  .login-label { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; display: block; }
+  .login-input { width: 100%; border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: monospace; color: var(--text); transition: border-color .15s; outline: none; }
+  .login-input:focus { border-color: var(--green); }
+  .login-input.error { border-color: var(--red); }
+  .login-hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .login-hint a { color: var(--green-dk); text-decoration: none; }
+  .login-hint a:hover { text-decoration: underline; }
+  .login-error { font-size: 13px; color: var(--red); margin-top: 8px; min-height: 20px; }
+  .login-footer { padding: 14px 22px; background: #fafafa; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+  .login-modes { padding: 0 22px 16px; display: flex; gap: 12px; }
+  .mode-card { flex: 1; border: 1.5px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer; transition: all .15s; }
+  .mode-card:hover { border-color: var(--green); }
+  .mode-card.selected { border-color: var(--green); background: var(--green-lt); }
+  .mode-card .mc-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .mode-card .mc-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .mode-sep { border: none; border-top: 1px solid var(--border); margin: 0 22px 16px; }
+  .key-section { padding: 0 22px; display: none; }
+  .key-section.visible { display: block; }
+
+  /* ════════════════════════════════════════
      WIZARD MODAL
-  ══════════════════════════════════════ */
+  ════════════════════════════════════════ */
   .wiz-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 500; display: flex; align-items: center; justify-content: center; }
   .wiz-modal { background: white; border-radius: 12px; width: 96vw; max-width: 1280px; height: 90vh; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,.3); overflow: hidden; }
   .wiz-header { background: var(--black); color: white; padding: 14px 20px; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
   .wiz-header .close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
   .wiz-body { display: flex; flex: 1; overflow: hidden; }
-
-  /* Left panel */
   .wiz-left { width: 310px; flex-shrink: 0; border-right: 2px solid var(--border); overflow-y: auto; background: #fafafa; display: flex; flex-direction: column; }
   .wiz-panel-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; padding: 14px 16px 8px; }
   .wiz-step { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; transition: background .15s; display: flex; align-items: flex-start; gap: 10px; }
@@ -231,7 +268,6 @@
   .step-hint-text { font-size: 11px; color: var(--muted); line-height: 1.4; }
   .step-value { font-size: 12px; color: var(--green-dk); font-weight: 700; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
   .step-clear { background: none; border: none; color: var(--red); font-size: 15px; cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; }
-  /* Amount sign selector inside left panel */
   .wiz-sign-panel { padding: 10px 14px; border-bottom: 1px solid #eee; display: none; background: #f0f7f4; }
   .wiz-sign-panel.visible { display: block; }
   .wiz-sign-panel label { font-size: 12px; font-weight: 600; color: var(--text); display: block; margin-bottom: 6px; }
@@ -241,11 +277,8 @@
   .wiz-kw-panel input { width: 100%; border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; font-size: 12px; }
   .wiz-apply-panel { padding: 10px 14px; border-top: 1px solid var(--border); background: #fafafa; }
   .wiz-apply-panel .btn { width: 100%; justify-content: center; height: 40px; font-size: 14px; }
-
-  /* Right panel */
   .wiz-right { flex: 1; overflow: auto; background: white; }
   .wiz-instruction { padding: 10px 16px; background: #e8f5e9; border-bottom: 2px solid #a8d4bc; font-size: 13px; color: var(--green-dk); font-weight: 600; position: sticky; top: 0; z-index: 5; }
-  /* Wizard table */
   .wiz-table { table-layout: fixed; width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; }
   .wiz-table th { background: #1a2e1a; color: white; padding: 8px 10px; text-align: center; position: sticky; top: 0; z-index: 4; white-space: nowrap; min-width: 80px; cursor: default; user-select: none; position: relative; border-right: 1px solid rgba(255,255,255,.15); }
   .wiz-table th .rh { background: transparent; }
@@ -273,13 +306,13 @@
   .exp-list input[type=checkbox] { accent-color: var(--green); width: 16px; height: 16px; }
   .exp-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; background: #fafafa; }
 
-  /* ── Scrollbars — more visible ── */
+  /* ── Scrollbars ── */
   ::-webkit-scrollbar { width: 9px; height: 9px; }
   ::-webkit-scrollbar-track { background: #e8ecf0; border-radius: 4px; }
   ::-webkit-scrollbar-thumb { background: #a0aab4; border-radius: 4px; border: 2px solid #e8ecf0; }
   ::-webkit-scrollbar-thumb:hover { background: #6e7f8d; }
 
-  /* ── Toast top-right ── */
+  /* ── Toast ── */
   #toast { position: fixed; top: 72px; right: 24px; background: white; border: 1.5px solid var(--border);
            border-radius: 8px; padding: 13px 18px; font-size: 14px; max-width: 400px; z-index: 999;
            display: none; box-shadow: 0 4px 18px rgba(0,0,0,.13); }
@@ -293,6 +326,7 @@
     .compare-grid { grid-template-columns: 1fr; }
     .actions-col { flex-direction: row; padding-top: 0; }
     .wiz-left { width: 250px; }
+    .login-modes { flex-direction: column; }
   }
 </style>
 </head>
@@ -316,10 +350,19 @@
   <div class="header-right">
     <div class="status-dot" id="status-dot"></div>
     <span class="status-text" id="status-text">Проверка...</span>
+    <div class="auth-area" id="auth-area">
+      <!-- filled by JS -->
+    </div>
   </div>
 </header>
 
 <main>
+  <!-- Гостевое уведомление -->
+  <div class="guest-notice" id="guest-notice">
+    ⚠️ Вы работаете в <strong>гостевом режиме</strong> — используется общий API, история сверок не сохраняется.
+    <a onclick="openLoginModal()">Войдите с личным API-ключом</a> для сохранения истории.
+  </div>
+
   <div class="upload-row">
     <div class="upload-card">
       <div class="card-title">📄 Документ организации</div>
@@ -442,6 +485,52 @@
   </div>
 </main>
 
+<!-- ════════ LOGIN MODAL ════════ -->
+<div class="login-overlay" id="login-overlay" style="display:none" onclick="if(event.target===this)closeLoginModal()">
+  <div class="login-modal">
+    <div class="login-header">
+      <h2>🔑 Вход в SverkAI</h2>
+      <button class="close" onclick="closeLoginModal()">×</button>
+    </div>
+    <div class="login-body">
+      <div class="login-info">
+        <strong>Зачем личный API-ключ?</strong><br>
+        С личным ключом Anthropic: история сверок сохраняется, запросы идут с вашего аккаунта, нет ограничений на AI-анализ.<br>
+        Без ключа: гостевой режим — история не сохраняется, используется общий API.
+      </div>
+
+      <div class="login-modes">
+        <div class="mode-card selected" id="mode-key" onclick="selectMode('key')">
+          <div class="mc-title">🔑 Личный API-ключ</div>
+          <div class="mc-desc">История сохраняется. Используется ваш Anthropic API.</div>
+        </div>
+        <div class="mode-card" id="mode-guest" onclick="selectMode('guest')">
+          <div class="mc-title">👤 Гостевой режим</div>
+          <div class="mc-desc">Без сохранения истории. Работает на общем API.</div>
+        </div>
+      </div>
+
+      <hr class="mode-sep">
+
+      <div class="key-section visible" id="key-section">
+        <label class="login-label">Ваш Anthropic API-ключ</label>
+        <input type="password" class="login-input" id="login-key-input"
+               placeholder="sk-ant-api03-..." autocomplete="off"
+               oninput="this.classList.remove('error');document.getElementById('login-error').textContent=''">
+        <div class="login-hint">
+          Получить ключ: <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>
+          &nbsp;•&nbsp; Ключ хранится только в вашем браузере (localStorage)
+        </div>
+        <div class="login-error" id="login-error"></div>
+      </div>
+    </div>
+    <div class="login-footer">
+      <button class="btn btn-ghost" onclick="closeLoginModal()">Отмена</button>
+      <button class="btn btn-green" id="login-btn" onclick="doLogin()">Войти</button>
+    </div>
+  </div>
+</div>
+
 <!-- ════════ WIZARD ════════ -->
 <div class="wiz-overlay" id="wiz-overlay" style="display:none">
   <div class="wiz-modal">
@@ -453,7 +542,6 @@
       <div class="wiz-left">
         <div class="wiz-panel-title">Параметры сверки</div>
         <div id="wiz-steps"></div>
-        <!-- Amount sign selector — inside left panel, shown when step is active -->
         <div class="wiz-sign-panel" id="wiz-sign-panel">
           <label>Знак суммы в единой колонке:</label>
           <select id="wiz-sign-select" onchange="wizValues['amount_sign']=this.value; renderWizSteps()">
@@ -502,35 +590,152 @@
 <div id="toast"></div>
 
 <script>
-// ── State ──────────────────────────────────────────────────────────
+// ── Глобальное состояние ───────────────────────────────────────────
 let file1=null,file2=null,lastResult=null,allDisc=[];
 let preview1=null,preview2=null,profile1=null,profile2=null;
 let wizNum=0,wizActiveStep=0,wizValues={};
 let activeFilters=new Set(['all']);
 let historyData=[];
+let loginMode='key'; // 'key' | 'guest'
 
-// ── Wizard steps ──────────────────────────────────────────────────
-const WIZ_STEPS=[
-  {key:'data_start_row',label:'Первая строка данных',        hint:'Щёлкните по первой строке с операциями в таблице',     required:true,  mode:'row'},
-  {key:'date_col',      label:'Дата операции',               hint:'Щёлкните на заголовок столбца с датой',                required:true,  mode:'col'},
-  {key:'doc_col',       label:'Название документа',          hint:'Щёлкните на заголовок столбца с именем документа',     required:true,  mode:'col'},
-  {key:'doc_num_col',   label:'Номер документа',             hint:'Только если номер в отдельном столбце (не в тексте)',  required:false, mode:'col'},
-  {key:'doc_type_col',  label:'Тип операции',                hint:'«Оплата / Поставка / Корректировка» — если есть',     required:false, mode:'col'},
-  {key:'debit_col',     label:'Дебет',                       hint:'Щёлкните на столбец дебета (если есть Дебет+Кредит)', required:false, mode:'col'},
-  {key:'credit_col',    label:'Кредит',                      hint:'Щёлкните на столбец кредита (парный к дебету)',        required:false, mode:'col'},
-  {key:'amount_col',    label:'Единая сумма',                hint:'Если одна колонка для всех сумм (вместо Дебет/Кредит)',required:false, mode:'col'},
-  {key:'amount_sign',   label:'Знак суммы',                  hint:'Укажите, как интерпретировать знак числа в сумме',    required:false, mode:'select'},
-];
+// ════════════════════════════════════════════════════════════════════
+//  АВТОРИЗАЦИЯ
+// ════════════════════════════════════════════════════════════════════
 
-// ── Health ─────────────────────────────────────────────────────────
+const LS_KEY = 'sverkai_api_key';
+
+function getStoredKey() {
+  return localStorage.getItem(LS_KEY) || '';
+}
+
+function isLoggedIn() {
+  return !!getStoredKey();
+}
+
+function authHeaders() {
+  const k = getStoredKey();
+  return k ? { 'X-Api-Key': k } : {};
+}
+
+function renderAuthArea() {
+  const area = document.getElementById('auth-area');
+  const guestNotice = document.getElementById('guest-notice');
+  if (isLoggedIn()) {
+    area.innerHTML = `
+      <span class="auth-badge authed">🔑 Личный API</span>
+      <button class="btn-logout" onclick="logout()">Выйти</button>`;
+    guestNotice.style.display = 'none';
+  } else {
+    area.innerHTML = `
+      <span class="auth-badge guest">👤 Гостевой режим</span>
+      <button class="btn-login" onclick="openLoginModal()">Войти</button>`;
+    guestNotice.style.display = 'block';
+  }
+}
+
+function openLoginModal() {
+  // If already logged in, pre-fill the key
+  const stored = getStoredKey();
+  const inp = document.getElementById('login-key-input');
+  inp.value = stored;
+  inp.classList.remove('error');
+  document.getElementById('login-error').textContent = '';
+  selectMode(stored ? 'key' : 'key');
+  document.getElementById('login-overlay').style.display = 'flex';
+  setTimeout(()=>inp.focus(), 100);
+}
+
+function closeLoginModal() {
+  document.getElementById('login-overlay').style.display = 'none';
+}
+
+function selectMode(mode) {
+  loginMode = mode;
+  document.getElementById('mode-key').classList.toggle('selected', mode === 'key');
+  document.getElementById('mode-guest').classList.toggle('selected', mode === 'guest');
+  document.getElementById('key-section').classList.toggle('visible', mode === 'key');
+  document.getElementById('login-btn').textContent = mode === 'guest' ? 'Войти как гость' : 'Войти';
+}
+
+async function doLogin() {
+  if (loginMode === 'guest') {
+    localStorage.removeItem(LS_KEY);
+    renderAuthArea();
+    loadHistory();
+    closeLoginModal();
+    showToast('Вы вошли как гость — история не сохраняется', 'warn');
+    return;
+  }
+
+  const key = document.getElementById('login-key-input').value.trim();
+  const errEl = document.getElementById('login-error');
+  const inp = document.getElementById('login-key-input');
+  const btn = document.getElementById('login-btn');
+
+  if (!key) {
+    inp.classList.add('error');
+    errEl.textContent = 'Введите API-ключ';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Проверка...';
+  errEl.textContent = '';
+
+  try {
+    const resp = await fetch('/api/validate-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: key })
+    });
+    const data = await resp.json();
+    if (data.valid) {
+      localStorage.setItem(LS_KEY, key);
+      renderAuthArea();
+      loadHistory();
+      closeLoginModal();
+      showToast('✓ Вошли с личным API-ключом — история сохраняется', 'success');
+    } else {
+      inp.classList.add('error');
+      errEl.textContent = data.error || 'Ключ не прошёл проверку';
+    }
+  } catch(e) {
+    errEl.textContent = 'Ошибка соединения: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  }
+}
+
+function logout() {
+  localStorage.removeItem(LS_KEY);
+  renderAuthArea();
+  // Очищаем историю в UI
+  document.getElementById('hist-body').innerHTML =
+    '<tr><td colspan="6" class="empty-hist">Войдите с личным API-ключом для просмотра истории</td></tr>';
+  showToast('Вы вышли — переключились в гостевой режим', 'warn');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  HEALTH
+// ════════════════════════════════════════════════════════════════════
 async function checkHealth(){
   try{
     const r=await fetch('/api/health'),d=await r.json();
     const dot=document.getElementById('status-dot'),txt=document.getElementById('status-text');
-    if(d.status==='ok'){dot.classList.add('ok');txt.textContent=d.api_key_set?'Готов • AI включён':'Готов • Без AI';}
-  }catch{document.getElementById('status-text').textContent='Сервер недоступен';}
+    if(d.status==='ok'){
+      dot.classList.add('ok');
+      txt.textContent = isLoggedIn() ? 'Готов • Личный AI' : (d.api_key_set ? 'Готов • Общий AI' : 'Готов');
+    }
+  }catch{
+    document.getElementById('status-text').textContent='Сервер недоступен';
+  }
 }
-checkHealth();loadHistory();
+
+// ── Init ──────────────────────────────────────────────────────────
+renderAuthArea();
+checkHealth();
+loadHistory();
 
 // ── Tabs ───────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab=>{
@@ -567,7 +772,7 @@ async function handleFile(f,num){
   we.innerHTML='<div class="empty-state">⏳ Анализ структуры...</div>';
   const fd=new FormData();fd.append('file',f);
   try{
-    const resp=await fetch('/api/preview',{method:'POST',body:fd}),data=await resp.json();
+    const resp=await fetch('/api/preview',{method:'POST',headers:authHeaders(),body:fd}),data=await resp.json();
     if(num===1)preview1=data;else preview2=data;
     te.textContent=f.name;
     if(data.ok&&!data.needs_manual&&data.table){
@@ -586,7 +791,21 @@ function updateRunBtn(){
   document.getElementById('btn-run').disabled=!(ok1&&ok2);
 }
 
-// ══════════════ WIZARD ══════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  WIZARD
+// ════════════════════════════════════════════════════════════════════
+const WIZ_STEPS=[
+  {key:'data_start_row',label:'Первая строка данных',        hint:'Щёлкните по первой строке с операциями в таблице',     required:true,  mode:'row'},
+  {key:'date_col',      label:'Дата операции',               hint:'Щёлкните на заголовок столбца с датой',                required:true,  mode:'col'},
+  {key:'doc_col',       label:'Название документа',          hint:'Щёлкните на заголовок столбца с именем документа',     required:true,  mode:'col'},
+  {key:'doc_num_col',   label:'Номер документа',             hint:'Только если номер в отдельном столбце (не в тексте)',  required:false, mode:'col'},
+  {key:'doc_type_col',  label:'Тип операции',                hint:'«Оплата / Поставка / Корректировка» — если есть',     required:false, mode:'col'},
+  {key:'debit_col',     label:'Дебет',                       hint:'Щёлкните на столбец дебета (если есть Дебет+Кредит)', required:false, mode:'col'},
+  {key:'credit_col',    label:'Кредит',                      hint:'Щёлкните на столбец кредита (парный к дебету)',        required:false, mode:'col'},
+  {key:'amount_col',    label:'Единая сумма',                hint:'Если одна колонка для всех сумм (вместо Дебет/Кредит)',required:false, mode:'col'},
+  {key:'amount_sign',   label:'Знак суммы',                  hint:'Укажите, как интерпретировать знак числа в сумме',    required:false, mode:'select'},
+];
+
 function openWizard(num){
   const f=num===1?file1:file2;
   if(!f){showToast('Сначала загрузите файл','warn');return;}
@@ -618,7 +837,6 @@ function renderWizSteps(){
       </div>
     </div>`;
   }).join('');
-  // Update sign select value
   const sel=document.getElementById('wiz-sign-select');
   if(sel&&wizValues.amount_sign)sel.value=wizValues.amount_sign;
 }
@@ -631,7 +849,6 @@ function setWizStep(idx){
   if(step.mode==='row')      instr.textContent=`Шаг ${idx+1}: ${step.hint} — щёлкните по строке в правой таблице`;
   else if(step.mode==='col') instr.textContent=`Шаг ${idx+1}: ${step.hint} — щёлкните по заголовку [N] столбца`;
   else if(step.mode==='select') instr.textContent=`Шаг ${idx+1}: ${step.hint} — выберите вариант в левой панели`;
-  // Show/hide sign panel in left panel
   const sp=document.getElementById('wiz-sign-panel');
   sp.classList.toggle('visible',step.mode==='select');
   updateWizHighlights();
@@ -721,11 +938,12 @@ function applyWizard(){
   closeWizard();updateRunBtn();showToast('✓ Настройка применена','success');
 }
 
-// ══════════════ RESIZE ══════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+//  RESIZE
+// ════════════════════════════════════════════════════════════════════
 function initTableResize(tableEl){
   if(!tableEl)return;
   tableEl.querySelectorAll('th').forEach(th=>{
-    // Remove existing handle if any
     th.querySelectorAll('.rh').forEach(h=>h.remove());
     const handle=document.createElement('div');
     handle.className='rh';
@@ -813,12 +1031,15 @@ async function runReconcile(){
   if(profile2)fd.append('profile2',JSON.stringify(profile2));
   try{
     setProgress(30,'Анализ структуры...');
-    const resp=await fetch('/api/reconcile',{method:'POST',body:fd});
+    const resp=await fetch('/api/reconcile',{method:'POST',headers:authHeaders(),body:fd});
     setProgress(70,'Сверка...');
     const data=await resp.json();
     if(!resp.ok){showToast(data.detail||'Ошибка сервера','error');setProgress(0,'Ошибка');btn.disabled=false;return;}
     if(data.logs)data.logs.forEach(l=>setProgress(null,l));
     setProgress(100,'✓ Сверка завершена');
+    if(data.history_saved===false && !isLoggedIn()){
+      setProgress(100,'✓ Сверка завершена (история не сохранена — гостевой режим)');
+    }
     displayResults(data);
   }catch(err){showToast('Ошибка: '+err.message,'error');setProgress(0,'Ошибка');}
   btn.disabled=false;
@@ -828,14 +1049,14 @@ function displayResults(data){
   lastResult=data;allDisc=data.discrepancies||[];
   renderTable(1,data.table1,data.highlight);renderTable(2,data.table2,data.highlight);
   renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
-  renderSummary(data.summary);loadHistory();
+  renderSummary(data.summary);
+  if(isLoggedIn())loadHistory();
   document.getElementById('btn-export').disabled=false;
   const cnt=data.summary.total_discrepancies;
   const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
   if(cnt===0)showToast('✓ Расхождений не обнаружено','success');
   else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
   switchTab('discrepancies');
-  // Init resize on disc table
   initTableResize(document.getElementById('disc-table-el'));
 }
 
@@ -895,7 +1116,7 @@ async function doExport(){
   const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
   const filtered=lastResult.discrepancies.filter(d=>allowed.has(d.type));
   try{
-    const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json'},
+    const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
       body:JSON.stringify({discrepancies:filtered,summary:lastResult.summary,file1_name:lastResult.file1_name,file2_name:lastResult.file2_name})});
     if(!resp.ok){showToast('Ошибка экспорта','error');return;}
     const blob=await resp.blob(),url=URL.createObjectURL(blob);
@@ -906,13 +1127,20 @@ async function doExport(){
 
 // ── History ───────────────────────────────────────────────────────
 async function loadHistory(){
+  const body=document.getElementById('hist-body');
+  if(!isLoggedIn()){
+    body.innerHTML='<tr><td colspan="6" class="empty-hist">Войдите с личным API-ключом для сохранения истории</td></tr>';
+    return;
+  }
   try{
-    const resp=await fetch('/api/history'),data=await resp.json();
+    const resp=await fetch('/api/history',{headers:authHeaders()}),data=await resp.json();
     historyData=[...data].reverse();
-    const body=document.getElementById('hist-body');
-    if(!data||!data.length){body.innerHTML='<tr><td colspan="6" class="empty-hist">История пуста</td></tr>';return;}
+    if(!data||!data.length){
+      body.innerHTML='<tr><td colspan="6" class="empty-hist">История пуста — выполните первую сверку</td></tr>';
+      return;
+    }
     body.innerHTML=historyData.map((h,i)=>{
-      const hasResult=!!h.result;
+      const hasResult=!!(h.result?.discrepancies);
       return`<tr onclick="loadHistoryItem(${i})" title="${hasResult?'Нажмите для восстановления результатов':'Нет сохранённых данных'}">
         <td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td>
         <td>${h.total||0}</td><td>${h.critical||0}</td>
@@ -924,9 +1152,8 @@ async function loadHistory(){
 
 function loadHistoryItem(idx){
   const h=historyData[idx];
-  if(!h?.result){showToast('Нет сохранённых данных для этой записи','warn');return;}
+  if(!h?.result?.discrepancies){showToast('Нет сохранённых данных для этой записи','warn');return;}
   const r=h.result;
-  // Restore lastResult so export works
   lastResult={
     discrepancies: r.discrepancies||[],
     summary:       r.summary||{},
@@ -936,7 +1163,6 @@ function loadHistoryItem(idx){
     file1_name:    r.file1_name||h.file1||'',
     file2_name:    r.file2_name||h.file2||'',
   };
-  // Highlight active history row
   document.querySelectorAll('#hist-body tr').forEach((tr,i)=>tr.classList.toggle('hist-active',i===idx));
   displayResults(lastResult);
   showToast(`✓ Восстановлена сверка от ${h.date}`,'success');

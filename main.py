@@ -1,5 +1,5 @@
-"""sverkAI v2.0 — веб-версия (FastAPI)"""
-import os, re, json, tempfile, shutil, uuid
+"""sverkAI v2.1 — веб-версия (FastAPI) с поддержкой личных API-ключей"""
+import os, re, json, tempfile, shutil, uuid, hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -9,7 +9,7 @@ import pdfplumber
 import xlsxwriter
 from anthropic import Anthropic
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +26,47 @@ _REPORT_DIR = Path(tempfile.gettempdir()) / "sverkai_reports"
 _REPORT_DIR.mkdir(exist_ok=True)
 _DATA_DIR = Path(__file__).parent / "data"
 _DATA_DIR.mkdir(exist_ok=True)
-_HISTORY_FILE = _DATA_DIR / "history.json"
+_HISTORY_FILE = _DATA_DIR / "history.json"   # legacy / гостевая (не используется для хранения)
+
+
+# ════════════════════════════════════════════════════════════════════
+#  АВТОРИЗАЦИЯ / ИСТОРИЯ ПО ПОЛЬЗОВАТЕЛЯМ
+# ════════════════════════════════════════════════════════════════════
+
+def _user_id(api_key: str) -> str:
+    """Хеш API-ключа — безопасный идентификатор пользователя."""
+    return hashlib.sha256(api_key.strip().encode()).hexdigest()[:24]
+
+def _user_history_file(api_key: str) -> Path:
+    return _DATA_DIR / f"history_{_user_id(api_key)}.json"
+
+def _load_user_history(api_key: str = "") -> list:
+    if not api_key or not api_key.strip():
+        return []
+    f = _user_history_file(api_key)
+    if f.exists():
+        try:
+            with open(f, encoding="utf-8") as fp:
+                return json.load(fp)
+        except Exception:
+            pass
+    return []
+
+def _save_user_history(history: list, api_key: str = "") -> None:
+    """Сохраняет историю только для авторизованных пользователей."""
+    if not api_key or not api_key.strip():
+        return
+    f = _user_history_file(api_key)
+    with open(f, "w", encoding="utf-8") as fp:
+        json.dump(history[-50:], fp, ensure_ascii=False, indent=2)
+
+def _get_user_key(request: Request) -> str:
+    """Извлекает личный API-ключ пользователя из заголовка запроса."""
+    return request.headers.get("X-Api-Key", "").strip()
+
+def _effective_key(user_key: str) -> str:
+    """Возвращает ключ пользователя, либо системный как fallback."""
+    return user_key if user_key else ANTHROPIC_API_KEY
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -742,26 +782,10 @@ def hybrid_reconcile(df1, df2, type1, type2, client, progress_cb=None, settings=
 
 
 # ════════════════════════════════════════════════════════════════════
-#  ИСТОРИЯ
-# ════════════════════════════════════════════════════════════════════
-
-def _load_history():
-    if _HISTORY_FILE.exists():
-        try:
-            with open(_HISTORY_FILE, encoding='utf-8') as f: return json.load(f)
-        except: pass
-    return []
-
-def _save_history(h):
-    with open(_HISTORY_FILE, 'w', encoding='utf-8') as f:
-        json.dump(h[-50:], f, ensure_ascii=False, indent=2)
-
-
-# ════════════════════════════════════════════════════════════════════
 #  ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ЗАГРУЗКИ
 # ════════════════════════════════════════════════════════════════════
 
-def _load_and_parse(path: str, logs: list):
+def _load_and_parse(path: str, logs: list, api_key: str = ""):
     ftype = detect_file_type(path)
     display_df = parse_generic(path)
     if ftype == 'proopt':
@@ -773,12 +797,13 @@ def _load_and_parse(path: str, logs: list):
     elif ftype == 'pdf_act':
         return parse_pdf_act_to_structured(path), display_df, 'generic_detected', 'PDF акт сверки'
     else:
-        if not ANTHROPIC_API_KEY:
+        eff_key = _effective_key(api_key)
+        if not eff_key:
             raise HTTPException(status_code=422,
                 detail=f"Формат файла '{Path(path).name}' не распознан. "
-                       "Необходим ANTHROPIC_API_KEY для автодетекта.")
+                       "Необходим API-ключ для автодетекта.")
         logs.append(f"Анализирую структуру {Path(path).name} через AI...")
-        profile = claude_detect_columns(path, ANTHROPIC_API_KEY)
+        profile = claude_detect_columns(path, eff_key)
         if not profile or profile.get('confidence') == 'low':
             raise HTTPException(status_code=422,
                 detail=f"Не удалось определить структуру файла '{Path(path).name}'. "
@@ -804,12 +829,38 @@ def _df_to_records(df: pd.DataFrame):
 #  API ENDPOINTS
 # ════════════════════════════════════════════════════════════════════
 
+@app.post("/api/validate-key")
+async def validate_key(payload: dict):
+    """Проверяет Anthropic API-ключ пользователя."""
+    key = payload.get("api_key", "").strip()
+    if not key:
+        return JSONResponse({"valid": False, "error": "Ключ не указан"})
+    if not key.startswith("sk-ant-"):
+        return JSONResponse({"valid": False, "error": "Неверный формат ключа (должен начинаться с sk-ant-)"})
+    try:
+        client = Anthropic(api_key=key)
+        client.messages.create(
+            model=MODEL_FAST, max_tokens=10,
+            messages=[{"role": "user", "content": "ping"}]
+        )
+        return JSONResponse({"valid": True})
+    except Exception as e:
+        err = str(e)
+        if "authentication" in err.lower() or "401" in err:
+            return JSONResponse({"valid": False, "error": "Ключ недействителен"})
+        return JSONResponse({"valid": False, "error": f"Ошибка проверки: {err[:120]}"})
+
+
 @app.post("/api/reconcile")
 async def reconcile(
+    request: Request,
     file1: UploadFile = File(...),
     file2: UploadFile = File(...),
     settings: str = Form(default="{}")
 ):
+    user_key = _get_user_key(request)
+    eff_key  = _effective_key(user_key)
+
     try:
         cfg = {**DEFAULT_RECON_SETTINGS, **json.loads(settings)}
     except Exception:
@@ -827,12 +878,12 @@ async def reconcile(
 
         logs = []
         try:
-            df1p, df1d, ft1, lb1 = _load_and_parse(p1, logs)
+            df1p, df1d, ft1, lb1 = _load_and_parse(p1, logs, user_key)
         except HTTPException: raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Ошибка чтения файла 1 ({file1.filename}): {e}")
         try:
-            df2p, df2d, ft2, lb2 = _load_and_parse(p2, logs)
+            df2p, df2d, ft2, lb2 = _load_and_parse(p2, logs, user_key)
         except HTTPException: raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Ошибка чтения файла 2 ({file2.filename}): {e}")
@@ -840,7 +891,7 @@ async def reconcile(
         logs.append(f"Файл 1: {file1.filename} → {lb1} ({len(df1p)} строк)")
         logs.append(f"Файл 2: {file2.filename} → {lb2} ({len(df2p)} строк)")
 
-        client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+        client = Anthropic(api_key=eff_key) if eff_key else None
 
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
@@ -861,32 +912,36 @@ async def reconcile(
                     'rows': _df_to_records(d),
                     'raw_rows': list(df['raw_row']) if 'raw_row' in df.columns else list(range(len(df)))}
 
-        history = _load_history()
-        history.append({
-            'date':       datetime.now().strftime('%d.%m.%Y %H:%M'),
-            'file1':      file1.filename,
-            'file2':      file2.filename,
-            'total':      result['summary'].get('total_discrepancies', 0),
-            'critical':   result['summary'].get('critical_count', 0),
-            'debt_label': result['summary'].get('debt_label', ''),
-            'result':     {
-                'summary':       result['summary'],
-                'discrepancies': result['discrepancies'],
-                'highlight':     {
-                    'missing1':  result.get('missing_rows1',[]),
-                    'missing2':  result.get('missing_rows2',[]),
-                    'amt_diff1': result.get('amount_diff_rows1',[]),
-                    'amt_diff2': result.get('amount_diff_rows2',[]),
-                    'sign1':     result.get('sign_mismatch_rows1',[]),
-                    'sign2':     result.get('sign_mismatch_rows2',[]),
-                    'date1':     result.get('date_diff_rows1',[]),
-                    'date2':     result.get('date_diff_rows2',[]),
-                },
-                'file1_name': file1.filename,
-                'file2_name': file2.filename,
-            }
-        })
-        _save_history(history)
+        # ── Сохранение истории только для авторизованных пользователей ──
+        if user_key:
+            history = _load_user_history(user_key)
+            history.append({
+                'date':       datetime.now().strftime('%d.%m.%Y %H:%M'),
+                'file1':      file1.filename,
+                'file2':      file2.filename,
+                'total':      result['summary'].get('total_discrepancies', 0),
+                'critical':   result['summary'].get('critical_count', 0),
+                'debt_label': result['summary'].get('debt_label', ''),
+                'result': {
+                    'summary':       result['summary'],
+                    'discrepancies': result['discrepancies'],
+                    'highlight': {
+                        'missing1':  result.get('missing_rows1',[]),
+                        'missing2':  result.get('missing_rows2',[]),
+                        'amt_diff1': result.get('amount_diff_rows1',[]),
+                        'amt_diff2': result.get('amount_diff_rows2',[]),
+                        'sign1':     result.get('sign_mismatch_rows1',[]),
+                        'sign2':     result.get('sign_mismatch_rows2',[]),
+                        'date1':     result.get('date_diff_rows1',[]),
+                        'date2':     result.get('date_diff_rows2',[]),
+                    },
+                    'file1_name': file1.filename,
+                    'file2_name': file2.filename,
+                    'table1': _prep(df1p),
+                    'table2': _prep(df2p),
+                }
+            })
+            _save_user_history(history, user_key)
 
         return JSONResponse({'ok': True, 'logs': logs, 'summary': result['summary'],
             'discrepancies': result['discrepancies'],
@@ -897,16 +952,20 @@ async def reconcile(
                 'sign1': result.get('sign_mismatch_rows1',[]), 'sign2': result.get('sign_mismatch_rows2',[]),
                 'date1': result.get('date_diff_rows1',[]), 'date2': result.get('date_diff_rows2',[]),
             },
-            'file1_name': file1.filename, 'file2_name': file2.filename})
+            'file1_name': file1.filename, 'file2_name': file2.filename,
+            'history_saved': bool(user_key),
+        })
     finally:
         if tmpdir and os.path.exists(tmpdir):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-
 @app.post("/api/preview")
-async def preview_file(file: UploadFile = File(...)):
+async def preview_file(request: Request, file: UploadFile = File(...)):
     """Парсит один файл и возвращает таблицу для предпросмотра + статус детекта."""
+    user_key = _get_user_key(request)
+    eff_key  = _effective_key(user_key)
+
     tmpdir = None
     try:
         tmpdir = tempfile.mkdtemp()
@@ -928,8 +987,8 @@ async def preview_file(file: UploadFile = File(...)):
         elif ftype == "pdf_act":
             df = parse_pdf_act_to_structured(path); label = "PDF акт сверки"; ftype = "generic_detected"
         else:
-            if ANTHROPIC_API_KEY:
-                profile = claude_detect_columns(path, ANTHROPIC_API_KEY)
+            if eff_key:
+                profile = claude_detect_columns(path, eff_key)
                 if profile and profile.get("confidence") != "low":
                     df = parse_with_profile(path, profile); label = "Автодетект AI"; ftype = "generic_detected"
                 else:
@@ -945,7 +1004,6 @@ async def preview_file(file: UploadFile = File(...)):
         else:
             display_df = df.head(200)
 
-        # Получаем превью сырого файла для диалога ручной настройки
         raw_preview = []
         try:
             raw_ext = Path(path).suffix.lower()
@@ -980,6 +1038,7 @@ async def preview_file(file: UploadFile = File(...)):
     finally:
         if tmpdir and os.path.exists(tmpdir):
             shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 @app.post("/api/export")
 async def export_report(payload: dict):
@@ -1037,8 +1096,10 @@ async def export_report(payload: dict):
 
 
 @app.get("/api/history")
-async def get_history():
-    return JSONResponse(_load_history())
+async def get_history(request: Request):
+    """Возвращает историю только для авторизованных пользователей."""
+    user_key = _get_user_key(request)
+    return JSONResponse(_load_user_history(user_key))
 
 
 # ── Статика ──────────────────────────────────────────────────────────────────
