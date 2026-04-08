@@ -862,11 +862,30 @@ async def reconcile(
                     'raw_rows': list(df['raw_row']) if 'raw_row' in df.columns else list(range(len(df)))}
 
         history = _load_history()
-        history.append({'date': datetime.now().strftime('%d.%m.%Y %H:%M'),
-                        'file1': file1.filename, 'file2': file2.filename,
-                        'total': result['summary'].get('total_discrepancies', 0),
-                        'critical': result['summary'].get('critical_count', 0),
-                        'debt_label': result['summary'].get('debt_label', '')})
+        history.append({
+            'date':       datetime.now().strftime('%d.%m.%Y %H:%M'),
+            'file1':      file1.filename,
+            'file2':      file2.filename,
+            'total':      result['summary'].get('total_discrepancies', 0),
+            'critical':   result['summary'].get('critical_count', 0),
+            'debt_label': result['summary'].get('debt_label', ''),
+            'result':     {
+                'summary':       result['summary'],
+                'discrepancies': result['discrepancies'],
+                'highlight':     {
+                    'missing1':  result.get('missing_rows1',[]),
+                    'missing2':  result.get('missing_rows2',[]),
+                    'amt_diff1': result.get('amount_diff_rows1',[]),
+                    'amt_diff2': result.get('amount_diff_rows2',[]),
+                    'sign1':     result.get('sign_mismatch_rows1',[]),
+                    'sign2':     result.get('sign_mismatch_rows2',[]),
+                    'date1':     result.get('date_diff_rows1',[]),
+                    'date2':     result.get('date_diff_rows2',[]),
+                },
+                'file1_name': file1.filename,
+                'file2_name': file2.filename,
+            }
+        })
         _save_history(history)
 
         return JSONResponse({'ok': True, 'logs': logs, 'summary': result['summary'],
@@ -932,10 +951,11 @@ async def preview_file(file: UploadFile = File(...)):
             raw_ext = Path(path).suffix.lower()
             engine = "openpyxl" if raw_ext == ".xlsx" else ("xlrd" if raw_ext == ".xls" else None)
             if engine:
-                raw = pd.read_excel(path, engine=engine, header=None, dtype=str, nrows=50)
+                raw_full = pd.read_excel(path, engine=engine, header=None, dtype=str)
                 raw_preview = {
-                    "columns": [str(i) for i in range(len(raw.columns))],
-                    "rows": [[str(v).strip() if pd.notna(v) else "" for v in row] for _, row in raw.iterrows()]
+                    "columns": [str(i) for i in range(len(raw_full.columns))],
+                    "rows": [[str(v).strip() if pd.notna(v) else "" for v in row] for _, row in raw_full.iterrows()],
+                    "n_rows": len(raw_full)
                 }
         except Exception:
             pass
