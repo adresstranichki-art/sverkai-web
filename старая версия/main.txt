@@ -370,17 +370,12 @@ def detect_file_type(path: str) -> str:
         if 'Дата операции' in text and 'Тип документа' in text: return 'emex'
         is_act = ('акт сверки' in text.lower() or 'взаимных расчетов' in text.lower() or 'По данным ООО' in text)
         if is_act:
-            # ── ИСПРАВЛЕНИЕ: определяем тип по ПЕРВОМУ вхождению "По данным" ──
-            # Первое вхождение — это заголовок ЛЕВОЙ части акта (данные владельца файла).
-            # Второе вхождение — правая часть (данные контрагента), его не учитываем.
-            first_by_dannym = re.search(r'По данным\b', text)
-            if first_by_dannym:
-                ctx = text[first_by_dannym.start():first_by_dannym.start() + 120]
-                if 'ПРООПТ' in ctx:
-                    return 'proopt'
-                else:
-                    return 'counterparty'
-            # Запасной вариант если паттерн не нашёл
+            proopt_pos = text.find('По данным ООО "ПРООПТ"')
+            other_pos = -1
+            for match in re.finditer(r'По данным [А-Яа-я]+ "(?!ПРООПТ)', text):
+                other_pos = match.start(); break
+            if proopt_pos != -1 and (other_pos == -1 or proopt_pos < other_pos): return 'proopt'
+            if other_pos != -1 and (proopt_pos == -1 or other_pos < proopt_pos): return 'counterparty'
             if 'ПРООПТ' in text: return 'proopt'
             return 'counterparty'
     except Exception:
@@ -591,13 +586,6 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                 vb = _sf(rb.get(col_b))
                 if vb is None: continue
                 if abs(abs(va) - abs(vb)) > 0.01: continue
-                # ── ИСПРАВЛЕНИЕ: пропускаем пары одного знака ──────────────────
-                # Настоящий sign_mismatch — это когда одна сторона отражает операцию
-                # как плюс, другая как минус. Если оба значения одного знака,
-                # это не конфликт, а корректировка с разными датами (уже обработана
-                # нечётким сопоставлением выше).
-                if va * vb > 0:
-                    continue
                 db = rb['date']
                 if ((pd.notna(da) and pd.notna(db) and abs((da - db).days) <= 5) or pd.isna(da) or pd.isna(db)):
                     pairs.append((ra, rb)); rem_a.add(ra['raw_row']); used_b.add(rb['raw_row']); break
