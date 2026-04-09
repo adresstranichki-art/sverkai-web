@@ -384,6 +384,7 @@
     </div>
     <div class="actions-col">
       <button class="btn btn-green" id="btn-run" onclick="runReconcile()" disabled>🔍 Сверить документы</button>
+      <button class="btn btn-ghost" id="btn-cancel" onclick="cancelReconcile()" style="display:none;color:var(--red);border-color:var(--red)" title="Остановить анализ">✕ Остановить</button>
       <button class="btn btn-ghost" id="btn-export" onclick="openExportModal()" disabled>📊 Экспорт в Excel</button>
     </div>
   </div>
@@ -531,6 +532,20 @@
   </div>
 </div>
 
+<!-- ════════ RESTORE CONFIRM ════════ -->
+<div class="login-overlay" id="restore-overlay" style="display:none" onclick="if(event.target===this)closeRestoreModal()">
+  <div class="login-modal" style="max-width:420px">
+    <div class="login-header"><h2>🕘 Восстановить сверку?</h2><button class="close" onclick="closeRestoreModal()">×</button></div>
+    <div class="login-body">
+      <p id="restore-msg" style="font-size:14px;line-height:1.6;color:var(--text);padding-bottom:4px"></p>
+    </div>
+    <div class="login-footer">
+      <button class="btn btn-ghost" onclick="closeRestoreModal()">Отмена</button>
+      <button class="btn btn-green" onclick="confirmRestore()">Восстановить</button>
+    </div>
+  </div>
+</div>
+
 <!-- ════════ WIZARD ════════ -->
 <div class="wiz-overlay" id="wiz-overlay" style="display:none">
   <div class="wiz-modal">
@@ -597,6 +612,7 @@ let wizNum=0,wizActiveStep=0,wizValues={};
 let activeFilters=new Set(['all']);
 let historyData=[];
 let loginMode='key'; // 'key' | 'guest'
+let abortController=null; // для отмены сверки
 
 // ════════════════════════════════════════════════════════════════════
 //  АВТОРИЗАЦИЯ
@@ -1011,9 +1027,24 @@ function applyDiscFilter(){
 }
 
 // ── Reconcile ──────────────────────────────────────────────────────
+function setCancelVisible(v){
+  document.getElementById('btn-cancel').style.display=v?'inline-flex':'none';
+  document.getElementById('btn-run').style.display=v?'none':'inline-flex';
+}
+
+function cancelReconcile(){
+  if(abortController){abortController.abort();abortController=null;}
+  setCancelVisible(false);
+  setProgress(0,'Анализ остановлен');
+  document.getElementById('btn-run').disabled=false;
+  showToast('Анализ остановлен','warn');
+}
+
 async function runReconcile(){
   if(!file1||!file2)return;
-  const btn=document.getElementById('btn-run');btn.disabled=true;
+  abortController=new AbortController();
+  document.getElementById('btn-run').disabled=true;
+  setCancelVisible(true);
   setProgress(10,'Загрузка файлов...');
   const settings={
     find_missing:document.getElementById('cfg-missing').checked,
@@ -1031,18 +1062,22 @@ async function runReconcile(){
   if(profile2)fd.append('profile2',JSON.stringify(profile2));
   try{
     setProgress(30,'Анализ структуры...');
-    const resp=await fetch('/api/reconcile',{method:'POST',headers:authHeaders(),body:fd});
+    const resp=await fetch('/api/reconcile',{method:'POST',headers:authHeaders(),body:fd,signal:abortController.signal});
     setProgress(70,'Сверка...');
     const data=await resp.json();
-    if(!resp.ok){showToast(data.detail||'Ошибка сервера','error');setProgress(0,'Ошибка');btn.disabled=false;return;}
+    if(!resp.ok){showToast(data.detail||'Ошибка сервера','error');setProgress(0,'Ошибка');setCancelVisible(false);document.getElementById('btn-run').disabled=false;return;}
     if(data.logs)data.logs.forEach(l=>setProgress(null,l));
-    setProgress(100,'✓ Сверка завершена');
-    if(data.history_saved===false && !isLoggedIn()){
-      setProgress(100,'✓ Сверка завершена (история не сохранена — гостевой режим)');
-    }
+    const noHist=data.history_saved===false&&!isLoggedIn();
+    setProgress(100,noHist?'✓ Сверка завершена (гостевой режим — история не сохраняется)':'✓ Сверка завершена');
     displayResults(data);
-  }catch(err){showToast('Ошибка: '+err.message,'error');setProgress(0,'Ошибка');}
-  btn.disabled=false;
+  }catch(err){
+    if(err.name==='AbortError'){return;}// уже обработано в cancelReconcile
+    showToast('Ошибка: '+err.message,'error');setProgress(0,'Ошибка');
+  }finally{
+    abortController=null;
+    setCancelVisible(false);
+    document.getElementById('btn-run').disabled=false;
+  }
 }
 
 function displayResults(data){
@@ -1073,7 +1108,15 @@ function renderDiscrepancies(discs,f1='',f2=''){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
   document.getElementById('disc-col-ctr').textContent=f2?`У контрагента (${sn(f2)})`:'У контрагента';
   const body=document.getElementById('disc-body');
-  if(!discs||!discs.length){body.innerHTML='<tr><td colspan="8" class="empty-state" style="color:var(--green)">✓ Расхождений не обнаружено</td></tr>';return;}
+  if(!discs||!discs.length){
+    body.innerHTML=`<tr><td colspan="8" style="padding:32px;text-align:center">
+      <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px">
+        <span style="font-size:36px">✅</span>
+        <span style="font-size:18px;font-weight:700;color:var(--green)">Расхождений не найдено</span>
+        <span style="font-size:13px;color:var(--muted)">Данные обеих сторон полностью совпадают</span>
+      </div></td></tr>`;
+    return;
+  }
   body.innerHTML=discs.map((d,i)=>{
     const[tl,tb]=TYPE_MAP[d.type]||[d.type,'badge-gray'];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
@@ -1144,15 +1187,35 @@ async function loadHistory(){
       return`<tr onclick="loadHistoryItem(${i})" title="${hasResult?'Нажмите для восстановления результатов':'Нет сохранённых данных'}">
         <td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td>
         <td>${h.total||0}</td><td>${h.critical||0}</td>
-        <td>${esc(trunc(h.debt_label||'',50))}${hasResult?' <span style="color:var(--green);font-size:11px">↩ восстановить</span>':''}</td>
+        <td>${esc(trunc(h.debt_label||'',50))}</td>
       </tr>`;
     }).join('');
   }catch{}
 }
 
+let _pendingRestoreIdx = null;
+
 function loadHistoryItem(idx){
   const h=historyData[idx];
   if(!h?.result?.discrepancies){showToast('Нет сохранённых данных для этой записи','warn');return;}
+  _pendingRestoreIdx=idx;
+  const f1=h.file1||'—', f2=h.file2||'—';
+  document.getElementById('restore-msg').innerHTML=
+    `Восстановить результаты сверки от <strong>${esc(h.date)}</strong>?<br>`+
+    `<span style="font-size:12px;color:var(--muted)">${esc(f1)} ↔ ${esc(f2)}</span>`;
+  document.getElementById('restore-overlay').style.display='flex';
+}
+
+function closeRestoreModal(){
+  document.getElementById('restore-overlay').style.display='none';
+  _pendingRestoreIdx=null;
+}
+
+function confirmRestore(){
+  closeRestoreModal();
+  const idx=_pendingRestoreIdx;
+  if(idx===null)return;
+  const h=historyData[idx];
   const r=h.result;
   lastResult={
     discrepancies: r.discrepancies||[],

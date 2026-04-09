@@ -26,12 +26,42 @@ _REPORT_DIR = Path(tempfile.gettempdir()) / "sverkai_reports"
 _REPORT_DIR.mkdir(exist_ok=True)
 _DATA_DIR = Path(__file__).parent / "data"
 _DATA_DIR.mkdir(exist_ok=True)
-_HISTORY_FILE = _DATA_DIR / "history.json"   # legacy / гостевая (не используется для хранения)
+_HISTORY_FILE      = _DATA_DIR / "history.json"         # legacy (не используется)
+_ALLOWED_KEYS_FILE = _DATA_DIR / "allowed_keys.json"    # белый список (хеши ключей)
+ADMIN_SECRET       = os.environ.get("ADMIN_SECRET", "") # для управления белым списком
 
 
 # ════════════════════════════════════════════════════════════════════
 #  АВТОРИЗАЦИЯ / ИСТОРИЯ ПО ПОЛЬЗОВАТЕЛЯМ
 # ════════════════════════════════════════════════════════════════════
+
+def _load_allowed_keys() -> list:
+    """Загружает белый список. Каждая запись: {hash, label, added}."""
+    if _ALLOWED_KEYS_FILE.exists():
+        try:
+            with open(_ALLOWED_KEYS_FILE, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def _save_allowed_keys(entries: list) -> None:
+    with open(_ALLOWED_KEYS_FILE, "w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+
+
+def _is_key_allowed(api_key: str) -> bool:
+    """Проверяет, есть ли ключ в белом списке.
+    Если файла нет или список пуст — dev-режим, всё разрешено."""
+    if not _ALLOWED_KEYS_FILE.exists():
+        return True
+    entries = _load_allowed_keys()
+    if not entries:
+        return True
+    h = _user_id(api_key)
+    return any(e.get("hash") == h for e in entries)
+
 
 def _user_id(api_key: str) -> str:
     """Хеш API-ключа — безопасный идентификатор пользователя."""
@@ -831,12 +861,16 @@ def _df_to_records(df: pd.DataFrame):
 
 @app.post("/api/validate-key")
 async def validate_key(payload: dict):
-    """Проверяет Anthropic API-ключ пользователя."""
+    """Проверяет Anthropic API-ключ: формат → белый список → реальный вызов."""
     key = payload.get("api_key", "").strip()
     if not key:
         return JSONResponse({"valid": False, "error": "Ключ не указан"})
     if not key.startswith("sk-ant-"):
         return JSONResponse({"valid": False, "error": "Неверный формат ключа (должен начинаться с sk-ant-)"})
+    # Проверка белого списка
+    if not _is_key_allowed(key):
+        return JSONResponse({"valid": False, "error": "Ключ не входит в список разрешённых. Обратитесь к администратору."})
+    # Проверка через реальный вызов к Anthropic
     try:
         client = Anthropic(api_key=key)
         client.messages.create(
@@ -849,6 +883,51 @@ async def validate_key(payload: dict):
         if "authentication" in err.lower() or "401" in err:
             return JSONResponse({"valid": False, "error": "Ключ недействителен"})
         return JSONResponse({"valid": False, "error": f"Ошибка проверки: {err[:120]}"})
+
+
+# ── Управление белым списком (только для администратора) ─────────────
+
+@app.post("/api/admin/add-key")
+async def admin_add_key(payload: dict):
+    """Добавляет ключ в белый список. Требует ADMIN_SECRET в теле."""
+    if not ADMIN_SECRET or payload.get("admin_secret") != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    key  = payload.get("api_key", "").strip()
+    label = payload.get("label", "").strip() or "—"
+    if not key:
+        raise HTTPException(status_code=400, detail="api_key не указан")
+    h = _user_id(key)
+    entries = _load_allowed_keys()
+    if any(e.get("hash") == h for e in entries):
+        return JSONResponse({"ok": False, "message": "Ключ уже в списке", "hash": h})
+    entries.append({"hash": h, "label": label, "added": datetime.now().strftime("%Y-%m-%d")})
+    _save_allowed_keys(entries)
+    return JSONResponse({"ok": True, "hash": h, "label": label, "total": len(entries)})
+
+
+@app.post("/api/admin/remove-key")
+async def admin_remove_key(payload: dict):
+    """Удаляет ключ из белого списка по хешу или по api_key."""
+    if not ADMIN_SECRET or payload.get("admin_secret") != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    h = payload.get("hash", "").strip()
+    if not h and payload.get("api_key"):
+        h = _user_id(payload["api_key"].strip())
+    entries = _load_allowed_keys()
+    before  = len(entries)
+    entries = [e for e in entries if e.get("hash") != h]
+    _save_allowed_keys(entries)
+    removed = before - len(entries)
+    return JSONResponse({"ok": True, "removed": removed, "total": len(entries)})
+
+
+@app.get("/api/admin/list-keys")
+async def admin_list_keys(request: Request):
+    """Возвращает белый список (без реальных ключей — только хеши и метки)."""
+    secret = request.headers.get("X-Admin-Secret", "")
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    return JSONResponse({"entries": _load_allowed_keys()})
 
 
 @app.post("/api/reconcile")
