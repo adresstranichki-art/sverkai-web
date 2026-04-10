@@ -217,6 +217,11 @@
   .summary-suggest-text { font-size: 14px; line-height: 1.55; color: var(--text); margin-bottom: 12px; }
   .summary-suggest-meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
   .summary-suggest-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .disc-suggest-banner { background: #fff8e8; border: 1.5px solid #f2c66d; border-radius: 10px; padding: 12px 14px; margin: 0 12px 12px; }
+  .disc-suggest-head { font-size: 12px; color: #9a6400; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+  .disc-suggest-text { font-size: 13px; line-height: 1.5; color: var(--text); margin-bottom: 8px; }
+  .disc-suggest-meta { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .disc-suggest-actions { display: flex; flex-wrap: wrap; gap: 10px; }
   .ai-card { background: #f0f7f4; border: 1.5px solid #a8d4bc; border-radius: 10px; padding: 14px 18px; }
   .ai-card .ai-title { font-size: 12px; color: var(--green-dk); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
   .ai-text { font-size: 14px; line-height: 1.7; color: var(--text); }
@@ -465,6 +470,14 @@
       <button class="filter-btn" id="fb-amount_diff"             onclick="toggleFilter('amount_diff',this)">💰 Разница в суммах</button>
       <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">🔀 Зеркальные КСФ</button>
       <button class="filter-btn" id="fb-date_diff"               onclick="toggleFilter('date_diff',this)">📅 Разница в датах</button>
+    </div>
+    <div class="disc-suggest-banner" id="disc-window-suggest" style="display:none">
+      <div class="disc-suggest-head">Рекомендуем расширить окна допусков</div>
+      <div class="disc-suggest-text" id="disc-window-suggest-text"></div>
+      <div class="disc-suggest-meta" id="disc-window-suggest-meta"></div>
+      <div class="disc-suggest-actions">
+        <button class="btn btn-green" id="disc-window-suggest-btn" type="button">Применить и пересчитать</button>
+      </div>
     </div>
     <div class="disc-wrap" id="disc-wrap">
       <table class="disc-table" id="disc-table-el">
@@ -1181,17 +1194,8 @@ function renderSummary(s,file1Name='',file2Name=''){
   else ac.style.display='none';
 }
 
-function renderWindowSuggestion(s){
-  const card=document.getElementById('window-suggest-card');
-  const textEl=document.getElementById('window-suggest-text');
-  const metaEl=document.getElementById('window-suggest-meta');
-  const btn=document.getElementById('window-suggest-btn');
-  const hint=s.window_suggestion;
-  if(!hint||!hint.candidate_pairs){
-    card.style.display='none';
-    btn.onclick=null;
-    return;
-  }
+function getWindowSuggestionView(hint){
+  if(!hint||!hint.candidate_pairs)return null;
 
   const detailParts=[];
   if(hint.payment_pairs)detailParts.push(`${hint.payment_pairs} оплат`);
@@ -1201,20 +1205,52 @@ function renderWindowSuggestion(s){
   const windowParts=[];
   if((hint.recommended_payment_window||0)>(hint.current_payment_window||0))windowParts.push(`окно оплат до ${hint.recommended_payment_window} дн.`);
   if((hint.recommended_delivery_window||0)>(hint.current_delivery_window||0))windowParts.push(`окно поставок до ${hint.recommended_delivery_window} дн.`);
-  if(!windowParts.length){
-    card.style.display='none';
-    btn.onclick=null;
-    return;
-  }
+  if(!windowParts.length)return null;
 
   const lead=hint.candidate_pairs>=8
     ? 'Обнаружено много операций с высокой вероятностью совпадения, которые отличаются датой отражения больше текущего допуска.'
     : 'Обнаружены операции с высокой вероятностью совпадения, которые отличаются датой отражения больше текущего допуска.';
-  textEl.textContent=`${lead} Рекомендуем увеличить ${windowParts.join(' и ')} и повторить сверку.`;
-  metaEl.textContent=`Вероятных совпадений: ${hint.candidate_pairs}. ${detailParts.length?`Из них: ${detailParts.join(', ')}.`:''}${hint.max_shift_days?` Максимальный сдвиг дат: ${hint.max_shift_days} дн.`:''}`;
-  btn.textContent='Применить и пересчитать';
-  btn.onclick=()=>applySuggestedWindows(hint.recommended_payment_window,hint.recommended_delivery_window);
-  card.style.display='block';
+
+  return {
+    text:`${lead} Рекомендуем увеличить ${windowParts.join(' и ')} и повторить сверку.`,
+    meta:`Вероятных совпадений: ${hint.candidate_pairs}. ${detailParts.length?`Из них: ${detailParts.join(', ')}.`:''}${hint.max_shift_days?` Максимальный сдвиг дат: ${hint.max_shift_days} дн.`:''}`,
+    payDays: hint.recommended_payment_window,
+    delDays: hint.recommended_delivery_window,
+  };
+}
+
+function renderWindowSuggestion(s){
+  const hintView=getWindowSuggestionView(s.window_suggestion);
+
+  const summaryCard=document.getElementById('window-suggest-card');
+  const summaryText=document.getElementById('window-suggest-text');
+  const summaryMeta=document.getElementById('window-suggest-meta');
+  const summaryBtn=document.getElementById('window-suggest-btn');
+
+  const discCard=document.getElementById('disc-window-suggest');
+  const discText=document.getElementById('disc-window-suggest-text');
+  const discMeta=document.getElementById('disc-window-suggest-meta');
+  const discBtn=document.getElementById('disc-window-suggest-btn');
+
+  if(!hintView){
+    summaryCard.style.display='none';
+    summaryBtn.onclick=null;
+    discCard.style.display='none';
+    discBtn.onclick=null;
+    return;
+  }
+
+  summaryText.textContent=hintView.text;
+  summaryMeta.textContent=hintView.meta;
+  summaryBtn.textContent='Применить и пересчитать';
+  summaryBtn.onclick=()=>applySuggestedWindows(hintView.payDays,hintView.delDays);
+  summaryCard.style.display='block';
+
+  discText.textContent=hintView.text;
+  discMeta.textContent=hintView.meta;
+  discBtn.textContent='Применить и пересчитать';
+  discBtn.onclick=()=>applySuggestedWindows(hintView.payDays,hintView.delDays);
+  discCard.style.display='block';
 }
 
 function renderSummaryDetails(s,file1Name='',file2Name=''){
