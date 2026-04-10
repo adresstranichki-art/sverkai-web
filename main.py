@@ -123,6 +123,7 @@ def _normalize_doc_num(num: str) -> str:
 
 
 _DOC_NUM_PATTERNS = (
+    re.compile(r'\bРГО\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'(?:сч[её]т[-\s]?фактура|упд)\s*[№#]?\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от', re.IGNORECASE),
     re.compile(r'(?:№|#|No)\s*(М-\d+|\d[\w/-]*)', re.IGNORECASE),
@@ -133,11 +134,33 @@ _DOC_NUM_PATTERNS = (
 def _extract_doc_num(doc: str) -> Optional[str]:
     if not doc:
         return None
-    for pattern in _DOC_NUM_PATTERNS:
-        for match in pattern.finditer(str(doc)):
+    text = str(doc)
+    has_full_date = bool(re.search(r'\b\d{2}\.\d{2}\.(?:19|20)\d{2}\b', text))
+    for idx, pattern in enumerate(_DOC_NUM_PATTERNS):
+        for match in pattern.finditer(text):
+            raw_num = match.group(1)
+            if idx == len(_DOC_NUM_PATTERNS) - 1 and has_full_date and re.fullmatch(r'(?:19|20)\d{2}', raw_num):
+                continue
             num = _normalize_doc_num(match.group(1))
             if num:
                 return num
+    return None
+
+
+def _extract_doc_date(doc: str) -> Optional[pd.Timestamp]:
+    if not doc:
+        return None
+    text = str(doc)
+    for pattern in (
+        r'\bот\s*(\d{2}\.\d{2}\.\d{2,4})\b',
+        r'\((\d{2}\.\d{2}\.\d{2,4})\)',
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        dt = pd.to_datetime(match.group(1), dayfirst=True, errors='coerce')
+        if pd.notna(dt):
+            return dt
     return None
 
 
@@ -163,9 +186,58 @@ def parse_proopt(path: str) -> pd.DataFrame:
         m = re.search(r'\((\d+)\s+от\s', doc_val)
         doc_num = m.group(1) if m else None
         date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
+        debit_val = _to_float(debit)
+        credit_val = _to_float(credit)
         rows.append({'date': date_parsed, 'date_str': date_val, 'document': doc_val,
-                     'doc_num': doc_num, 'debit': _to_float(debit), 'credit': _to_float(credit),
+                     'doc_num': doc_num, 'debit': debit_val, 'credit': credit_val,
+                     'match_date': _extract_doc_date(doc_val) or date_parsed,
+                     'signed_amount': float(debit_val or 0) - float(credit_val or 0),
                      'raw_row': idx})
+    return pd.DataFrame(rows)
+
+
+def parse_partner_ledger_act(path: str) -> pd.DataFrame:
+    ext = Path(path).suffix.lower()
+    engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
+    raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
+    rows = []
+    for idx in range(12, len(raw)):
+        row = raw.iloc[idx]
+        doc_val = str(row[2]).strip() if pd.notna(row[2]) else ''
+        if not doc_val or doc_val == 'nan':
+            continue
+        doc_low = doc_val.lower()
+        if 'сальдо конечное' in doc_low:
+            break
+        if 'обороты' in doc_low or 'сальдо начальное' in doc_low:
+            continue
+        ref_val = str(row[4]).strip() if pd.notna(row[4]) else ''
+        posted_date = str(row[5]).strip() if pd.notna(row[5]) else ''
+        debit_raw = str(row[6]).strip() if pd.notna(row[6]) else ''
+        credit_raw = str(row[7]).strip() if pd.notna(row[7]) else ''
+        debit = _to_float(debit_raw)
+        credit = _to_float(credit_raw)
+        if debit is None and credit is None:
+            continue
+        date_parsed = pd.to_datetime(posted_date, dayfirst=True, errors='coerce') if posted_date else pd.NaT
+        match_date = _extract_doc_date(doc_val) or date_parsed
+        if pd.isna(date_parsed):
+            date_parsed = match_date
+            date_str = date_parsed.strftime('%d.%m.%Y') if pd.notna(date_parsed) else posted_date
+        else:
+            date_str = posted_date
+        doc_num = _extract_doc_num(doc_val) or _extract_doc_num(ref_val)
+        rows.append({
+            'date': date_parsed,
+            'date_str': date_str,
+            'document': doc_val,
+            'doc_num': doc_num,
+            'debit': debit,
+            'credit': credit,
+            'match_date': match_date,
+            'signed_amount': float(debit or 0) - float(credit or 0),
+            'raw_row': idx,
+        })
     return pd.DataFrame(rows)
 
 
@@ -188,9 +260,14 @@ def parse_emex(path: str) -> pd.DataFrame:
         m = re.search(r'^(\d+)', doc_val)
         doc_num = m.group(1) if m else None
         date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
+        debit_val = _to_float(debit)
+        credit_val = _to_float(credit)
         rows.append({'date': date_parsed, 'date_str': date_val, 'document': doc_val,
                      'doc_num': doc_num, 'doc_type': doc_type,
-                     'debit': _to_float(debit), 'credit': _to_float(credit), 'raw_row': idx})
+                     'debit': debit_val, 'credit': credit_val,
+                     'match_date': _extract_doc_date(doc_val) or date_parsed,
+                     'signed_amount': float(debit_val or 0) - float(credit_val or 0),
+                     'raw_row': idx})
     return pd.DataFrame(rows)
 
 
@@ -216,8 +293,13 @@ def parse_counterparty(path: str) -> pd.DataFrame:
         date_str = m_date.group(1) if m_date else ''
         date_parsed = pd.to_datetime(date_str, dayfirst=True, errors='coerce') if date_str else pd.NaT
         doc_num = _extract_doc_num(doc_val)
+        debit_val = _to_float(debit)
+        credit_val = _to_float(credit)
         rows.append({'date': date_parsed, 'date_str': date_str, 'document': doc_val,
-                     'doc_num': doc_num, 'debit': _to_float(debit), 'credit': _to_float(credit), 'raw_row': idx})
+                     'doc_num': doc_num, 'debit': debit_val, 'credit': credit_val,
+                     'match_date': _extract_doc_date(doc_val) or date_parsed,
+                     'signed_amount': float(credit_val or 0) - float(debit_val or 0),
+                     'raw_row': idx})
     return pd.DataFrame(rows)
 
 
@@ -270,7 +352,10 @@ def parse_standard_act(path: str) -> pd.DataFrame:
         date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
         doc_num = _extract_doc_num(doc_val)
         rows.append({'date': date_parsed, 'date_str': date_val, 'document': doc_val,
-                     'doc_num': doc_num, 'debit': debit, 'credit': credit, 'raw_row': idx})
+                     'doc_num': doc_num, 'debit': debit, 'credit': credit,
+                     'match_date': _extract_doc_date(doc_val) or date_parsed,
+                     'signed_amount': float(debit or 0) - float(credit or 0),
+                     'raw_row': idx})
     return pd.DataFrame(rows)
 
 
@@ -331,7 +416,10 @@ def parse_two_sided_act(path: str) -> pd.DataFrame:
         date_str = date_parsed.strftime('%d.%m.%Y') if pd.notna(date_parsed) else date_val
         doc_num = _extract_doc_num(doc_val)
         rows.append({'date': date_parsed, 'date_str': date_str, 'document': doc_val,
-                     'doc_num': doc_num, 'debit': debit, 'credit': credit, 'raw_row': idx})
+                     'doc_num': doc_num, 'debit': debit, 'credit': credit,
+                     'match_date': _extract_doc_date(doc_val) or date_parsed,
+                     'signed_amount': float(credit or 0) - float(debit or 0),
+                     'raw_row': idx})
     return pd.DataFrame(rows)
 
 
@@ -517,35 +605,14 @@ def detect_file_type(path: str) -> str:
         text = ' '.join(str(v) for v in raw.values.flatten() if pd.notna(v))
         if 'Номер документа' in text and 'Эмекс' in text: return 'emex'
         if 'Дата операции' in text and 'Тип документа' in text: return 'emex'
+        if ('Наименование договора' in text and 'Номер С/Ф' in text and 'Дата С/Ф' in text
+                and 'По данным' in text and 'Сальдо начальное' in text):
+            return 'partner_ledger_act'
         is_act = ('акт сверки' in text.lower() or 'взаимных расчетов' in text.lower() or 'По данным ООО' in text)
         if is_act:
-            proopt_pos = text.find('По данным ООО "ПРООПТ"')
-            other_pos = -1
-            for match in re.finditer(r'По данным [А-Яа-я]+ "(?!ПРООПТ)', text):
-                other_pos = match.start(); break
-            if proopt_pos != -1 and (other_pos == -1 or proopt_pos < other_pos): return 'proopt'
-            if other_pos != -1 and (proopt_pos == -1 or other_pos < proopt_pos):
-                # Определяем: двусторонний или обычный контрагентский формат
-                try:
-                    raw_full = pd.read_excel(path, header=None, dtype=str, nrows=20)
-                    date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
-                    # Двусторонний: NaN в col 0, дата в col 1
-                    has_two_sided = any(
-                        pd.isna(raw_full.iloc[i, 0]) and date_re.match(str(raw_full.iloc[i, 1]).strip())
-                        for i in range(8, min(15, len(raw_full)))
-                    )
-                    # Однострочный с датой в col 0 (нестандартный контрагент / формат МА)
-                    has_date_col0 = any(
-                        date_re.match(str(raw_full.iloc[i, 0]).strip())
-                        for i in range(8, min(15, len(raw_full)))
-                    )
-                    if has_two_sided: return 'two_sided_act'
-                    if has_date_col0: return 'standard_act'
-                except Exception:
-                    pass
-                return 'counterparty'
-            if 'ПРООПТ' in text: return 'proopt'
-            # Проверяем также без явного «контрагента»
+            raw_full = None
+            has_two_sided = False
+            has_date_col0 = False
             try:
                 raw_full = pd.read_excel(path, header=None, dtype=str, nrows=20)
                 date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
@@ -557,10 +624,22 @@ def detect_file_type(path: str) -> str:
                     date_re.match(str(raw_full.iloc[i, 0]).strip())
                     for i in range(8, min(15, len(raw_full)))
                 )
-                if has_two_sided: return 'two_sided_act'
-                if has_date_col0: return 'standard_act'
             except Exception:
                 pass
+            if has_two_sided:
+                return 'two_sided_act'
+            proopt_pos = text.find('По данным ООО "ПРООПТ"')
+            other_pos = -1
+            for match in re.finditer(r'По данным [А-Яа-я]+ "(?!ПРООПТ)', text):
+                other_pos = match.start(); break
+            if proopt_pos != -1 and (other_pos == -1 or proopt_pos < other_pos): return 'proopt'
+            if other_pos != -1 and (proopt_pos == -1 or other_pos < proopt_pos):
+                # Определяем: двусторонний или обычный контрагентский формат
+                if has_date_col0: return 'standard_act'
+                return 'counterparty'
+            if 'ПРООПТ' in text: return 'proopt'
+            # Проверяем также без явного «контрагента»
+            if has_date_col0: return 'standard_act'
             return 'counterparty'
     except Exception:
         pass
@@ -677,6 +756,12 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         except: pass
         return None
 
+    def _md(r):
+        d = r.get('match_date')
+        if d is not None and pd.notna(d):
+            return d
+        return r.get('date')
+
     _sign_pat = re.compile(
         r'корректировк|ксф|возврат|сторно|исправлени|аннулирован|зачет|зачёт|'
         r'adjustment|correction|credit.?note|reversal|refund|write.?off|reverse', re.IGNORECASE)
@@ -749,7 +834,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     unmatched2 = df2[~df2['raw_row'].isin(matched2)].copy()
 
     for _, r1 in unmatched1.iterrows():
-        d1 = r1['date']; cat1 = _cat(r1); found = False
+        d1 = _md(r1); cat1 = _cat(r1); found = False
         for s1, s2 in [('debit','credit'),('credit','debit'),('debit','debit'),('credit','credit')]:
             v1 = _sf(r1.get(s1))
             if v1 is None: continue
@@ -762,7 +847,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                 if v2 is None: continue
                 if abs(abs(v1) - abs(v2)) > 0.01: continue
                 if cat1 == 'корректировка' and cat2 == 'корректировка' and s1 != s2 and v1 * v2 < 0: continue
-                d2 = r2['date']
+                d2 = _md(r2)
                 dw = dw_payment if cat1 == 'оплата' else dw_delivery
                 if pd.notna(d1) and pd.notna(d2):
                     if abs((d1 - d2).days) <= dw:
@@ -784,13 +869,13 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         for _, ra in sa.iterrows():
             va = _sf(ra.get(col_a))
             if va is None: continue
-            da = ra['date']
+            da = _md(ra)
             for _, rb in sb.iterrows():
                 if rb['raw_row'] in used_b: continue
                 vb = _sf(rb.get(col_b))
                 if vb is None: continue
                 if abs(abs(va) - abs(vb)) > 0.01: continue
-                db = rb['date']
+                db = _md(rb)
                 if ((pd.notna(da) and pd.notna(db) and abs((da - db).days) <= 5) or pd.isna(da) or pd.isna(db)):
                     pairs.append((ra, rb)); rem_a.add(ra['raw_row']); used_b.add(rb['raw_row']); break
         return pairs, rem_a, used_b
@@ -865,6 +950,10 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             d1, d2 = r1.get('date'), r2.get('date')
             if pd.notna(d1) and pd.notna(d2) and abs((d1 - d2).days) > 0:
                 dd = abs((d1 - d2).days)
+                cat = _cat(r1)
+                dw = dw_payment if cat == 'оплата' else dw_delivery
+                if dd <= dw:
+                    continue
                 pfx = 'Нечёткое совпадение: ' if (r1['raw_row'], r2['raw_row']) in fuzzy_rr_pairs else ''
                 discrepancies.append({'type':'date_diff','document_number':r1.get('document',''),
                     'description':f'{pfx}Даты расходятся на {dd} дн.',
@@ -879,6 +968,11 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         return 0.0
 
     def _balance_effect(df):
+        if 'signed_amount' in df.columns:
+            try:
+                return float(pd.to_numeric(df['signed_amount'], errors='coerce').fillna(0).sum())
+            except Exception:
+                pass
         total = 0.0
         for _, r in df.iterrows():
             total += _sfz(r.get('debit')) - _sfz(r.get('credit'))
@@ -1019,6 +1113,11 @@ def _load_and_parse(path: str, logs: list, api_key: str = "", original_filename:
 
     if ftype == 'emex':
         return parse_emex(path), display_df, ftype, 'ЭМЕКС'
+
+    if ftype == 'partner_ledger_act':
+        df = parse_partner_ledger_act(path)
+        if not df.empty:
+            return df, display_df, 'generic_detected', 'Акт сверки (реестр проводок)'
 
     if ftype == 'pdf_act':
         return parse_pdf_act_to_structured(path), display_df, 'generic_detected', 'PDF акт сверки'
