@@ -561,7 +561,7 @@ def parse_standard_act(path: str) -> pd.DataFrame:
     return _attach_meta(pd.DataFrame(rows), **meta)
 
 
-def parse_two_sided_act(path: str) -> pd.DataFrame:
+def parse_two_sided_act(path: str, side: str = 'left') -> pd.DataFrame:
     """Парсит двусторонний акт сверки (формат 220): обе стороны в одном листе.
     Читает только сторону организации (левая половина):
     col 1 = дата, col 2 = документ, col 4 = дебет, col 6 = кредит (позиции авто-определяются)."""
@@ -571,17 +571,25 @@ def parse_two_sided_act(path: str) -> pd.DataFrame:
     date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
     meta = _extract_balance_meta(raw)
     # Автодетект колонок дебет/кредит: сканируем левую половину листа по нескольким строкам.
-    date_col, doc_col, debit_col, credit_col = 1, 2, 4, 6
+    if side == 'right':
+        date_col, doc_col, debit_col, credit_col = 9, 10, 12, 14
+    else:
+        date_col, doc_col, debit_col, credit_col = 1, 2, 4, 6
     from collections import Counter
     col_hits: Counter = Counter()
     mid = max(len(raw.columns) // 2, 8)
     scan_rows = []
     for i in range(5, min(50, len(raw))):
-        if date_re.match(str(raw.iloc[i, 1]).strip()):
+        scan_idx = 9 if side == 'right' else 1
+        if date_re.match(str(raw.iloc[i, scan_idx]).strip()):
             scan_rows.append(i)
             if len(scan_rows) >= 30: break
     for i in scan_rows:
-        for c in range(3, mid):
+        if side == 'right':
+            scan_range = range(mid, len(raw.columns))
+        else:
+            scan_range = range(3, mid)
+        for c in scan_range:
             v = str(raw.iloc[i, c]).strip()
             if v in ('', 'nan', '-', '—'): continue
             try: float(v.replace(',', '.').replace(' ', '').replace('\xa0', '')); col_hits[c] += 1
@@ -621,7 +629,11 @@ def parse_two_sided_act(path: str) -> pd.DataFrame:
         rows.append({'date': date_parsed, 'date_str': date_str, 'document': doc_val,
                      'doc_num': doc_num, 'debit': debit, 'credit': credit,
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
-                     'signed_amount': float(credit or 0) - float(debit or 0),
+                     'signed_amount': (
+                         float(debit or 0) - float(credit or 0)
+                         if side == 'right'
+                         else float(credit or 0) - float(debit or 0)
+                     ),
                      'raw_row': idx})
     return _attach_meta(pd.DataFrame(rows), **meta)
 
@@ -1331,6 +1343,317 @@ def _reconcile_via_claude(df1, df2, client, log):
             'matched1':[],'matched2':[],'missing_rows1':[],'missing_rows2':[],'fuzzy_rows1':[],'fuzzy_rows2':[]}
 
 
+def _has_structured_rows(df: pd.DataFrame) -> bool:
+    if df is None or df.empty:
+        return False
+    if not {'date', 'document'}.issubset(df.columns):
+        return False
+    return 'debit' in df.columns or 'credit' in df.columns
+
+
+def _score_parsed_dataframe(df: pd.DataFrame) -> dict:
+    rows = len(df)
+    if rows == 0:
+        return {
+            'rows': 0,
+            'date_ratio': 0.0,
+            'doc_ratio': 0.0,
+            'amount_ratio': 0.0,
+            'doc_num_ratio': 0.0,
+            'has_start_balance': False,
+            'has_end_balance': False,
+            'score': -999.0,
+        }
+
+    date_ratio = float(pd.notna(df['date']).mean()) if 'date' in df.columns else 0.0
+    doc_ratio = float(df['document'].astype(str).str.strip().ne('').mean()) if 'document' in df.columns else 0.0
+    doc_num_ratio = float(df['doc_num'].fillna('').astype(str).str.strip().ne('').mean()) if 'doc_num' in df.columns else 0.0
+
+    amount_rows = 0
+    for _, row in df.iterrows():
+        if _to_float(row.get('debit')) is not None or _to_float(row.get('credit')) is not None:
+            amount_rows += 1
+    amount_ratio = amount_rows / rows if rows else 0.0
+
+    has_start_balance = df.attrs.get('start_balance') is not None
+    has_end_balance = df.attrs.get('end_balance') is not None
+
+    score = 0.0
+    score += min(rows, 1500) * 0.02
+    score += date_ratio * 22
+    score += doc_ratio * 18
+    score += amount_ratio * 24
+    score += doc_num_ratio * 6
+    if has_start_balance:
+        score += 8
+    if has_end_balance:
+        score += 12
+    if rows < 5:
+        score -= 20
+    if amount_ratio < 0.5:
+        score -= 25
+    if doc_ratio < 0.8:
+        score -= 12
+
+    return {
+        'rows': rows,
+        'date_ratio': round(date_ratio, 4),
+        'doc_ratio': round(doc_ratio, 4),
+        'amount_ratio': round(amount_ratio, 4),
+        'doc_num_ratio': round(doc_num_ratio, 4),
+        'has_start_balance': has_start_balance,
+        'has_end_balance': has_end_balance,
+        'score': round(score, 2),
+    }
+
+
+def _profile_cache_file() -> Path:
+    return _DATA_DIR / 'col_profiles.json'
+
+
+def _load_profile_cache() -> dict:
+    cache_file = _profile_cache_file()
+    if cache_file.exists():
+        try:
+            with open(cache_file, encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_profile_cache(cache: dict) -> None:
+    try:
+        with open(_profile_cache_file(), 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _make_parse_candidate(df: pd.DataFrame, parse_type: str, label: str, parser_id: str, bonus: float = 0.0) -> Optional[dict]:
+    if not _has_structured_rows(df):
+        return None
+    quality = _score_parsed_dataframe(df)
+    total_score = quality['score'] + bonus
+    df.attrs['parser_id'] = parser_id
+    df.attrs['parser_label'] = label
+    df.attrs['parser_score'] = total_score
+    doc_nums = set()
+    amounts = set()
+    if 'doc_num' in df.columns:
+        for value in df['doc_num'].fillna('').astype(str):
+            value = _normalize_doc_num(value.strip())
+            if value:
+                doc_nums.add(value)
+    for col in ('debit', 'credit'):
+        if col not in df.columns:
+            continue
+        for value in df[col]:
+            parsed = _to_float(value)
+            if parsed is not None:
+                amounts.add(round(abs(float(parsed)), 2))
+    return {
+        'df': df,
+        'type': parse_type,
+        'label': label,
+        'parser_id': parser_id,
+        'quality': quality,
+        'score': total_score,
+        'doc_nums': doc_nums,
+        'amounts': amounts,
+    }
+
+
+def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original_filename: str = ""):
+    eff_key = _effective_key(api_key)
+    display_df = parse_generic(path)
+    cache_name = original_filename or Path(path).name
+    ext = Path(path).suffix.lower()
+    ftype = detect_file_type(path)
+
+    header_text = ''
+    try:
+        raw = pd.read_excel(path, header=None, dtype=str, nrows=20)
+        header_text = ' '.join(str(v) for v in raw.values.flatten() if pd.notna(v))
+    except Exception:
+        pass
+    header_lower = header_text.lower()
+    is_sheet = ext in ('.xls', '.xlsx')
+    is_act_like = any(marker in header_lower for marker in (
+        'акт сверки', 'взаимных расчетов', 'взаиморасчетов', 'сальдо', 'по данным'
+    ))
+
+    candidates = []
+    seen_ids = set()
+
+    def add_candidate(parser_id: str, label: str, parse_type: str, parser_fn, bonus: float = 0.0):
+        if parser_id in seen_ids:
+            return
+        seen_ids.add(parser_id)
+        try:
+            df = parser_fn(path)
+        except Exception:
+            return
+        candidate = _make_parse_candidate(df, parse_type, label, parser_id, bonus)
+        if candidate:
+            candidates.append(candidate)
+
+    if ftype == 'proopt':
+        add_candidate('proopt', 'ПРООПТ', 'proopt', parse_proopt, bonus=22)
+    if ftype == 'emex':
+        add_candidate('emex', 'ЭМЕКС', 'emex', parse_emex, bonus=22)
+    if ftype == 'partner_ledger_act':
+        add_candidate('partner_ledger_act', 'Акт сверки (реестр проводок)', 'generic_detected', parse_partner_ledger_act, bonus=20)
+    if ftype == 'balance_state_act':
+        add_candidate('balance_state_act', 'Акт сверки (сальдо по операциям)', 'generic_detected', parse_balance_state_act, bonus=20)
+    if ftype == 'pdf_act':
+        add_candidate('pdf_act', 'PDF акт сверки', 'generic_detected', parse_pdf_act_to_structured, bonus=20)
+    if ftype == 'standard_act':
+        add_candidate('standard_act', 'Акт сверки (односторонний)', 'generic_detected', parse_standard_act, bonus=20)
+    if ftype == 'two_sided_act':
+        add_candidate('two_sided_left', 'Акт сверки (двусторонний)', 'generic_detected', lambda p: parse_two_sided_act(p, side='left'), bonus=22)
+        add_candidate('two_sided_right', 'Акт сверки (двусторонний, правая сторона)', 'generic_detected', lambda p: parse_two_sided_act(p, side='right'), bonus=18)
+    if ftype == 'counterparty':
+        add_candidate('counterparty', 'Акт сверки (контрагент)', 'generic_detected', parse_counterparty, bonus=18)
+
+    if is_sheet and is_act_like:
+        add_candidate('two_sided_left', 'Акт сверки (двусторонний)', 'generic_detected', lambda p: parse_two_sided_act(p, side='left'), bonus=6 if ftype != 'two_sided_act' else 0)
+        add_candidate('two_sided_right', 'Акт сверки (двусторонний, правая сторона)', 'generic_detected', lambda p: parse_two_sided_act(p, side='right'), bonus=4 if ftype != 'two_sided_act' else 0)
+        add_candidate('standard_act', 'Акт сверки (односторонний)', 'generic_detected', parse_standard_act, bonus=5 if ftype != 'standard_act' else 0)
+        add_candidate('counterparty', 'Акт сверки (контрагент)', 'generic_detected', parse_counterparty, bonus=5 if ftype != 'counterparty' else 0)
+        add_candidate('balance_state_act', 'Акт сверки (сальдо по операциям)', 'generic_detected', parse_balance_state_act, bonus=5 if ftype != 'balance_state_act' else 0)
+        add_candidate('partner_ledger_act', 'Акт сверки (реестр проводок)', 'generic_detected', parse_partner_ledger_act, bonus=5 if ftype != 'partner_ledger_act' else 0)
+
+    cache = _load_profile_cache()
+    cache_key = f"col_profile_{cache_name}"
+    profile = cache.get(cache_key)
+    profile_source = 'cache' if profile else ''
+    if profile is None and eff_key and is_sheet:
+        try:
+            logs.append(f"Пробую AI-структуру для {cache_name}...")
+            profile = claude_detect_columns(path, eff_key)
+            profile_source = 'ai'
+            if profile and profile.get('confidence') != 'low':
+                cache[cache_key] = profile
+                _save_profile_cache(cache)
+        except Exception:
+            profile = None
+    if profile and profile.get('confidence') != 'low':
+        try:
+            df = parse_with_profile(path, profile)
+            confidence = profile.get('confidence', 'medium')
+            label = 'Кеш профиля' if profile_source == 'cache' else f'Автодетект AI ({confidence})'
+            ai_bonus = 18 if profile_source == 'cache' else 10
+            candidate = _make_parse_candidate(df, 'generic_detected', label, f'ai_profile_{confidence}', ai_bonus)
+            if candidate:
+                candidate['profile'] = profile
+                candidates.append(candidate)
+        except Exception:
+            pass
+
+    candidates.sort(key=lambda c: (c['score'], c['quality']['rows']), reverse=True)
+    return display_df, candidates
+
+
+def _score_reconcile_candidate(result: dict, cand1: dict, cand2: dict) -> float:
+    discrepancies = result.get('discrepancies', [])
+    counts = {}
+    for disc in discrepancies:
+        counts[disc.get('type', '')] = counts.get(disc.get('type', ''), 0) + 1
+
+    summary = result.get('summary', {})
+    exact = int(summary.get('exact_matches', 0) or 0)
+    fuzzy = int(summary.get('fuzzy_count', 0) or 0)
+    critical = int(summary.get('critical_count', 0) or 0)
+    max_rows = max(len(cand1['df']), len(cand2['df']), 1)
+    coverage_ratio = (exact + fuzzy) / max_rows
+
+    score = 0.0
+    score += cand1['score'] + cand2['score']
+    score += coverage_ratio * 160
+    score += exact * 0.12 + fuzzy * 0.05
+    score -= len(discrepancies) * 4.5
+    score -= critical * 12
+    score -= counts.get('amount_diff', 0) * 10
+    score -= (counts.get('missing_in_counterparty', 0) + counts.get('missing_in_company', 0)) * 6
+    score -= counts.get('date_diff', 0) * 1.2
+
+    opening_diff = summary.get('opening_balance_difference')
+    closing_diff = summary.get('closing_balance_difference')
+    txn_diff = summary.get('transaction_net_difference')
+    if opening_diff is not None:
+        score += 10
+    if closing_diff is not None:
+        score += 18
+    if opening_diff is not None and closing_diff is not None and txn_diff is not None:
+        if abs(round(float(opening_diff) + float(txn_diff) - float(closing_diff), 2)) <= 0.01:
+            score += 18
+
+    return round(score, 2)
+
+
+def _quick_pair_score(cand1: dict, cand2: dict) -> float:
+    doc_overlap = len(cand1.get('doc_nums', set()) & cand2.get('doc_nums', set()))
+    amount_overlap = len(cand1.get('amounts', set()) & cand2.get('amounts', set()))
+    max_rows = max(len(cand1['df']), len(cand2['df']), 1)
+    row_ratio = min(len(cand1['df']), len(cand2['df'])) / max_rows
+
+    score = 0.0
+    score += cand1['score'] + cand2['score']
+    score += min(doc_overlap, 1000) * 0.45
+    score += min(amount_overlap, 1000) * 0.06
+    score += row_ratio * 20
+    if cand1['quality']['has_end_balance'] and cand2['quality']['has_end_balance']:
+        score += 14
+    if cand1['quality']['has_start_balance'] and cand2['quality']['has_start_balance']:
+        score += 8
+    return round(score, 2)
+
+
+def _select_best_candidate_pair(candidates1: list, candidates2: list, cfg: dict, logs: list):
+    if not candidates1 or not candidates2:
+        raise HTTPException(status_code=422, detail="Не удалось построить структурированные кандидаты для сверки.")
+
+    top1 = candidates1[:3]
+    top2 = candidates2[:3]
+    pair_queue = []
+    for cand1 in top1:
+        for cand2 in top2:
+            pair_queue.append({
+                'cand1': cand1,
+                'cand2': cand2,
+                'quick_score': _quick_pair_score(cand1, cand2),
+            })
+    pair_queue.sort(key=lambda item: item['quick_score'], reverse=True)
+    detailed_pairs = pair_queue[:1]
+    best = None
+
+    for pair in detailed_pairs:
+        cand1 = pair['cand1']
+        cand2 = pair['cand2']
+        result = _reconcile_structured(
+                cand1['df'], cand2['df'], cand1['type'], cand2['type'],
+                None, lambda *_: None, cfg
+        )
+        pair_score = _score_reconcile_candidate(result, cand1, cand2)
+        candidate_info = {
+            'cand1': cand1,
+            'cand2': cand2,
+            'result': result,
+            'score': pair_score,
+        }
+        if best is None or pair_score > best['score']:
+            best = candidate_info
+
+    logs.append(f"Быстро оценено комбинаций структур: {len(pair_queue)}")
+    logs.append(f"Детально проверено комбинаций: {len(detailed_pairs)}")
+    logs.append(
+        f"Выбрана лучшая структура: файл 1 -> {best['cand1']['label']}, "
+        f"файл 2 -> {best['cand2']['label']}"
+    )
+    return best
+
+
 def hybrid_reconcile(df1, df2, type1, type2, client, progress_cb=None, settings=None):
     def log(msg):
         if progress_cb: progress_cb(msg)
@@ -1363,95 +1686,28 @@ def _load_and_parse(path: str, logs: list, api_key: str = "", original_filename:
     временному пути на диске — иначе все файлы с именем file1.xlsx получали
     бы один и тот же профиль независимо от содержимого.
     """
-    eff_key = _effective_key(api_key)
-    display_df = parse_generic(path)
-    # Используем оригинальное имя для кеша; если не передано — имя tempfile
+    display_df, candidates = _collect_parse_candidates(path, logs, api_key, original_filename)
     cache_name = original_filename or Path(path).name
-
-    # ── 1. Определяем тип по содержимому ───────────────────────────
-    ftype = detect_file_type(path)
-
-    if ftype == 'proopt':
-        return parse_proopt(path), display_df, ftype, 'ПРООПТ'
-
-    if ftype == 'emex':
-        return parse_emex(path), display_df, ftype, 'ЭМЕКС'
-
-    if ftype == 'partner_ledger_act':
-        df = parse_partner_ledger_act(path)
-        if not df.empty:
-            return df, display_df, 'generic_detected', 'Акт сверки (реестр проводок)'
-
-    if ftype == 'balance_state_act':
-        df = parse_balance_state_act(path)
-        if not df.empty:
-            return df, display_df, 'generic_detected', 'Акт сверки (сальдо по операциям)'
-
-    if ftype == 'pdf_act':
-        return parse_pdf_act_to_structured(path), display_df, 'generic_detected', 'PDF акт сверки'
-
-    if ftype == 'standard_act':
-        df = parse_standard_act(path)
-        if not df.empty:
-            return df, display_df, 'generic_detected', 'Акт сверки (односторонний)'
-
-    if ftype == 'two_sided_act':
-        df = parse_two_sided_act(path)
-        if not df.empty:
-            return df, display_df, 'generic_detected', 'Акт сверки (двусторонний)'
-
-    if ftype == 'counterparty':
-        df = parse_counterparty(path)
-        if not df.empty:
-            return df, display_df, 'generic_detected', 'Акт сверки (контрагент)'
-
-    # ── 2. Неизвестный формат — кеш профиля или Claude ─────────────
-    cache_file = _DATA_DIR / 'col_profiles.json'
-    cache: dict = {}
-    if cache_file.exists():
-        try:
-            with open(cache_file, encoding='utf-8') as f:
-                cache = json.load(f)
-        except Exception:
-            pass
-    cache_key = f"col_profile_{cache_name}"
-    if cache_key in cache:
-        logs.append(f"Использую сохранённый профиль для {cache_name}")
-        profile = cache[cache_key]
-        df = parse_with_profile(path, profile)
-        if not df.empty:
-            return df, display_df, 'generic_detected', 'Кеш профиля'
-
-    if not eff_key:
-        raise HTTPException(status_code=422,
-            detail=f"Формат файла '{cache_name}' не распознан автоматически. "
-                   "Укажите API-ключ для определения структуры через AI.")
-
-    logs.append(f"Анализирую структуру {cache_name} через AI...")
-    profile = claude_detect_columns(path, eff_key)
-
-    if not profile or profile.get('confidence') == 'low':
-        raise HTTPException(status_code=422,
+    if not candidates:
+        eff_key = _effective_key(api_key)
+        if not eff_key:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Формат файла '{cache_name}' не распознан автоматически. "
+                       "Укажите API-ключ или настройте структуру вручную."
+            )
+        raise HTTPException(
+            status_code=422,
             detail=f"Не удалось определить структуру файла '{cache_name}'. "
-                   "Попробуйте другой файл или обратитесь к администратору.")
+                   "Попробуйте другой файл или настройку вручную."
+        )
 
-    df = parse_with_profile(path, profile)
-    if df.empty:
-        raise HTTPException(status_code=422,
-            detail=f"Файл '{cache_name}' распознан, но не содержит транзакций. "
-                   "Проверьте, что файл содержит данные сверки.")
-
-    # Кешируем профиль по оригинальному имени файла
-    cache[cache_key] = profile
-    try:
-        with open(cache_file, 'w', encoding='utf-8') as f:
-            json.dump(cache, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-    confidence = profile.get('confidence', 'medium')
-    logs.append(f"Структура {cache_name} определена (уверенность: {confidence}), строк: {len(df)}")
-    return df, display_df, 'generic_detected', f'Автодетект AI ({confidence})'
+    best = candidates[0]
+    logs.append(
+        f"Структура {cache_name} определена: {best['label']} "
+        f"(качество: {best['score']:.1f}, строк: {len(best['df'])})"
+    )
+    return best['df'], display_df, best['type'], best['label']
 
 
 def _df_to_records(df: pd.DataFrame):
@@ -1570,29 +1826,40 @@ async def reconcile(
 
         logs = []
         try:
-            df1p, df1d, ft1, lb1 = _load_and_parse(p1, logs, user_key, file1.filename)
+            df1d, candidates1 = _collect_parse_candidates(p1, logs, user_key, file1.filename)
         except HTTPException: raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Ошибка чтения файла 1 ({file1.filename}): {e}")
         try:
-            df2p, df2d, ft2, lb2 = _load_and_parse(p2, logs, user_key, file2.filename)
+            df2d, candidates2 = _collect_parse_candidates(p2, logs, user_key, file2.filename)
         except HTTPException: raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Ошибка чтения файла 2 ({file2.filename}): {e}")
-
-        logs.append(f"Файл 1: {file1.filename} → {lb1} ({len(df1p)} строк)")
-        logs.append(f"Файл 2: {file2.filename} → {lb2} ({len(df2p)} строк)")
 
         client = Anthropic(api_key=eff_key) if eff_key else None
 
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
+
+        def _pick_and_run():
+            best_pair = _select_best_candidate_pair(candidates1, candidates2, cfg, logs)
+            cand1 = best_pair['cand1']
+            cand2 = best_pair['cand2']
+            logs.append(f"Файл 1: {file1.filename} -> {cand1['label']} ({len(cand1['df'])} строк)")
+            logs.append(f"Файл 2: {file2.filename} -> {cand2['label']} ({len(cand2['df'])} строк)")
+            final_result = _reconcile_structured(
+                cand1['df'], cand2['df'], cand1['type'], cand2['type'],
+                client, lambda t: logs.append(t), cfg
+            )
+            return cand1, cand2, final_result
+
+        df1_choice, df2_choice, result = await loop.run_in_executor(
             ThreadPoolExecutor(max_workers=1),
-            lambda: hybrid_reconcile(df1p, df2p, ft1, ft2, client,
-                                     progress_cb=lambda t: logs.append(t), settings=cfg)
+            _pick_and_run
         )
+        df1p, ft1, lb1 = df1_choice['df'], df1_choice['type'], df1_choice['label']
+        df2p, ft2, lb2 = df2_choice['df'], df2_choice['type'], df2_choice['label']
 
         DCOLS = ['date_str','document','doc_num','debit','credit']
         COL_RU = {'date_str':'Дата','document':'Документ','doc_num':'Номер','debit':'Дебет','credit':'Кредит'}
@@ -1665,35 +1932,23 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
         path = os.path.join(tmpdir, f"preview{ext}")
         with open(path, "wb") as f: f.write(await file.read())
 
-        ftype = detect_file_type(path)
-        profile = None
         label = ""
         needs_manual = False
-
-        if ftype == "proopt":
-            df = parse_proopt(path); label = "ПРООПТ"
-        elif ftype == "emex":
-            df = parse_emex(path); label = "ЭМЕКС"
-        elif ftype == "pdf_act":
-            df = parse_pdf_act_to_structured(path); label = "PDF акт сверки"; ftype = "generic_detected"
-        elif ftype == "balance_state_act":
-            df = parse_balance_state_act(path); label = "Акт сверки (сальдо по операциям)"; ftype = "generic_detected"
-        elif ftype == "standard_act":
-            df = parse_standard_act(path); label = "Акт сверки (односторонний)"; ftype = "generic_detected"
-        elif ftype == "two_sided_act":
-            df = parse_two_sided_act(path); label = "Акт сверки (двусторонний)"; ftype = "generic_detected"
-        elif ftype == "counterparty":
-            df = parse_counterparty(path); label = "Акт сверки (контрагент)"; ftype = "generic_detected"
+        display_candidate = None
+        preview_logs = []
+        _, candidates = _collect_parse_candidates(path, preview_logs, user_key, file.filename)
+        if candidates:
+            display_candidate = candidates[0]
+            df = display_candidate['df']
+            label = display_candidate['label']
+            ftype = display_candidate['type']
+            profile = display_candidate.get('profile')
         else:
-            if eff_key:
-                profile = claude_detect_columns(path, eff_key)
-                if profile and profile.get("confidence") != "low":
-                    df = parse_with_profile(path, profile)
-                    label = "Автодетект AI"; ftype = "generic_detected"
-                else:
-                    df = parse_generic(path); label = "Требуется настройка"; needs_manual = True
-            else:
-                df = parse_generic(path); label = "Требуется настройка"; needs_manual = True
+            df = parse_generic(path)
+            label = "Требуется настройка"
+            ftype = detect_file_type(path)
+            profile = None
+            needs_manual = True
 
         DCOLS = ["date_str", "document", "doc_num", "debit", "credit"]
         COL_RU = {"date_str": "Дата", "document": "Документ", "doc_num": "Номер", "debit": "Дебет", "credit": "Кредит"}
