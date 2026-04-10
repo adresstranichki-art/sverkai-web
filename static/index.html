@@ -212,6 +212,11 @@
   .summary-detail-row .v.red { color: var(--red); }
   .summary-detail-row .v.warn { color: var(--yellow); }
   .summary-detail-hint { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .summary-suggest-card { background: #fff8e8; border: 1.5px solid #f2c66d; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  .summary-suggest-title { font-size: 12px; color: #9a6400; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
+  .summary-suggest-text { font-size: 14px; line-height: 1.55; color: var(--text); margin-bottom: 12px; }
+  .summary-suggest-meta { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+  .summary-suggest-actions { display: flex; flex-wrap: wrap; gap: 10px; }
   .ai-card { background: #f0f7f4; border: 1.5px solid #a8d4bc; border-radius: 10px; padding: 14px 18px; }
   .ai-card .ai-title { font-size: 12px; color: var(--green-dk); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
   .ai-text { font-size: 14px; line-height: 1.7; color: var(--text); }
@@ -482,6 +487,14 @@
     <div class="summary-pad">
       <div class="summary-grid" id="summary-cards"><div class="stat-card"><div class="label">Ожидание сверки</div><div class="value dark">—</div></div></div>
       <div class="debt-card" id="debt-card" style="display:none"><div class="debt-label" id="debt-label"></div><div class="period-label" id="period-label"></div></div>
+      <div class="summary-suggest-card" id="window-suggest-card" style="display:none">
+        <div class="summary-suggest-title">Рекомендация по окнам</div>
+        <div class="summary-suggest-text" id="window-suggest-text"></div>
+        <div class="summary-suggest-meta" id="window-suggest-meta"></div>
+        <div class="summary-suggest-actions">
+          <button class="btn btn-green" id="window-suggest-btn" type="button">Применить и пересчитать</button>
+        </div>
+      </div>
       <div class="summary-detail-grid" id="summary-detail-grid" style="display:none"></div>
       <div class="ai-card" id="ai-card" style="display:none"><div class="ai-title">🤖 Комментарий AI</div><div class="ai-text" id="ai-text"></div></div>
     </div>
@@ -1094,6 +1107,15 @@ async function runReconcile(){
   }
 }
 
+async function applySuggestedWindows(payDays, delDays){
+  const payEl=document.getElementById('cfg-dw-pay');
+  const delEl=document.getElementById('cfg-dw-del');
+  if(Number.isFinite(Number(payDays)))payEl.value=payDays;
+  if(Number.isFinite(Number(delDays)))delEl.value=delDays;
+  showToast(`Окна обновлены: оплаты ${payEl.value} дн., поставки ${delEl.value} дн. Пересчитываю...`,'warn');
+  await runReconcile();
+}
+
 function displayResults(data){
   lastResult=data;allDisc=data.discrepancies||[];
   renderTable(1,data.table1,data.highlight);renderTable(2,data.table2,data.highlight);
@@ -1104,6 +1126,7 @@ function displayResults(data){
   const cnt=data.summary.total_discrepancies;
   const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
   if(cnt===0)showToast('✓ Расхождений не обнаружено','success');
+  else if(data.summary.window_suggestion?.candidate_pairs)showToast('Найдены вероятные совпадения с разницей по датам. Можно расширить окна и пересчитать.','warn');
   else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
   switchTab('discrepancies');
   initTableResize(document.getElementById('disc-table-el'));
@@ -1151,11 +1174,49 @@ function renderSummary(s,file1Name='',file2Name=''){
   const dc=document.getElementById('debt-card');
   if(s.debt_label){dc.style.display='block';document.getElementById('debt-label').textContent=s.debt_label;document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:'';}
   else dc.style.display='none';
+  renderWindowSuggestion(s);
   renderSummaryDetails(s,file1Name,file2Name);
   const ac=document.getElementById('ai-card');
   if(s.ai_comment){ac.style.display='block';document.getElementById('ai-text').innerHTML=md(s.ai_comment);}
   else ac.style.display='none';
 }
+
+function renderWindowSuggestion(s){
+  const card=document.getElementById('window-suggest-card');
+  const textEl=document.getElementById('window-suggest-text');
+  const metaEl=document.getElementById('window-suggest-meta');
+  const btn=document.getElementById('window-suggest-btn');
+  const hint=s.window_suggestion;
+  if(!hint||!hint.candidate_pairs){
+    card.style.display='none';
+    btn.onclick=null;
+    return;
+  }
+
+  const detailParts=[];
+  if(hint.payment_pairs)detailParts.push(`${hint.payment_pairs} оплат`);
+  if(hint.delivery_pairs)detailParts.push(`${hint.delivery_pairs} поставок`);
+  if(hint.adjustment_pairs)detailParts.push(`${hint.adjustment_pairs} корректировок`);
+
+  const windowParts=[];
+  if((hint.recommended_payment_window||0)>(hint.current_payment_window||0))windowParts.push(`окно оплат до ${hint.recommended_payment_window} дн.`);
+  if((hint.recommended_delivery_window||0)>(hint.current_delivery_window||0))windowParts.push(`окно поставок до ${hint.recommended_delivery_window} дн.`);
+  if(!windowParts.length){
+    card.style.display='none';
+    btn.onclick=null;
+    return;
+  }
+
+  const lead=hint.candidate_pairs>=8
+    ? 'Обнаружено много операций с высокой вероятностью совпадения, которые отличаются датой отражения больше текущего допуска.'
+    : 'Обнаружены операции с высокой вероятностью совпадения, которые отличаются датой отражения больше текущего допуска.';
+  textEl.textContent=`${lead} Рекомендуем увеличить ${windowParts.join(' и ')} и повторить сверку.`;
+  metaEl.textContent=`Вероятных совпадений: ${hint.candidate_pairs}. ${detailParts.length?`Из них: ${detailParts.join(', ')}.`:''}${hint.max_shift_days?` Максимальный сдвиг дат: ${hint.max_shift_days} дн.`:''}`;
+  btn.textContent='Применить и пересчитать';
+  btn.onclick=()=>applySuggestedWindows(hint.recommended_payment_window,hint.recommended_delivery_window);
+  card.style.display='block';
+}
+
 function renderSummaryDetails(s,file1Name='',file2Name=''){
   const wrap=document.getElementById('summary-detail-grid');
   const hasBalances=[

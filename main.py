@@ -1113,6 +1113,90 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     missing_in_2 = missing_in_2[~missing_in_2['raw_row'].isin(ra1 | ra2)]
     missing_in_1 = missing_in_1[~missing_in_1['raw_row'].isin(rb1 | rb2)]
 
+    def _build_window_suggestion(side_a, side_b):
+        max_pay_scan = min(max(dw_payment + 7, 10), 14)
+        max_del_scan = min(max(dw_delivery + 7, 10), 14)
+        if max_pay_scan <= dw_payment and max_del_scan <= dw_delivery:
+            return None
+
+        candidates = []
+        used_b = set()
+        for _, ra in side_a.iterrows():
+            da = _md(ra)
+            cat_a = _cat(ra)
+            if cat_a == 'прочее' or da is None or pd.isna(da):
+                continue
+            best = None
+            best_score = None
+            norm_a = _normalize_doc_num(ra.get('doc_num')) if ra.get('doc_num') else ''
+            for col_a, col_b in [('debit', 'credit'), ('credit', 'debit'), ('debit', 'debit'), ('credit', 'credit')]:
+                va = _sf(ra.get(col_a))
+                if va is None:
+                    continue
+                for _, rb in side_b.iterrows():
+                    if rb['raw_row'] in used_b:
+                        continue
+                    text_b = f"{rb.get('doc_type', '')} {rb.get('document', '')}".lower()
+                    if any(term in text_b for term in PENALTY_KW):
+                        continue
+                    cat_b = _cat(rb)
+                    if cat_a != cat_b or cat_b == 'прочее':
+                        continue
+                    vb = _sf(rb.get(col_b))
+                    if vb is None or abs(abs(va) - abs(vb)) > 0.01:
+                        continue
+                    if cat_a == 'корректировка' and col_a != col_b and va * vb < 0:
+                        continue
+                    db = _md(rb)
+                    if db is None or pd.isna(db):
+                        continue
+                    dd = abs((da - db).days)
+                    base_dw = dw_payment if cat_a == 'оплата' else dw_delivery
+                    scan_dw = max_pay_scan if cat_a == 'оплата' else max_del_scan
+                    if dd <= base_dw or dd > scan_dw:
+                        continue
+                    norm_b = _normalize_doc_num(rb.get('doc_num')) if rb.get('doc_num') else ''
+                    same_doc = 1 if norm_a and norm_b and norm_a == norm_b else 0
+                    score = same_doc * 100 - dd
+                    if best_score is None or score > best_score:
+                        best_score = score
+                        best = (rb, dd, cat_a)
+            if best is None:
+                continue
+            rb, dd, cat_name = best
+            used_b.add(rb['raw_row'])
+            candidates.append({
+                'category': cat_name,
+                'days': int(dd),
+                'row_a': int(ra.get('raw_row', 0)),
+                'row_b': int(rb.get('raw_row', 0)),
+            })
+
+        if len(candidates) < 4:
+            return None
+
+        payment_pairs = [item for item in candidates if item['category'] == 'оплата']
+        delivery_pairs = [item for item in candidates if item['category'] == 'поставка']
+        adjustment_pairs = [item for item in candidates if item['category'] == 'корректировка']
+        non_payment_pairs = delivery_pairs + adjustment_pairs
+
+        rec_pay = max([dw_payment] + [item['days'] for item in payment_pairs])
+        rec_del = max([dw_delivery] + [item['days'] for item in non_payment_pairs])
+        if rec_pay <= dw_payment and rec_del <= dw_delivery:
+            return None
+
+        return {
+            'candidate_pairs': len(candidates),
+            'payment_pairs': len(payment_pairs),
+            'delivery_pairs': len(delivery_pairs),
+            'adjustment_pairs': len(adjustment_pairs),
+            'current_payment_window': dw_payment,
+            'current_delivery_window': dw_delivery,
+            'recommended_payment_window': int(rec_pay),
+            'recommended_delivery_window': int(rec_del),
+            'max_shift_days': max(item['days'] for item in candidates),
+        }
+
     log("Шаг 3/3: Формирование отчёта...")
 
     def _ga(r):
@@ -1261,6 +1345,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     else:
         debt_label = f'Расхождение конечного сальдо в пользу контрагента: {abs(net_period):,.2f} руб. (за период {period_str})'
 
+    window_suggestion = _build_window_suggestion(missing_in_2, missing_in_1)
     critical = sum(1 for d in discrepancies if d['severity'] == 'high')
     ai_comment = ''
     if client and discrepancies and cfg.get('ai_comment', True):
@@ -1291,7 +1376,8 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                     'period_mismatch': bool(period1_str and period2_str and period1_str != period2_str),
                     'opening_balance_difference': opening_diff,
                     'closing_balance_difference': closing_diff,
-                    'transaction_net_difference': transaction_net_diff},
+                    'transaction_net_difference': transaction_net_diff,
+                    'window_suggestion': window_suggestion},
         'matched1': list(matched1), 'matched2': list(matched2),
         'missing_rows1': list(missing_in_2['raw_row'].tolist()),
         'missing_rows2': list(missing_in_1['raw_row'].tolist()),

@@ -141,6 +141,11 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertEqual(len(result['discrepancies']), 50)
         self.assertAlmostEqual(result['summary']['opening_balance_difference'], 43163.54, places=2)
         self.assertAlmostEqual(result['summary']['closing_balance_difference'], 23934.04, places=2)
+        hint = result['summary'].get('window_suggestion')
+        self.assertIsNotNone(hint)
+        self.assertGreaterEqual(hint['candidate_pairs'], 5)
+        self.assertEqual(hint['current_delivery_window'], 3)
+        self.assertGreater(hint['recommended_delivery_window'], hint['current_delivery_window'])
 
     def test_proopt_registry_case(self):
         cand1, cand2, result = self._run_case(
