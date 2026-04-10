@@ -199,6 +199,19 @@
   .debt-card { background: var(--green-lt); border: 1.5px solid var(--green); border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; }
   .debt-card .debt-label { font-size: 15px; font-weight: 700; color: var(--green-dk); }
   .period-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .summary-detail-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 12px; margin-bottom: 12px; }
+  .summary-detail-card { background: #fff; border: 1.5px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .summary-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .summary-detail-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  .summary-detail-name { font-size: 13px; font-weight: 700; color: var(--text); text-align: right; max-width: 62%; word-break: break-word; }
+  .summary-detail-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid #eef1f5; }
+  .summary-detail-row:first-of-type { border-top: none; padding-top: 0; }
+  .summary-detail-row .k { font-size: 12px; color: var(--muted); }
+  .summary-detail-row .v { font-size: 14px; font-weight: 700; color: var(--text); text-align: right; }
+  .summary-detail-row .v.green { color: var(--green-dk); }
+  .summary-detail-row .v.red { color: var(--red); }
+  .summary-detail-row .v.warn { color: var(--yellow); }
+  .summary-detail-hint { margin-top: 8px; font-size: 12px; color: var(--muted); }
   .ai-card { background: #f0f7f4; border: 1.5px solid #a8d4bc; border-radius: 10px; padding: 14px 18px; }
   .ai-card .ai-title { font-size: 12px; color: var(--green-dk); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
   .ai-text { font-size: 14px; line-height: 1.7; color: var(--text); }
@@ -469,6 +482,7 @@
     <div class="summary-pad">
       <div class="summary-grid" id="summary-cards"><div class="stat-card"><div class="label">Ожидание сверки</div><div class="value dark">—</div></div></div>
       <div class="debt-card" id="debt-card" style="display:none"><div class="debt-label" id="debt-label"></div><div class="period-label" id="period-label"></div></div>
+      <div class="summary-detail-grid" id="summary-detail-grid" style="display:none"></div>
       <div class="ai-card" id="ai-card" style="display:none"><div class="ai-title">🤖 Комментарий AI</div><div class="ai-text" id="ai-text"></div></div>
     </div>
   </div>
@@ -1084,7 +1098,7 @@ function displayResults(data){
   lastResult=data;allDisc=data.discrepancies||[];
   renderTable(1,data.table1,data.highlight);renderTable(2,data.table2,data.highlight);
   renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
-  renderSummary(data.summary);
+  renderSummary(data.summary,data.file1_name,data.file2_name);
   if(isLoggedIn())loadHistory();
   document.getElementById('btn-export').disabled=false;
   const cnt=data.summary.total_discrepancies;
@@ -1127,7 +1141,7 @@ function renderDiscrepancies(discs,f1='',f2=''){
 }
 
 // ── Summary ───────────────────────────────────────────────────────
-function renderSummary(s){
+function renderSummary(s,file1Name='',file2Name=''){
   const critical=s.critical_count||0;
   document.getElementById('summary-cards').innerHTML=`
     <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${s.total_discrepancies>0?'red':''}">${s.total_discrepancies}</div></div>
@@ -1136,9 +1150,50 @@ function renderSummary(s){
     <div class="stat-card"><div class="label">Нечётких совпадений</div><div class="value">${s.fuzzy_count||0}</div></div>`;
   const dc=document.getElementById('debt-card');
   if(s.debt_label){dc.style.display='block';document.getElementById('debt-label').textContent=s.debt_label;document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:'';}
+  else dc.style.display='none';
+  renderSummaryDetails(s,file1Name,file2Name);
   const ac=document.getElementById('ai-card');
   if(s.ai_comment){ac.style.display='block';document.getElementById('ai-text').innerHTML=md(s.ai_comment);}
   else ac.style.display='none';
+}
+function renderSummaryDetails(s,file1Name='',file2Name=''){
+  const wrap=document.getElementById('summary-detail-grid');
+  const hasBalances=[
+    s.opening_balance_doc1,s.opening_balance_doc2,s.closing_balance_doc1,s.closing_balance_doc2,
+    s.opening_balance_difference,s.closing_balance_difference,s.transaction_net_difference
+  ].some(v=>v!==null&&v!==undefined&&Number.isFinite(Number(v)));
+  const hasPeriods=!!(s.period_doc1||s.period_doc2||s.period);
+  if(!hasBalances&&!hasPeriods){wrap.style.display='none';wrap.innerHTML='';return;}
+  wrap.style.display='grid';
+  wrap.innerHTML=`
+    <div class="summary-detail-card">
+      <div class="summary-detail-head">
+        <div class="summary-detail-title">Документ 1</div>
+        <div class="summary-detail-name">${esc(file1Name||'Документ организации')}</div>
+      </div>
+      <div class="summary-detail-row"><div class="k">Период</div><div class="v">${esc(s.period_doc1||s.period||'—')}</div></div>
+      <div class="summary-detail-row"><div class="k">Начальное сальдо</div><div class="v">${fmtMoney(s.opening_balance_doc1)}</div></div>
+      <div class="summary-detail-row"><div class="k">Конечное сальдо</div><div class="v">${fmtMoney(s.closing_balance_doc1)}</div></div>
+    </div>
+    <div class="summary-detail-card">
+      <div class="summary-detail-head">
+        <div class="summary-detail-title">Документ 2</div>
+        <div class="summary-detail-name">${esc(file2Name||'Документ контрагента')}</div>
+      </div>
+      <div class="summary-detail-row"><div class="k">Период</div><div class="v">${esc(s.period_doc2||s.period||'—')}</div></div>
+      <div class="summary-detail-row"><div class="k">Начальное сальдо</div><div class="v">${fmtMoney(s.opening_balance_doc2)}</div></div>
+      <div class="summary-detail-row"><div class="k">Конечное сальдо</div><div class="v">${fmtMoney(s.closing_balance_doc2)}</div></div>
+    </div>
+    <div class="summary-detail-card">
+      <div class="summary-detail-head">
+        <div class="summary-detail-title">Сравнение</div>
+        <div class="summary-detail-name">${s.period_mismatch?'Разный период':'Период совпадает'}</div>
+      </div>
+      <div class="summary-detail-row"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(s.opening_balance_difference)}">${fmtSignedMoney(s.opening_balance_difference)}</div></div>
+      <div class="summary-detail-row"><div class="k">Разница конечного сальдо</div><div class="v ${diffClass(s.closing_balance_difference)}">${fmtSignedMoney(s.closing_balance_difference)}</div></div>
+      <div class="summary-detail-row"><div class="k">Разница по операциям</div><div class="v ${diffClass(s.transaction_net_difference)}">${fmtSignedMoney(s.transaction_net_difference)}</div></div>
+      <div class="summary-detail-hint">${s.period_mismatch?'Периоды в шапках актов различаются и могут влиять на входящее сальдо.':'Период в шапках актов совпадает.'}</div>
+    </div>`;
 }
 function md(t){
   if(!t)return'';
@@ -1243,6 +1298,9 @@ function trunc(s,n){return s.length>n?s.slice(0,n)+'…':s;}
 function sn(n){const p=n.lastIndexOf('.');return p>0?n.slice(0,p):n;}
 function today(){return new Date().toISOString().slice(0,10).replace(/-/g,'');}
 function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className=`show ${type}`;setTimeout(()=>t.classList.remove('show'),4500);}
+function fmtMoney(v){const n=Number(v);if(!Number.isFinite(n))return '—';return `${n.toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2})} руб.`;}
+function fmtSignedMoney(v){const n=Number(v);if(!Number.isFinite(n))return '—';const abs=Math.abs(n).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});return `${n>0?'+':n<0?'−':''}${abs} руб.`;}
+function diffClass(v){const n=Number(v);if(!Number.isFinite(n)||Math.abs(n)<0.005)return 'green';return n>0?'red':'warn';}
 
 // Init disc table resize after page load
 document.addEventListener('DOMContentLoaded',()=>{
