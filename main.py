@@ -104,11 +104,15 @@ def _effective_key(user_key: str) -> str:
 # ════════════════════════════════════════════════════════════════════
 
 def _to_float(s: str) -> Optional[float]:
+    if s is None or (not isinstance(s, str) and pd.isna(s)):
+        return None
     if not s or s == 'nan':
         return None
     try:
         cleaned = str(s).replace('\u2212', '-').replace(',', '.').replace(' ', '').replace('\xa0', '')
         v = float(cleaned)
+        if pd.isna(v):
+            return None
         return None if v == 0 else v
     except Exception:
         return None
@@ -164,6 +168,103 @@ def _extract_doc_date(doc: str) -> Optional[pd.Timestamp]:
     return None
 
 
+def _extract_any_date(text: str) -> Optional[pd.Timestamp]:
+    if not text:
+        return None
+    match = re.search(r'(\d{2}\.\d{2}\.\d{2,4})', str(text))
+    if not match:
+        return None
+    return pd.to_datetime(match.group(1), dayfirst=True, errors='coerce')
+
+
+def _extract_period_bounds(text: str) -> tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+    if not text:
+        return (None, None)
+    compact = ' '.join(str(text).split())
+    for pattern in (
+        r'за период с (\d{2}\.\d{2}\.\d{4}) по (\d{2}\.\d{2}\.\d{4})',
+        r'за период[:\s]+(\d{2}\.\d{2}\.\d{4})\s*-\s*(\d{2}\.\d{2}\.\d{4})',
+    ):
+        match = re.search(pattern, compact, re.IGNORECASE)
+        if match:
+            return (
+                pd.to_datetime(match.group(1), dayfirst=True, errors='coerce'),
+                pd.to_datetime(match.group(2), dayfirst=True, errors='coerce'),
+            )
+    match = re.search(r'([1-4])\s*квартал\s*(\d{4})', compact, re.IGNORECASE)
+    if match:
+        quarter = int(match.group(1))
+        year = int(match.group(2))
+        month_from = (quarter - 1) * 3 + 1
+        month_to = month_from + 2
+        period_from = pd.Timestamp(year=year, month=month_from, day=1)
+        period_to = (pd.Timestamp(year=year, month=month_to, day=1) + pd.offsets.MonthEnd(1)).normalize()
+        return period_from, period_to
+    match = re.search(r'по состоянию на (\d{2}\.\d{2}\.\d{4})', compact, re.IGNORECASE)
+    if match:
+        return (None, pd.to_datetime(match.group(1), dayfirst=True, errors='coerce'))
+    return (None, None)
+
+
+def _extract_balance_meta(raw: pd.DataFrame) -> dict:
+    header_rows = min(8, len(raw))
+    header_text = ' '.join(
+        str(v) for v in raw.iloc[:header_rows].values.flatten()
+        if pd.notna(v) and str(v).strip() and str(v).strip().lower() != 'nan'
+    )
+    period_from, period_to = _extract_period_bounds(header_text)
+    start_balance = None
+    end_balance = None
+    start_row_text = ''
+    end_row_text = ''
+    for idx in range(len(raw)):
+        row_vals = [
+            str(v).strip() for v in raw.iloc[idx].tolist()
+            if pd.notna(v) and str(v).strip() and str(v).strip().lower() != 'nan'
+        ]
+        if not row_vals:
+            continue
+        row_text = ' '.join(row_vals).lower()
+        if start_balance is None and 'сальдо' in row_text and 'началь' in row_text:
+            for value in raw.iloc[idx].tolist():
+                amount = _to_float(value)
+                if amount is not None:
+                    start_balance = amount
+                    start_row_text = ' '.join(row_vals)
+                    break
+        if end_balance is None and 'сальдо' in row_text and 'конеч' in row_text:
+            for value in raw.iloc[idx].tolist():
+                amount = _to_float(value)
+                if amount is not None:
+                    end_balance = amount
+                    end_row_text = ' '.join(row_vals)
+                    break
+    if period_from is None:
+        period_from = _extract_any_date(start_row_text)
+    if period_to is None:
+        period_to = _extract_any_date(end_row_text)
+    meta = {}
+    if start_balance is not None:
+        meta['start_balance'] = float(start_balance)
+    if end_balance is not None:
+        meta['end_balance'] = float(end_balance)
+    if period_from is not None and pd.notna(period_from):
+        meta['period_from'] = period_from
+    if period_to is not None and pd.notna(period_to):
+        meta['period_to'] = period_to
+    return meta
+
+
+def _attach_meta(df: pd.DataFrame, **meta) -> pd.DataFrame:
+    for key, value in meta.items():
+        if value is None:
+            continue
+        if pd.isna(value):
+            continue
+        df.attrs[key] = value
+    return df
+
+
 # ════════════════════════════════════════════════════════════════════
 #  ПАРСЕРЫ
 # ════════════════════════════════════════════════════════════════════
@@ -171,6 +272,7 @@ def _extract_doc_date(doc: str) -> Optional[pd.Timestamp]:
 def parse_proopt(path: str) -> pd.DataFrame:
     raw = pd.read_excel(path, header=None, dtype=str)
     rows = []
+    meta = _extract_balance_meta(raw)
     for idx in range(9, len(raw)):
         row = raw.iloc[idx]
         date_val = str(row[1]).strip() if pd.notna(row[1]) else ''
@@ -193,7 +295,7 @@ def parse_proopt(path: str) -> pd.DataFrame:
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
                      'signed_amount': float(debit_val or 0) - float(credit_val or 0),
                      'raw_row': idx})
-    return pd.DataFrame(rows)
+    return _attach_meta(pd.DataFrame(rows), **meta)
 
 
 def parse_partner_ledger_act(path: str) -> pd.DataFrame:
@@ -201,6 +303,7 @@ def parse_partner_ledger_act(path: str) -> pd.DataFrame:
     engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
     raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
     rows = []
+    meta = _extract_balance_meta(raw)
     for idx in range(12, len(raw)):
         row = raw.iloc[idx]
         doc_val = str(row[2]).strip() if pd.notna(row[2]) else ''
@@ -238,12 +341,13 @@ def parse_partner_ledger_act(path: str) -> pd.DataFrame:
             'signed_amount': float(debit or 0) - float(credit or 0),
             'raw_row': idx,
         })
-    return pd.DataFrame(rows)
+    return _attach_meta(pd.DataFrame(rows), **meta)
 
 
 def parse_emex(path: str) -> pd.DataFrame:
     raw = pd.read_excel(path, header=None, dtype=str)
     rows = []
+    meta = _extract_balance_meta(raw)
     for idx in range(12, len(raw)):
         row = raw.iloc[idx]
         date_val = str(row[0]).strip() if pd.notna(row[0]) else ''
@@ -268,7 +372,7 @@ def parse_emex(path: str) -> pd.DataFrame:
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
                      'signed_amount': float(debit_val or 0) - float(credit_val or 0),
                      'raw_row': idx})
-    return pd.DataFrame(rows)
+    return _attach_meta(pd.DataFrame(rows), **meta)
 
 
 def parse_counterparty(path: str) -> pd.DataFrame:
@@ -277,6 +381,7 @@ def parse_counterparty(path: str) -> pd.DataFrame:
     raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
     date_pattern = re.compile(r'\((\d{2}\.\d{2}\.\d{4})')
     rows = []
+    meta = _extract_balance_meta(raw)
     for idx in range(6, len(raw)):
         row = raw.iloc[idx]
         doc_val = str(row[2]).strip() if pd.notna(row[2]) else ''
@@ -300,7 +405,7 @@ def parse_counterparty(path: str) -> pd.DataFrame:
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
                      'signed_amount': float(credit_val or 0) - float(debit_val or 0),
                      'raw_row': idx})
-    return pd.DataFrame(rows)
+    return _attach_meta(pd.DataFrame(rows), **meta)
 
 
 def parse_standard_act(path: str) -> pd.DataFrame:
@@ -310,6 +415,7 @@ def parse_standard_act(path: str) -> pd.DataFrame:
     engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
     raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
     date_re = re.compile(r'^\d{2}\.\d{2}\.\d{4}$')
+    meta = _extract_balance_meta(raw)
     # Автодетект колонок дебет/кредит: сканируем 30 строк, ищем два чередующихся числовых столбца.
     # Столбец «сумма документа» присутствует в каждой строке → его исключаем.
     debit_col, credit_col = 10, 12
@@ -356,7 +462,7 @@ def parse_standard_act(path: str) -> pd.DataFrame:
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
                      'signed_amount': float(debit or 0) - float(credit or 0),
                      'raw_row': idx})
-    return pd.DataFrame(rows)
+    return _attach_meta(pd.DataFrame(rows), **meta)
 
 
 def parse_two_sided_act(path: str) -> pd.DataFrame:
@@ -367,6 +473,7 @@ def parse_two_sided_act(path: str) -> pd.DataFrame:
     engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
     raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
     date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
+    meta = _extract_balance_meta(raw)
     # Автодетект колонок дебет/кредит: сканируем левую половину листа по нескольким строкам.
     date_col, doc_col, debit_col, credit_col = 1, 2, 4, 6
     from collections import Counter
@@ -420,7 +527,7 @@ def parse_two_sided_act(path: str) -> pd.DataFrame:
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
                      'signed_amount': float(credit or 0) - float(debit or 0),
                      'raw_row': idx})
-    return pd.DataFrame(rows)
+    return _attach_meta(pd.DataFrame(rows), **meta)
 
 
 def _parse_pdf_generic(path: str) -> pd.DataFrame:
@@ -762,6 +869,12 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             return d
         return r.get('date')
 
+    def _meta(df, key):
+        try:
+            return df.attrs.get(key)
+        except Exception:
+            return None
+
     _sign_pat = re.compile(
         r'корректировк|ксф|возврат|сторно|исправлени|аннулирован|зачет|зачёт|'
         r'adjustment|correction|credit.?note|reversal|refund|write.?off|reverse', re.IGNORECASE)
@@ -978,16 +1091,50 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             total += _sfz(r.get('debit')) - _sfz(r.get('credit'))
         return total
 
-    net_period = round(_balance_effect(df1) - _balance_effect(df2), 2)
+    net_period_txn = round(_balance_effect(df1) - _balance_effect(df2), 2)
+    opening_diff = None
+    closing_diff = None
+    start1 = _meta(df1, 'start_balance')
+    start2 = _meta(df2, 'start_balance')
+    end1 = _meta(df1, 'end_balance')
+    end2 = _meta(df2, 'end_balance')
+    if start1 is not None and start2 is not None:
+        opening_diff = round(float(start1) - float(start2), 2)
+    if end1 is not None and end2 is not None:
+        closing_diff = round(float(end1) - float(end2), 2)
+
+    net_period = net_period_txn
+    if closing_diff is not None:
+        if abs(abs(net_period_txn) - abs(closing_diff)) <= 0.01 and abs(net_period_txn) >= 0.01:
+            net_period = abs(closing_diff) if net_period_txn > 0 else -abs(closing_diff)
+        else:
+            net_period = closing_diff
     if abs(net_period) < 0.01:
         net_period = 0.0
 
-    all_dates = []
-    for df in (df1, df2):
-        if 'date' in df.columns:
-            all_dates += [d for d in df['date'] if pd.notna(d)]
-    period_str = (f"{min(all_dates).strftime('%d.%m.%Y')} - {max(all_dates).strftime('%d.%m.%Y')}"
-                  if all_dates else '')
+    period1_from = _meta(df1, 'period_from')
+    period1_to = _meta(df1, 'period_to')
+    period2_from = _meta(df2, 'period_from')
+    period2_to = _meta(df2, 'period_to')
+
+    def _fmt_period(start, end):
+        if start is not None and pd.notna(start) and end is not None and pd.notna(end):
+            return f"{start.strftime('%d.%m.%Y')} - {end.strftime('%d.%m.%Y')}"
+        if end is not None and pd.notna(end):
+            return end.strftime('%d.%m.%Y')
+        return ''
+
+    period1_str = _fmt_period(period1_from, period1_to)
+    period2_str = _fmt_period(period2_from, period2_to)
+    if period1_str and period2_str:
+        period_str = period1_str if period1_str == period2_str else f"Док.1: {period1_str}; Док.2: {period2_str}"
+    else:
+        all_dates = []
+        for df in (df1, df2):
+            if 'date' in df.columns:
+                all_dates += [d for d in df['date'] if pd.notna(d)]
+        period_str = (f"{min(all_dates).strftime('%d.%m.%Y')} - {max(all_dates).strftime('%d.%m.%Y')}"
+                      if all_dates else '')
 
     if abs(net_period) < 0.01:
         debt_label = f'Взаиморасчёты совпадают (за период {period_str})' if period_str else 'Взаиморасчёты совпадают'
@@ -1016,7 +1163,10 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         'summary': {'total_discrepancies': len(discrepancies), 'critical_count': critical,
                     'fuzzy_count': len(fuzzy_matches), 'exact_matches': len(exact_pairs),
                     'net_period': net_period, 'debt_label': debt_label,
-                    'ai_comment': ai_comment, 'period': period_str},
+                    'ai_comment': ai_comment, 'period': period_str,
+                    'opening_balance_difference': opening_diff,
+                    'closing_balance_difference': closing_diff,
+                    'transaction_net_difference': net_period_txn},
         'matched1': list(matched1), 'matched2': list(matched2),
         'missing_rows1': list(missing_in_2['raw_row'].tolist()),
         'missing_rows2': list(missing_in_1['raw_row'].tolist()),
