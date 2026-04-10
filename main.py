@@ -122,6 +122,25 @@ def _normalize_doc_num(num: str) -> str:
     return cleaned.lower()
 
 
+_DOC_NUM_PATTERNS = (
+    re.compile(r'(?:сч[её]т[-\s]?фактура|упд)\s*[№#]?\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
+    re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от', re.IGNORECASE),
+    re.compile(r'(?:№|#|No)\s*(М-\d+|\d[\w/-]*)', re.IGNORECASE),
+    re.compile(r'\b(\d{4,})\b'),
+)
+
+
+def _extract_doc_num(doc: str) -> Optional[str]:
+    if not doc:
+        return None
+    for pattern in _DOC_NUM_PATTERNS:
+        for match in pattern.finditer(str(doc)):
+            num = _normalize_doc_num(match.group(1))
+            if num:
+                return num
+    return None
+
+
 # ════════════════════════════════════════════════════════════════════
 #  ПАРСЕРЫ
 # ════════════════════════════════════════════════════════════════════
@@ -196,10 +215,7 @@ def parse_counterparty(path: str) -> pd.DataFrame:
         m_date = date_pattern.search(doc_val)
         date_str = m_date.group(1) if m_date else ''
         date_parsed = pd.to_datetime(date_str, dayfirst=True, errors='coerce') if date_str else pd.NaT
-        m_num = re.search(r'[№#](\d+)', doc_val)
-        if not m_num:
-            m_num = re.search(r',(\d{4,})\)', doc_val)
-        doc_num = _normalize_doc_num(m_num.group(1)) if m_num else None
+        doc_num = _extract_doc_num(doc_val)
         rows.append({'date': date_parsed, 'date_str': date_str, 'document': doc_val,
                      'doc_num': doc_num, 'debit': _to_float(debit), 'credit': _to_float(credit), 'raw_row': idx})
     return pd.DataFrame(rows)
@@ -212,16 +228,6 @@ def parse_standard_act(path: str) -> pd.DataFrame:
     engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
     raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
     date_re = re.compile(r'^\d{2}\.\d{2}\.\d{4}$')
-    _DOC_NUM_PATTERNS = [
-        re.compile(r'[No№#]\s*(М-\d+|\d[\w/-]*)'),
-        re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от'),
-        re.compile(r'\b(\d{4,})\b'),
-    ]
-    def _exnum(doc):
-        for p in _DOC_NUM_PATTERNS:
-            m = p.search(doc)
-            if m: return _normalize_doc_num(m.group(1))
-        return None
     # Автодетект колонок дебет/кредит: сканируем 30 строк, ищем два чередующихся числовых столбца.
     # Столбец «сумма документа» присутствует в каждой строке → его исключаем.
     debit_col, credit_col = 10, 12
@@ -262,7 +268,7 @@ def parse_standard_act(path: str) -> pd.DataFrame:
         credit = _to_float(c_raw)
         if debit is None and credit is None: continue
         date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
-        doc_num = _exnum(doc_val)
+        doc_num = _extract_doc_num(doc_val)
         rows.append({'date': date_parsed, 'date_str': date_val, 'document': doc_val,
                      'doc_num': doc_num, 'debit': debit, 'credit': credit, 'raw_row': idx})
     return pd.DataFrame(rows)
@@ -276,16 +282,6 @@ def parse_two_sided_act(path: str) -> pd.DataFrame:
     engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
     raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
     date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
-    _DOC_NUM_PATTERNS = [
-        re.compile(r'[No№#]\s*(М-\d+|\d[\w/-]*)'),
-        re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от'),
-        re.compile(r'\b(\d{4,})\b'),
-    ]
-    def _exnum(doc):
-        for p in _DOC_NUM_PATTERNS:
-            m = p.search(doc)
-            if m: return _normalize_doc_num(m.group(1))
-        return None
     # Автодетект колонок дебет/кредит: сканируем левую половину листа по нескольким строкам.
     date_col, doc_col, debit_col, credit_col = 1, 2, 4, 6
     from collections import Counter
@@ -333,7 +329,7 @@ def parse_two_sided_act(path: str) -> pd.DataFrame:
             except Exception:
                 pass
         date_str = date_parsed.strftime('%d.%m.%Y') if pd.notna(date_parsed) else date_val
-        doc_num = _exnum(doc_val)
+        doc_num = _extract_doc_num(doc_val)
         rows.append({'date': date_parsed, 'date_str': date_str, 'document': doc_val,
                      'doc_num': doc_num, 'debit': debit, 'credit': credit, 'raw_row': idx})
     return pd.DataFrame(rows)
@@ -463,17 +459,6 @@ def parse_with_profile(path: str, profile: dict) -> pd.DataFrame:
     amount_col   = profile.get('amount_col')
     amount_sign  = profile.get('amount_sign', 'unknown')
     footer_kws   = [k.lower() for k in profile.get('footer_keywords', [])]
-    _DOC_NUM_PATTERNS = [
-        re.compile(r'[No№#]\s*(\d[\w/-]*)'),
-        re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от'),
-        re.compile(r'[-/](\d{3,})\b'),
-        re.compile(r'\b(\d{4,})\b'),
-    ]
-    def _extract_doc_num_from_text(doc_val: str) -> Optional[str]:
-        for pattern in _DOC_NUM_PATTERNS:
-            m = pattern.search(doc_val)
-            if m: return _normalize_doc_num(m.group(1))
-        return None
     rows = []
     for idx in range(data_start, len(raw)):
         row = raw.iloc[idx]
@@ -485,7 +470,7 @@ def parse_with_profile(path: str, profile: dict) -> pd.DataFrame:
         if any(row_text.startswith(kw) or kw in row_text[:40] for kw in footer_kws): break
         doc_num = (_normalize_doc_num(str(row[doc_num_col]).strip())
                    if doc_num_col is not None and pd.notna(row[doc_num_col])
-                   else _extract_doc_num_from_text(doc_val))
+                   else _extract_doc_num(doc_val))
         doc_type = str(row[doc_type_col]).strip() if doc_type_col is not None and pd.notna(row[doc_type_col]) else ''
         date_p = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
         if amount_col is not None:
@@ -692,7 +677,32 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         except: pass
         return None
 
-    exact_pairs, amount_diff_pairs = [], []
+    _sign_pat = re.compile(
+        r'корректировк|ксф|возврат|сторно|исправлени|аннулирован|зачет|зачёт|'
+        r'adjustment|correction|credit.?note|reversal|refund|write.?off|reverse', re.IGNORECASE)
+
+    def _row_side(r):
+        if _sf(r.get('debit')) is not None: return 'debit'
+        if _sf(r.get('credit')) is not None: return 'credit'
+        return None
+
+    def _has_sign_hint(r):
+        text = f"{r.get('doc_type', '')} {r.get('document', '')}"
+        return bool(_sign_pat.search(text))
+
+    def _has_negative_amount(r):
+        return any((_sf(r.get(col)) or 0) < 0 for col in ('debit', 'credit'))
+
+    def _is_sign_mismatch_pair(r1, r2):
+        v1 = _sf(r1.get('debit')) or _sf(r1.get('credit'))
+        v2 = _sf(r2.get('debit')) or _sf(r2.get('credit'))
+        if v1 is None or v2 is None or abs(abs(v1) - abs(v2)) > 0.01:
+            return False
+        if not (_has_sign_hint(r1) or _has_sign_hint(r2) or _has_negative_amount(r1) or _has_negative_amount(r2)):
+            return False
+        return (v1 * v2 < 0) or (_row_side(r1) != _row_side(r2))
+
+    exact_pairs, amount_diff_pairs, seed_sign_mismatch_pairs = [], [], []
     for _, r1 in df1.iterrows():
         norm1 = _normalize_doc_num(r1['doc_num']) if r1.get('doc_num') else None
         if not norm1 or norm1 not in idx2_by_docnum: continue
@@ -711,7 +721,10 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                 amount_diff_pairs.append((r1, best, sum1, sum2))
         if best is not None:
             matched1.add(r1['raw_row']); matched2.add(best['raw_row'])
-            exact_pairs.append((r1, best))
+            if _is_sign_mismatch_pair(r1, best):
+                seed_sign_mismatch_pairs.append((r1, best))
+            else:
+                exact_pairs.append((r1, best))
 
     log("Шаг 2/3: Нечёткое сопоставление...")
 
@@ -764,10 +777,6 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     missing_in_2 = df1[~df1['raw_row'].isin(matched1)].copy()
     missing_in_1 = df2[~df2['raw_row'].isin(matched2)].copy()
 
-    _sign_pat = re.compile(
-        r'корректировк|ксф|возврат|сторно|исправлени|аннулирован|зачет|зачёт|'
-        r'adjustment|correction|credit.?note|reversal|refund|write.?off|reverse', re.IGNORECASE)
-
     def _find_smm(side_a, side_b, col_a, col_b):
         pairs, rem_a, used_b = [], set(), set()
         sa = side_a[side_a['document'].str.contains(_sign_pat, na=False) & side_a[col_a].notna()]
@@ -790,7 +799,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     m2r = missing_in_2[~missing_in_2['raw_row'].isin(ra1)]
     m1r = missing_in_1[~missing_in_1['raw_row'].isin(rb1)]
     p2, ra2, rb2 = _find_smm(m2r, m1r, 'debit', 'credit')
-    smm_pairs = p1 + p2
+    smm_pairs = seed_sign_mismatch_pairs + p1 + p2
     missing_in_2 = missing_in_2[~missing_in_2['raw_row'].isin(ra1 | ra2)]
     missing_in_1 = missing_in_1[~missing_in_1['raw_row'].isin(rb1 | rb2)]
 
@@ -869,12 +878,15 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         except: pass
         return 0.0
 
-    net_period = 0.0
-    for _, r in missing_in_2.iterrows(): net_period += _sfz(r.get('credit')) - _sfz(r.get('debit'))
-    for _, r in missing_in_1.iterrows(): net_period += abs(_sfz(r.get('debit'))) + _sfz(r.get('credit'))
-    for ro, rc in smm_pairs:
-        net_period += abs(_sfz(ro.get('credit')) or _sfz(ro.get('debit'))) * 2
-    for r1, r2, s1, s2 in amount_diff_pairs: net_period += (abs(s2) - abs(s1))
+    def _balance_effect(df):
+        total = 0.0
+        for _, r in df.iterrows():
+            total += _sfz(r.get('debit')) - _sfz(r.get('credit'))
+        return total
+
+    net_period = round(_balance_effect(df1) - _balance_effect(df2), 2)
+    if abs(net_period) < 0.01:
+        net_period = 0.0
 
     all_dates = []
     for df in (df1, df2):
@@ -886,9 +898,9 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     if abs(net_period) < 0.01:
         debt_label = f'Взаиморасчёты совпадают (за период {period_str})' if period_str else 'Взаиморасчёты совпадают'
     elif net_period > 0:
-        debt_label = f'Организация должна контрагенту: {net_period:,.2f} руб. (за период {period_str})'
+        debt_label = f'Расхождение конечного сальдо в пользу организации: {net_period:,.2f} руб. (за период {period_str})'
     else:
-        debt_label = f'Контрагент должен организации: {abs(net_period):,.2f} руб. (за период {period_str})'
+        debt_label = f'Расхождение конечного сальдо в пользу контрагента: {abs(net_period):,.2f} руб. (за период {period_str})'
 
     critical = sum(1 for d in discrepancies if d['severity'] == 'high')
     ai_comment = ''
