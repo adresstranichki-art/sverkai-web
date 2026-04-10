@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SverkAI — Сверка актов</title>
+<style>
+  :root {
+    --green:    #00a854;
+    --green-dk: #007a3d;
+    --green-lt: #e8f5e9;
+    --black:    #1a2e1a;
+    --white:    #ffffff;
+    --bg:       #f0f2f5;
+    --panel:    #ffffff;
+    --border:   #c8d0d8;
+    --text:     #1a1a2e;
+    --muted:    #5a6472;
+    --red:      #d32f2f;
+    --yellow:   #e65100;
+    --blue:     #1565c0;
+    --shadow:   0 1px 5px rgba(0,0,0,.10);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
+
+  /* ── Header ── */
+  header { background: var(--black); border-bottom: 3px solid var(--green); padding: 0 24px; height: 58px;
+           display: flex; align-items: center; justify-content: space-between;
+           position: sticky; top: 0; z-index: 200; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+  .logo-icon { width: 28px; height: 28px; flex-shrink: 0; }
+  .logo-text { font-size: 22px; font-weight: 800; letter-spacing: .5px; color: var(--white); }
+  .logo-text em { color: var(--green); font-style: normal; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; background: #888; flex-shrink: 0; }
+  .status-dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-text { font-size: 13px; color: rgba(255,255,255,.75); }
+
+  /* ── Auth in header ── */
+  .auth-area { display: flex; align-items: center; gap: 8px; border-left: 1px solid rgba(255,255,255,.15); padding-left: 14px; }
+  .auth-badge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+  .auth-badge.guest { background: rgba(255,255,255,.1); color: rgba(255,255,255,.6); }
+  .auth-badge.authed { background: rgba(0,168,84,.25); color: #6dffa8; border: 1px solid rgba(0,168,84,.4); }
+  .btn-login  { background: var(--green); color: white; border: none; border-radius: 7px; padding: 7px 14px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background .15s; }
+  .btn-login:hover { background: var(--green-dk); }
+  .btn-logout { background: rgba(255,255,255,.1); color: rgba(255,255,255,.75); border: 1px solid rgba(255,255,255,.2); border-radius: 7px; padding: 6px 12px; font-size: 12px; cursor: pointer; transition: all .15s; }
+  .btn-logout:hover { background: rgba(211,47,47,.25); border-color: rgba(211,47,47,.4); color: #ff8a8a; }
+
+  main { padding: 18px 24px; max-width: 1800px; margin: 0 auto; }
+
+  /* ── Upload ── */
+  .upload-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: start; margin-bottom: 14px; }
+  .upload-card { background: var(--panel); border: 1.5px solid var(--border); border-radius: 10px; padding: 14px; box-shadow: var(--shadow); }
+  .card-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 10px; }
+  .drop-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 16px; text-align: center;
+               cursor: pointer; transition: all .2s; min-height: 80px; display: flex; flex-direction: column;
+               align-items: center; justify-content: center; gap: 5px; background: var(--bg); }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--green); background: var(--green-lt); }
+  .drop-zone .icon { font-size: 28px; }
+  .drop-zone p { font-size: 13px; color: var(--muted); }
+  .drop-zone .hint { font-size: 11px; color: #aaa; }
+  .file-status { font-size: 12px; margin-top: 8px; display: flex; align-items: flex-start; gap: 6px; font-weight: 600; min-height: 20px; }
+  .file-status.ok   { color: var(--green); }
+  .file-status.warn { color: var(--yellow); }
+  .file-status.loading { color: var(--muted); }
+  .card-btns { display: flex; gap: 8px; margin-top: 10px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: none; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all .15s; white-space: nowrap; }
+  .btn-green { background: var(--green); color: white; }
+  .btn-green:hover { background: var(--green-dk); }
+  .btn-green:disabled { background: #b2d8c4; color: white; cursor: not-allowed; }
+  .btn-ghost { background: var(--panel); color: var(--text); border: 1.5px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--green); color: var(--green); }
+  .btn-ghost:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-outline { background: transparent; color: var(--muted); border: 1.5px solid var(--border); font-size: 12px; padding: 5px 12px; }
+  .btn-outline:hover { border-color: var(--green-dk); color: var(--green-dk); }
+  .actions-col { display: flex; flex-direction: column; gap: 10px; padding-top: 30px; }
+  #btn-run { width: 210px; height: 46px; font-size: 15px; box-shadow: 0 2px 10px rgba(0,168,84,.3); }
+  #btn-export { width: 210px; height: 40px; }
+
+  /* ── Guest notice ── */
+  .guest-notice { background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px; padding: 10px 16px;
+                  font-size: 13px; color: #7a5800; display: none; margin-bottom: 14px; }
+  .guest-notice a { color: var(--green-dk); font-weight: 700; cursor: pointer; text-decoration: underline; }
+
+  /* ── Settings ── */
+  .settings-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+                  padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center;
+                  gap: 16px; flex-wrap: wrap; box-shadow: var(--shadow); }
+  .settings-title { font-size: 12px; font-weight: 700; color: var(--green); text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+  .settings-bar label { font-size: 13px; color: var(--text); display: flex; align-items: center; gap: 6px; cursor: pointer; position: relative; }
+  .settings-bar label:hover .tip { display: block; }
+  .settings-bar input[type=checkbox] { accent-color: var(--green); width: 15px; height: 15px; }
+  .settings-bar input[type=number] { background: var(--bg); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 3px 8px; width: 56px; font-size: 13px; }
+  .tip { display: none; position: absolute; bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%);
+         background: #1a1a2e; color: white; font-size: 11px; padding: 5px 9px; border-radius: 5px;
+         white-space: nowrap; z-index: 100; pointer-events: none; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  .tip::after { content:''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+                border: 5px solid transparent; border-top-color: #1a1a2e; }
+
+  /* ── Progress ── */
+  #progress-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; box-shadow: var(--shadow); }
+  #progress-bar { height: 3px; background: var(--green); width: 0; transition: width .3s; border-radius: 2px; margin-bottom: 5px; }
+  #progress-text { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .spinner { width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin .6s linear infinite; display: none; }
+  .spinner.active { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Tabs ── */
+  .tab-bar { display: flex; gap: 2px; border-bottom: 2px solid var(--border); background: var(--panel); border-radius: 8px 8px 0 0; padding: 0 8px; box-shadow: var(--shadow); }
+  .tab { padding: 11px 18px; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; user-select: none; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--green); border-bottom-color: var(--green); }
+  .tab-badge { background: var(--red); color: white; border-radius: 10px; padding: 1px 7px; font-size: 11px; margin-left: 5px; }
+  .tab-content { display: none; background: var(--panel); border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px; box-shadow: var(--shadow); }
+  .tab-content.active { display: block; }
+
+  /* ── Compare tables ── */
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
+  .table-panel { border: 1.5px solid var(--border); border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); }
+  .table-header { background: var(--black); padding: 9px 12px; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: white; }
+  .table-header .title { display: flex; align-items: center; gap: 8px; overflow: hidden; min-width: 0; }
+  .table-header .title span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .col-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .search-box { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); border-radius: 5px; color: white; padding: 5px 10px; font-size: 12px; width: 150px; flex-shrink: 0; }
+  .search-box::placeholder { color: rgba(255,255,255,.5); }
+  .search-box:focus { outline: none; border-color: var(--green); }
+  .table-wrap { overflow-x: auto; overflow-y: auto; max-height: 400px; background: white; }
+
+  .data-table { table-layout: fixed; width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
+  .data-table th {
+    background: #eef1f5; color: var(--muted); font-weight: 700;
+    padding: 8px 10px; text-align: left;
+    position: sticky; top: 0; z-index: 2;
+    border-bottom: 2px solid var(--border);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    min-width: 50px; cursor: default; user-select: none;
+    border-right: 2px solid var(--border);
+  }
+  .rh { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; cursor: col-resize; background: transparent; z-index: 3; }
+  .rh:hover, .rh.dragging { background: var(--green); opacity: .6; }
+  .data-table th { position: relative; }
+  .data-table td {
+    padding: 6px 10px; border-bottom: 1px solid #eee; border-right: 1px solid #f0f0f0;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 0;
+  }
+  tr:hover td { background: rgba(0,168,84,.04); }
+  tr.row-missing td { background: #ffc9c9 !important; }
+  tr.row-amount td  { background: #ffe09a !important; }
+  tr.row-sign td    { background: #a8d4ff !important; }
+  tr.row-date td    { background: #e0e0e0 !important; }
+  tr.row-missing:hover td { background: #ffb3b3 !important; }
+  tr.row-amount:hover td  { background: #ffd06e !important; }
+  tr.row-sign:hover td    { background: #8ec4ff !important; }
+  tr.row-date:hover td    { background: #d0d0d0 !important; }
+  .empty-state { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; background: white; }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding: 10px 14px 0; }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-box { width: 14px; height: 14px; border-radius: 3px; }
+
+  /* ── Discrepancies ── */
+  .disc-filter { padding: 10px 12px; display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: #fafafa; align-items: center; }
+  .disc-filter-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 4px; }
+  .filter-btn { padding: 5px 13px; border-radius: 20px; border: 1.5px solid var(--border); background: white; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; }
+  .filter-btn:hover { border-color: var(--text); color: var(--text); }
+  .filter-btn.active { border-color: var(--green); color: var(--green-dk); background: var(--green-lt); }
+  .filter-btn-all { background: var(--black); color: white; border-color: var(--black); }
+  .filter-btn-all:hover { background: #2d3a2d; border-color: #2d3a2d; color: white; }
+  .filter-btn-all.active { background: var(--green); border-color: var(--green); color: white; }
+  .disc-wrap { overflow: auto; }
+
+  .disc-table { table-layout: fixed; width: max-content; min-width: 100%; border-collapse: collapse; font-size: 13px; }
+  .disc-table th { background: #eef1f5; color: var(--muted); font-weight: 700; padding: 9px 13px; text-align: left;
+                   position: sticky; top: 0; border-bottom: 2px solid var(--border);
+                   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+                   border-right: 2px solid var(--border); min-width: 50px; cursor: default; user-select: none; position: relative; }
+  .disc-table td { padding: 8px 13px; border-bottom: 1px solid #eee; border-right: 1px solid #f0f0f0;
+                   overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 0; }
+  .disc-table tr:hover td { background: rgba(0,168,84,.04); }
+  .disc-table tr.sev-high td   { border-left: 3px solid var(--red); }
+  .disc-table tr.sev-medium td { border-left: 3px solid #f59f00; }
+  .disc-table tr.sev-low td    { border-left: 3px solid #b2bec3; }
+  .disc-table tr.type-sign td  { border-left: 3px solid var(--blue); }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+  .badge-red    { background: #ffebee; color: var(--red); }
+  .badge-yellow { background: #fff8e1; color: var(--yellow); }
+  .badge-blue   { background: #e3f2fd; color: var(--blue); }
+  .badge-gray   { background: #f0f0f0; color: var(--muted); }
+
+  /* ── Summary ── */
+  .summary-pad { padding: 16px; }
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 12px; margin-bottom: 14px; }
+  .stat-card { background: var(--bg); border: 1.5px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+  .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+  .stat-card .value { font-size: 32px; font-weight: 700; color: var(--green); }
+  .stat-card .value.red { color: var(--red); }
+  .stat-card .value.dark { color: var(--text); font-size: 22px; }
+  .debt-card { background: var(--green-lt); border: 1.5px solid var(--green); border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; }
+  .debt-card .debt-label { font-size: 15px; font-weight: 700; color: var(--green-dk); }
+  .period-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .ai-card { background: #f0f7f4; border: 1.5px solid #a8d4bc; border-radius: 10px; padding: 14px 18px; }
+  .ai-card .ai-title { font-size: 12px; color: var(--green-dk); font-weight: 700; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
+  .ai-text { font-size: 14px; line-height: 1.7; color: var(--text); }
+  .ai-text h1,.ai-text h2,.ai-text h3 { font-size: 15px; font-weight: 700; margin: 10px 0 5px; color: var(--green-dk); }
+  .ai-text p { margin-bottom: 8px; } .ai-text strong { font-weight: 700; } .ai-text em { font-style: italic; }
+  .ai-text ul,.ai-text ol { padding-left: 22px; margin-bottom: 8px; } .ai-text li { margin-bottom: 4px; }
+  .ai-text code { background: #e8f5e9; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+
+  /* ── History ── */
+  .hist-wrap { overflow: auto; }
+  .hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .hist-table th { background: #eef1f5; color: var(--muted); font-weight: 700; padding: 9px 14px; text-align: left; border-bottom: 2px solid var(--border); cursor: default; }
+  .hist-table td { padding: 9px 14px; border-bottom: 1px solid #eee; }
+  .hist-table tr:hover td { background: var(--green-lt); cursor: pointer; }
+  .hist-table tr.hist-active td { background: #c8e6c9; font-weight: 600; }
+  .empty-hist { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; }
+
+  /* ════════════════════════════════════════
+     LOGIN MODAL
+  ════════════════════════════════════════ */
+  .login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 600; display: flex; align-items: center; justify-content: center; }
+  .login-modal { background: white; border-radius: 14px; width: 94vw; max-width: 480px; box-shadow: 0 12px 50px rgba(0,0,0,.3); overflow: hidden; }
+  .login-header { background: var(--black); color: white; padding: 18px 22px; display: flex; align-items: center; justify-content: space-between; }
+  .login-header h2 { font-size: 17px; font-weight: 700; }
+  .login-header .close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
+  .login-body { padding: 22px; }
+  .login-info { background: var(--green-lt); border: 1px solid #a8d4bc; border-radius: 8px; padding: 12px 16px; font-size: 13px; color: var(--green-dk); margin-bottom: 18px; line-height: 1.6; }
+  .login-info strong { font-weight: 700; }
+  .login-label { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 6px; display: block; }
+  .login-input { width: 100%; border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-family: monospace; color: var(--text); transition: border-color .15s; outline: none; }
+  .login-input:focus { border-color: var(--green); }
+  .login-input.error { border-color: var(--red); }
+  .login-hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .login-hint a { color: var(--green-dk); text-decoration: none; }
+  .login-hint a:hover { text-decoration: underline; }
+  .login-error { font-size: 13px; color: var(--red); margin-top: 8px; min-height: 20px; }
+  .login-footer { padding: 14px 22px; background: #fafafa; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+  .login-modes { padding: 0 22px 16px; display: flex; gap: 12px; }
+  .mode-card { flex: 1; border: 1.5px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer; transition: all .15s; }
+  .mode-card:hover { border-color: var(--green); }
+  .mode-card.selected { border-color: var(--green); background: var(--green-lt); }
+  .mode-card .mc-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .mode-card .mc-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .mode-sep { border: none; border-top: 1px solid var(--border); margin: 0 22px 16px; }
+  .key-section { padding: 0 22px; display: none; }
+  .key-section.visible { display: block; }
+
+  /* ════════════════════════════════════════
+     WIZARD MODAL
+  ════════════════════════════════════════ */
+  .wiz-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 500; display: flex; align-items: center; justify-content: center; }
+  .wiz-modal { background: white; border-radius: 12px; width: 96vw; max-width: 1280px; height: 90vh; display: flex; flex-direction: column; box-shadow: 0 8px 40px rgba(0,0,0,.3); overflow: hidden; }
+  .wiz-header { background: var(--black); color: white; padding: 14px 20px; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .wiz-header .close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
+  .wiz-body { display: flex; flex: 1; overflow: hidden; }
+  .wiz-left { width: 310px; flex-shrink: 0; border-right: 2px solid var(--border); overflow-y: auto; background: #fafafa; display: flex; flex-direction: column; }
+  .wiz-panel-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; padding: 14px 16px 8px; }
+  .wiz-step { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; transition: background .15s; display: flex; align-items: flex-start; gap: 10px; }
+  .wiz-step:hover { background: #f0f0f0; }
+  .wiz-step.active { background: #e8f5e9; border-left: 3px solid var(--green); padding-left: 11px; }
+  .step-num { width: 24px; height: 24px; border-radius: 50%; background: var(--border); color: var(--muted); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+  .wiz-step.active .step-num { background: var(--green); color: white; }
+  .wiz-step.done .step-num { background: var(--green-dk); color: white; }
+  .step-info { flex: 1; min-width: 0; }
+  .step-name { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .step-name.optional { color: var(--muted); font-weight: 400; }
+  .step-hint-text { font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .step-value { font-size: 12px; color: var(--green-dk); font-weight: 700; margin-top: 4px; display: flex; align-items: center; gap: 6px; }
+  .step-clear { background: none; border: none; color: var(--red); font-size: 15px; cursor: pointer; line-height: 1; padding: 0 2px; flex-shrink: 0; }
+  .wiz-sign-panel { padding: 10px 14px; border-bottom: 1px solid #eee; display: none; background: #f0f7f4; }
+  .wiz-sign-panel.visible { display: block; }
+  .wiz-sign-panel label { font-size: 12px; font-weight: 600; color: var(--text); display: block; margin-bottom: 6px; }
+  .wiz-sign-panel select { width: 100%; font-size: 13px; padding: 6px 8px; border: 1.5px solid var(--border); border-radius: 6px; background: white; }
+  .wiz-kw-panel { padding: 10px 14px; border-top: 1px solid var(--border); background: #fafafa; }
+  .wiz-kw-panel label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .wiz-kw-panel input { width: 100%; border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; font-size: 12px; }
+  .wiz-apply-panel { padding: 10px 14px; border-top: 1px solid var(--border); background: #fafafa; }
+  .wiz-apply-panel .btn { width: 100%; justify-content: center; height: 40px; font-size: 14px; }
+  .wiz-right { flex: 1; overflow: auto; background: white; }
+  .wiz-instruction { padding: 10px 16px; background: #e8f5e9; border-bottom: 2px solid #a8d4bc; font-size: 13px; color: var(--green-dk); font-weight: 600; position: sticky; top: 0; z-index: 5; }
+  .wiz-table { table-layout: fixed; width: max-content; min-width: 100%; border-collapse: collapse; font-size: 12px; }
+  .wiz-table th { background: #1a2e1a; color: white; padding: 8px 10px; text-align: center; position: sticky; top: 0; z-index: 4; white-space: nowrap; min-width: 80px; cursor: default; user-select: none; position: relative; border-right: 1px solid rgba(255,255,255,.15); }
+  .wiz-table th .rh { background: transparent; }
+  .wiz-table th .rh:hover, .wiz-table th .rh.dragging { background: rgba(255,255,255,.4); }
+  .wiz-table td { padding: 5px 10px; border-bottom: 1px solid #f0f0f0; border-right: 1px solid #f0f0f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; }
+  .wiz-table tr { cursor: pointer; }
+  .wiz-table tr:hover td { background: #fff9e6; }
+  .wiz-table tr.wiz-row-selected td { background: #c8e6c9 !important; font-weight: 600; }
+  .wiz-table .rn { background: #2d3a2d; color: rgba(255,255,255,.7); text-align: center; min-width: 36px; width: 36px; position: sticky; left: 0; z-index: 3; font-size: 11px; }
+  .wiz-table td.rn { background: #f5f5f5; color: var(--muted); font-weight: 700; position: sticky; left: 0; z-index: 2; }
+  .wiz-table th.col-active  { background: var(--green) !important; }
+  .wiz-table th.col-hover   { background: #2d6a3a !important; cursor: pointer; }
+  .wiz-table td.col-active  { background: rgba(0,168,84,.18) !important; }
+  .wiz-table td.col-hover   { background: rgba(0,168,84,.08) !important; }
+  .wiz-table th.col-assigned { background: #4a7a50 !important; }
+  .wiz-table td.col-assigned { background: rgba(0,100,50,.07) !important; }
+
+  /* ── Export modal ── */
+  .exp-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 500; display: flex; align-items: center; justify-content: center; }
+  .exp-modal { background: white; border-radius: 12px; width: 480px; max-width: 96vw; box-shadow: 0 8px 40px rgba(0,0,0,.25); overflow: hidden; }
+  .exp-header { background: var(--black); color: white; padding: 14px 20px; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; }
+  .exp-header .close { background: none; border: none; color: white; font-size: 22px; cursor: pointer; }
+  .exp-list { padding: 14px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .exp-list label { font-size: 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .exp-list input[type=checkbox] { accent-color: var(--green); width: 16px; height: 16px; }
+  .exp-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; background: #fafafa; }
+
+  /* ── Scrollbars ── */
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-track { background: #e8ecf0; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: #a0aab4; border-radius: 4px; border: 2px solid #e8ecf0; }
+  ::-webkit-scrollbar-thumb:hover { background: #6e7f8d; }
+
+  /* ── Toast ── */
+  #toast { position: fixed; top: 72px; right: 24px; background: white; border: 1.5px solid var(--border);
+           border-radius: 8px; padding: 13px 18px; font-size: 14px; max-width: 400px; z-index: 999;
+           display: none; box-shadow: 0 4px 18px rgba(0,0,0,.13); }
+  #toast.show { display: block; }
+  #toast.error   { border-color: var(--red);   color: var(--red); }
+  #toast.success { border-color: var(--green); color: var(--green-dk); }
+  #toast.warn    { border-color: #f59f00;      color: var(--yellow); }
+
+  @media (max-width: 960px) {
+    .upload-row { grid-template-columns: 1fr; }
+    .compare-grid { grid-template-columns: 1fr; }
+    .actions-col { flex-direction: row; padding-top: 0; }
+    .wiz-left { width: 250px; }
+    .login-modes { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="/">
+    <svg class="logo-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="47" y="8" width="6" height="16" rx="3" fill="white"/>
+      <rect x="10" y="22" width="80" height="7" rx="3.5" fill="white"/>
+      <rect x="48" y="86" width="4" height="6" rx="2" fill="white"/>
+      <rect x="36" y="88" width="28" height="5" rx="2.5" fill="white"/>
+      <path d="M20 29 L5 58 Q5 68 20 68 Q35 68 35 58 Z" fill="white" opacity=".9"/>
+      <path d="M80 29 L65 58 Q65 68 80 68 Q95 68 95 58 Z" fill="white" opacity=".9"/>
+      <line x1="20" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      <line x1="80" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      <line x1="50" y1="25" x2="50" y2="86" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    </svg>
+    <span class="logo-text">Sverk<em>AI</em></span>
+  </a>
+  <div class="header-right">
+    <div class="status-dot" id="status-dot"></div>
+    <span class="status-text" id="status-text">Проверка...</span>
+    <div class="auth-area" id="auth-area">
+      <!-- filled by JS -->
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- Гостевое уведомление -->
+  <div class="guest-notice" id="guest-notice">
+    ⚠️ Вы работаете в <strong>гостевом режиме</strong> — используется общий API, история сверок не сохраняется.
+    <a onclick="openLoginModal()">Войдите с личным API-ключом</a> для сохранения истории.
+  </div>
+
+  <div class="upload-row">
+    <div class="upload-card">
+      <div class="card-title">📄 Документ организации</div>
+      <div class="drop-zone" id="drop1" onclick="document.getElementById('input1').click()">
+        <div class="icon">📁</div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls</p>
+      </div>
+      <input type="file" id="input1" accept=".xlsx,.xls" style="display:none">
+      <div class="file-status" id="file1-status"></div>
+      <div class="card-btns"><button class="btn btn-outline" onclick="openWizard(1)">⚙ Настроить вручную</button></div>
+    </div>
+    <div class="upload-card">
+      <div class="card-title">📄 Документ контрагента</div>
+      <div class="drop-zone" id="drop2" onclick="document.getElementById('input2').click()">
+        <div class="icon">📁</div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls</p>
+      </div>
+      <input type="file" id="input2" accept=".xlsx,.xls" style="display:none">
+      <div class="file-status" id="file2-status"></div>
+      <div class="card-btns"><button class="btn btn-outline" onclick="openWizard(2)">⚙ Настроить вручную</button></div>
+    </div>
+    <div class="actions-col">
+      <button class="btn btn-green" id="btn-run" onclick="runReconcile()" disabled>🔍 Сверить документы</button>
+      <button class="btn btn-ghost" id="btn-export" onclick="openExportModal()" disabled>📊 Экспорт в Excel</button>
+    </div>
+  </div>
+
+  <div class="settings-bar">
+    <span class="settings-title">⚙ Настройки</span>
+    <label><input type="checkbox" id="cfg-missing" checked> Отсутствующие <span class="tip">Документ есть у одной стороны, но отсутствует у другой</span></label>
+    <label><input type="checkbox" id="cfg-amount" checked> Разница в суммах <span class="tip">Один документ у обеих сторон, но суммы не совпадают</span></label>
+    <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Корректировки с противоположным знаком: одна сторона ставит +, другая −</span></label>
+    <label><input type="checkbox" id="cfg-date" checked> Разница в датах <span class="tip">Документ совпадает по номеру/сумме, но даты отличаются (низкий приоритет)</span></label>
+    <label>Окно оплат (дн): <input type="number" id="cfg-dw-pay" value="5" min="0" max="30"> <span class="tip">Макс. расхождение в датах при поиске пар оплат</span></label>
+    <label>Окно поставок (дн): <input type="number" id="cfg-dw-del" value="3" min="0" max="30"> <span class="tip">То же для накладных и КСФ</span></label>
+    <label>Мин. сумма: <input type="number" id="cfg-min-amt" value="0" min="0" step="100"> <span class="tip">Расхождения меньше этой суммы не показывать (0 = все)</span></label>
+    <label><input type="checkbox" id="cfg-ai" checked> AI-комментарий <span class="tip">Генерировать краткий текстовый разбор расхождений</span></label>
+  </div>
+
+  <div id="progress-wrap">
+    <div id="progress-bar"></div>
+    <div id="progress-text"><div class="spinner" id="spinner"></div><span id="progress-msg">Готов к работе</span></div>
+  </div>
+
+  <div class="tab-bar">
+    <div class="tab active" data-tab="compare">Сравнение</div>
+    <div class="tab" data-tab="discrepancies">Расхождения <span class="tab-badge" id="badge-disc" style="display:none">0</span></div>
+    <div class="tab" data-tab="summary">Сводка</div>
+    <div class="tab" data-tab="history">История</div>
+  </div>
+
+  <div class="tab-content active" id="tab-compare">
+    <div class="legend">
+      <span class="legend-item"><span class="legend-box" style="background:#ffc9c9"></span> Отсутствует</span>
+      <span class="legend-item"><span class="legend-box" style="background:#ffe09a"></span> Разница в суммах</span>
+      <span class="legend-item"><span class="legend-box" style="background:#a8d4ff"></span> Зеркальная КСФ</span>
+      <span class="legend-item"><span class="legend-box" style="background:#e0e0e0"></span> Разница в датах</span>
+    </div>
+    <div class="compare-grid">
+      <div class="table-panel">
+        <div class="table-header">
+          <div class="title"><span class="col-dot" style="background:#00c853"></span><span id="t1-title">Документ организации</span></div>
+          <input class="search-box" id="search1" placeholder="🔍 Поиск..." oninput="searchTable(1,this.value)">
+        </div>
+        <div class="table-wrap" id="table1-wrap"><div class="empty-state">Загрузите файл организации</div></div>
+      </div>
+      <div class="table-panel">
+        <div class="table-header">
+          <div class="title"><span class="col-dot" style="background:#e91e63"></span><span id="t2-title">Документ контрагента</span></div>
+          <input class="search-box" id="search2" placeholder="🔍 Поиск..." oninput="searchTable(2,this.value)">
+        </div>
+        <div class="table-wrap" id="table2-wrap"><div class="empty-state">Загрузите файл контрагента</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-discrepancies">
+    <div class="disc-filter">
+      <span class="disc-filter-label">Показать:</span>
+      <button class="filter-btn filter-btn-all active" id="fb-all" onclick="toggleFilter('all',this)">Все</button>
+      <button class="filter-btn" id="fb-missing_in_counterparty" onclick="toggleFilter('missing_in_counterparty',this)">❌ Нет у контрагента</button>
+      <button class="filter-btn" id="fb-missing_in_company"      onclick="toggleFilter('missing_in_company',this)">❌ Нет у организации</button>
+      <button class="filter-btn" id="fb-amount_diff"             onclick="toggleFilter('amount_diff',this)">💰 Разница в суммах</button>
+      <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">🔀 Зеркальные КСФ</button>
+      <button class="filter-btn" id="fb-date_diff"               onclick="toggleFilter('date_diff',this)">📅 Разница в датах</button>
+    </div>
+    <div class="disc-wrap" id="disc-wrap">
+      <table class="disc-table" id="disc-table-el">
+        <thead><tr id="disc-thead-row">
+          <th style="width:44px">№</th>
+          <th style="width:190px">Тип</th>
+          <th style="width:95px">Дата</th>
+          <th style="width:280px">Документ</th>
+          <th style="width:180px" id="disc-col-org">У организации</th>
+          <th style="width:180px" id="disc-col-ctr">У контрагента</th>
+          <th style="width:110px">Разница</th>
+          <th style="width:90px">Уровень</th>
+        </tr></thead>
+        <tbody id="disc-body"><tr><td colspan="8" class="empty-state">Выполните сверку для просмотра расхождений</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-summary">
+    <div class="summary-pad">
+      <div class="summary-grid" id="summary-cards"><div class="stat-card"><div class="label">Ожидание сверки</div><div class="value dark">—</div></div></div>
+      <div class="debt-card" id="debt-card" style="display:none"><div class="debt-label" id="debt-label"></div><div class="period-label" id="period-label"></div></div>
+      <div class="ai-card" id="ai-card" style="display:none"><div class="ai-title">🤖 Комментарий AI</div><div class="ai-text" id="ai-text"></div></div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-history">
+    <div style="padding:10px 14px;background:#fafafa;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)">
+      Нажмите на запись для восстановления результатов сверки
+    </div>
+    <div class="hist-wrap">
+      <table class="hist-table">
+        <thead><tr><th>Дата</th><th>Файл организации</th><th>Файл контрагента</th><th>Расхождений</th><th>Критических</th><th>Итог</th></tr></thead>
+        <tbody id="hist-body"><tr><td colspan="6" class="empty-hist">История пуста</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- ════════ LOGIN MODAL ════════ -->
+<div class="login-overlay" id="login-overlay" style="display:none" onclick="if(event.target===this)closeLoginModal()">
+  <div class="login-modal">
+    <div class="login-header">
+      <h2>🔑 Вход в SverkAI</h2>
+      <button class="close" onclick="closeLoginModal()">×</button>
+    </div>
+    <div class="login-body">
+      <div class="login-info">
+        <strong>Зачем личный API-ключ?</strong><br>
+        С личным ключом Anthropic: история сверок сохраняется, запросы идут с вашего аккаунта, нет ограничений на AI-анализ.<br>
+        Без ключа: гостевой режим — история не сохраняется, используется общий API.
+      </div>
+
+      <div class="login-modes">
+        <div class="mode-card selected" id="mode-key" onclick="selectMode('key')">
+          <div class="mc-title">🔑 Личный API-ключ</div>
+          <div class="mc-desc">История сохраняется. Используется ваш Anthropic API.</div>
+        </div>
+        <div class="mode-card" id="mode-guest" onclick="selectMode('guest')">
+          <div class="mc-title">👤 Гостевой режим</div>
+          <div class="mc-desc">Без сохранения истории. Работает на общем API.</div>
+        </div>
+      </div>
+
+      <hr class="mode-sep">
+
+      <div class="key-section visible" id="key-section">
+        <label class="login-label">Ваш Anthropic API-ключ</label>
+        <input type="password" class="login-input" id="login-key-input"
+               placeholder="sk-ant-api03-..." autocomplete="off"
+               oninput="this.classList.remove('error');document.getElementById('login-error').textContent=''">
+        <div class="login-hint">
+          Получить ключ: <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>
+          &nbsp;•&nbsp; Ключ хранится только в вашем браузере (localStorage)
+        </div>
+        <div class="login-error" id="login-error"></div>
+      </div>
+    </div>
+    <div class="login-footer">
+      <button class="btn btn-ghost" onclick="closeLoginModal()">Отмена</button>
+      <button class="btn btn-green" id="login-btn" onclick="doLogin()">Войти</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ WIZARD ════════ -->
+<div class="wiz-overlay" id="wiz-overlay" style="display:none">
+  <div class="wiz-modal">
+    <div class="wiz-header">
+      <span id="wiz-title">Настройка колонок</span>
+      <button class="close" onclick="closeWizard()">×</button>
+    </div>
+    <div class="wiz-body">
+      <div class="wiz-left">
+        <div class="wiz-panel-title">Параметры сверки</div>
+        <div id="wiz-steps"></div>
+        <div class="wiz-sign-panel" id="wiz-sign-panel">
+          <label>Знак суммы в единой колонке:</label>
+          <select id="wiz-sign-select" onchange="wizValues['amount_sign']=this.value; renderWizSteps()">
+            <option value="positive_is_credit">+ = кредит (приход от контрагента)</option>
+            <option value="positive_is_debit">+ = дебет (расход / оплата)</option>
+            <option value="signed">знак уже зашит в число (отриц. = дебет)</option>
+            <option value="unknown">не знаю — определить автоматически</option>
+          </select>
+        </div>
+        <div style="flex:1"></div>
+        <div class="wiz-kw-panel">
+          <label>Слова конца таблицы (через запятую):</label>
+          <input type="text" id="wiz-kw" value="обороты, сальдо, итого">
+        </div>
+        <div class="wiz-apply-panel">
+          <button class="btn btn-green" onclick="applyWizard()">✓ Применить настройку</button>
+        </div>
+      </div>
+      <div class="wiz-right" id="wiz-right">
+        <div class="wiz-instruction" id="wiz-instruction">Загрузите файл, чтобы начать настройку</div>
+        <div id="wiz-preview-wrap"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ EXPORT ════════ -->
+<div class="exp-overlay" id="exp-overlay" style="display:none" onclick="if(event.target===this)closeExportModal()">
+  <div class="exp-modal">
+    <div class="exp-header"><span>📊 Экспорт — выбор типов</span><button class="close" onclick="closeExportModal()">×</button></div>
+    <div style="padding:12px 20px 4px;font-size:13px;color:var(--muted)">Выберите типы расхождений для включения в отчёт:</div>
+    <div class="exp-list">
+      <label><input type="checkbox" id="ex-missing_in_counterparty" checked> ❌ Нет у контрагента</label>
+      <label><input type="checkbox" id="ex-missing_in_company" checked> ❌ Нет у организации</label>
+      <label><input type="checkbox" id="ex-amount_diff" checked> 💰 Разница в суммах</label>
+      <label><input type="checkbox" id="ex-sign_mismatch" checked> 🔀 Зеркальные КСФ</label>
+      <label><input type="checkbox" id="ex-date_diff" checked> 📅 Разница в датах</label>
+    </div>
+    <div class="exp-footer">
+      <button class="btn btn-ghost" onclick="closeExportModal()">✕ Отмена</button>
+      <button class="btn btn-green" onclick="doExport()">📥 Скачать</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Глобальное состояние ───────────────────────────────────────────
+let file1=null,file2=null,lastResult=null,allDisc=[];
+let preview1=null,preview2=null,profile1=null,profile2=null;
+let wizNum=0,wizActiveStep=0,wizValues={};
+let activeFilters=new Set(['all']);
+let historyData=[];
+let loginMode='key'; // 'key' | 'guest'
+
+// ════════════════════════════════════════════════════════════════════
+//  АВТОРИЗАЦИЯ
+// ════════════════════════════════════════════════════════════════════
+
+const LS_KEY = 'sverkai_api_key';
+
+function getStoredKey() {
+  return localStorage.getItem(LS_KEY) || '';
+}
+
+function isLoggedIn() {
+  return !!getStoredKey();
+}
+
+function authHeaders() {
+  const k = getStoredKey();
+  return k ? { 'X-Api-Key': k } : {};
+}
+
+function renderAuthArea() {
+  const area = document.getElementById('auth-area');
+  const guestNotice = document.getElementById('guest-notice');
+  if (isLoggedIn()) {
+    area.innerHTML = `
+      <span class="auth-badge authed">🔑 Личный API</span>
+      <button class="btn-logout" onclick="logout()">Выйти</button>`;
+    guestNotice.style.display = 'none';
+  } else {
+    area.innerHTML = `
+      <span class="auth-badge guest">👤 Гостевой режим</span>
+      <button class="btn-login" onclick="openLoginModal()">Войти</button>`;
+    guestNotice.style.display = 'block';
+  }
+}
+
+function openLoginModal() {
+  // If already logged in, pre-fill the key
+  const stored = getStoredKey();
+  const inp = document.getElementById('login-key-input');
+  inp.value = stored;
+  inp.classList.remove('error');
+  document.getElementById('login-error').textContent = '';
+  selectMode(stored ? 'key' : 'key');
+  document.getElementById('login-overlay').style.display = 'flex';
+  setTimeout(()=>inp.focus(), 100);
+}
+
+function closeLoginModal() {
+  document.getElementById('login-overlay').style.display = 'none';
+}
+
+function selectMode(mode) {
+  loginMode = mode;
+  document.getElementById('mode-key').classList.toggle('selected', mode === 'key');
+  document.getElementById('mode-guest').classList.toggle('selected', mode === 'guest');
+  document.getElementById('key-section').classList.toggle('visible', mode === 'key');
+  document.getElementById('login-btn').textContent = mode === 'guest' ? 'Войти как гость' : 'Войти';
+}
+
+async function doLogin() {
+  if (loginMode === 'guest') {
+    localStorage.removeItem(LS_KEY);
+    renderAuthArea();
+    loadHistory();
+    closeLoginModal();
+    showToast('Вы вошли как гость — история не сохраняется', 'warn');
+    return;
+  }
+
+  const key = document.getElementById('login-key-input').value.trim();
+  const errEl = document.getElementById('login-error');
+  const inp = document.getElementById('login-key-input');
+  const btn = document.getElementById('login-btn');
+
+  if (!key) {
+    inp.classList.add('error');
+    errEl.textContent = 'Введите API-ключ';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Проверка...';
+  errEl.textContent = '';
+
+  try {
+    const resp = await fetch('/api/validate-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: key })
+    });
+    const data = await resp.json();
+    if (data.valid) {
+      localStorage.setItem(LS_KEY, key);
+      renderAuthArea();
+      loadHistory();
+      closeLoginModal();
+      showToast('✓ Вошли с личным API-ключом — история сохраняется', 'success');
+    } else {
+      inp.classList.add('error');
+      errEl.textContent = data.error || 'Ключ не прошёл проверку';
+    }
+  } catch(e) {
+    errEl.textContent = 'Ошибка соединения: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  }
+}
+
+function logout() {
+  localStorage.removeItem(LS_KEY);
+  renderAuthArea();
+  // Очищаем историю в UI
+  document.getElementById('hist-body').innerHTML =
+    '<tr><td colspan="6" class="empty-hist">Войдите с личным API-ключом для просмотра истории</td></tr>';
+  showToast('Вы вышли — переключились в гостевой режим', 'warn');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  HEALTH
+// ════════════════════════════════════════════════════════════════════
+async function checkHealth(){
+  try{
+    const r=await fetch('/api/health'),d=await r.json();
+    const dot=document.getElementById('status-dot'),txt=document.getElementById('status-text');
+    if(d.status==='ok'){
+      dot.classList.add('ok');
+      txt.textContent = isLoggedIn() ? 'Готов • Личный AI' : (d.api_key_set ? 'Готов • Общий AI' : 'Готов');
+    }
+  }catch{
+    document.getElementById('status-text').textContent='Сервер недоступен';
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+renderAuthArea();
+checkHealth();
+loadHistory();
+
+// ── Tabs ───────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-'+tab.dataset.tab).classList.add('active');
+  });
+});
+function switchTab(n){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+  const t=document.querySelector(`.tab[data-tab="${n}"]`);if(t)t.classList.add('active');
+  const c=document.getElementById('tab-'+n);if(c)c.classList.add('active');
+}
+
+// ── File drop ──────────────────────────────────────────────────────
+function setupDrop(dId,iId,num){
+  const drop=document.getElementById(dId),inp=document.getElementById(iId);
+  inp.addEventListener('change',e=>handleFile(e.target.files[0],num));
+  drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag-over');});
+  drop.addEventListener('dragleave',()=>drop.classList.remove('drag-over'));
+  drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag-over');if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0],num);});
+}
+setupDrop('drop1','input1',1);setupDrop('drop2','input2',2);
+
+async function handleFile(f,num){
+  if(!f)return;
+  if(!/\.(xlsx|xls)$/i.test(f.name)){showToast('Поддерживаются: .xlsx, .xls','error');return;}
+  if(num===1){file1=f;profile1=null;preview1=null;}else{file2=f;profile2=null;preview2=null;}
+  const se=document.getElementById(`file${num}-status`),te=document.getElementById(`t${num}-title`),we=document.getElementById(`table${num}-wrap`);
+  se.className='file-status loading';se.textContent='⏳ Анализ...';
+  we.innerHTML='<div class="empty-state">⏳ Анализ структуры...</div>';
+  const fd=new FormData();fd.append('file',f);
+  try{
+    const resp=await fetch('/api/preview',{method:'POST',headers:authHeaders(),body:fd}),data=await resp.json();
+    if(num===1)preview1=data;else preview2=data;
+    te.textContent=f.name;
+    if(data.ok&&!data.needs_manual&&data.table){
+      se.className='file-status ok';se.textContent=`✓ ${f.name} • ${data.label}`;
+      renderTable(num,data.table,null,data.raw_rows);
+    }else{
+      se.className='file-status warn';se.textContent='⚠ Не удалось определить структуру. Нажмите «Настроить вручную»';
+      we.innerHTML='<div class="empty-state">Нажмите «⚙ Настроить вручную»</div>';
+    }
+  }catch(e){se.className='file-status warn';se.textContent=`⚠ Ошибка: ${e.message}`;}
+  updateRunBtn();
+}
+function updateRunBtn(){
+  const ok1=file1&&(preview1?.ok&&!preview1?.needs_manual||profile1);
+  const ok2=file2&&(preview2?.ok&&!preview2?.needs_manual||profile2);
+  document.getElementById('btn-run').disabled=!(ok1&&ok2);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  WIZARD
+// ════════════════════════════════════════════════════════════════════
+const WIZ_STEPS=[
+  {key:'data_start_row',label:'Первая строка данных',        hint:'Щёлкните по первой строке с операциями в таблице',     required:true,  mode:'row'},
+  {key:'date_col',      label:'Дата операции',               hint:'Щёлкните на заголовок столбца с датой',                required:true,  mode:'col'},
+  {key:'doc_col',       label:'Название документа',          hint:'Щёлкните на заголовок столбца с именем документа',     required:true,  mode:'col'},
+  {key:'doc_num_col',   label:'Номер документа',             hint:'Только если номер в отдельном столбце (не в тексте)',  required:false, mode:'col'},
+  {key:'doc_type_col',  label:'Тип операции',                hint:'«Оплата / Поставка / Корректировка» — если есть',     required:false, mode:'col'},
+  {key:'debit_col',     label:'Дебет',                       hint:'Щёлкните на столбец дебета (если есть Дебет+Кредит)', required:false, mode:'col'},
+  {key:'credit_col',    label:'Кредит',                      hint:'Щёлкните на столбец кредита (парный к дебету)',        required:false, mode:'col'},
+  {key:'amount_col',    label:'Единая сумма',                hint:'Если одна колонка для всех сумм (вместо Дебет/Кредит)',required:false, mode:'col'},
+  {key:'amount_sign',   label:'Знак суммы',                  hint:'Укажите, как интерпретировать знак числа в сумме',    required:false, mode:'select'},
+];
+
+function openWizard(num){
+  const f=num===1?file1:file2;
+  if(!f){showToast('Сначала загрузите файл','warn');return;}
+  wizNum=num;wizActiveStep=0;wizValues={};
+  const p=num===1?preview1:preview2,src=(num===1?profile1:profile2)||p?.profile||{};
+  WIZ_STEPS.forEach(s=>{if(s.key in src&&src[s.key]!==null&&src[s.key]!==undefined)wizValues[s.key]=src[s.key];});
+  if(!wizValues.amount_sign)wizValues.amount_sign='positive_is_credit';
+  document.getElementById('wiz-title').textContent=`Настройка колонок — ${f.name}`;
+  renderWizSteps();renderWizPreview(p);
+  document.getElementById('wiz-overlay').style.display='flex';
+  setWizStep(0);
+}
+function closeWizard(){document.getElementById('wiz-overlay').style.display='none';}
+
+function renderWizSteps(){
+  const c=document.getElementById('wiz-steps');
+  c.innerHTML=WIZ_STEPS.map((s,i)=>{
+    const v=wizValues[s.key],isDone=v!==undefined;
+    let vs='';
+    if(s.mode==='row'&&isDone)vs=`Строка ${v}`;
+    else if(s.mode==='col'&&isDone)vs=`Столбец [${v}]`;
+    else if(s.mode==='select'&&v)vs=v;
+    return`<div class="wiz-step ${s.required?'required':'optional'} ${isDone?'done':''}" id="wstep-${i}" onclick="setWizStep(${i})">
+      <div class="step-num">${isDone?'✓':(i+1)}</div>
+      <div class="step-info">
+        <div class="step-name ${s.required?'':'optional'}">${s.label}${s.required?'':' <span style="font-size:11px;color:var(--muted)">(необяз.)</span>'}</div>
+        <div class="step-hint-text">${s.hint}</div>
+        ${isDone?`<div class="step-value">${esc(String(vs))}<button class="step-clear" onclick="event.stopPropagation();clearWizStep(${i})" title="Сбросить">×</button></div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+  const sel=document.getElementById('wiz-sign-select');
+  if(sel&&wizValues.amount_sign)sel.value=wizValues.amount_sign;
+}
+
+function setWizStep(idx){
+  wizActiveStep=idx;
+  document.querySelectorAll('.wiz-step').forEach((el,i)=>el.classList.toggle('active',i===idx));
+  const step=WIZ_STEPS[idx];
+  const instr=document.getElementById('wiz-instruction');
+  if(step.mode==='row')      instr.textContent=`Шаг ${idx+1}: ${step.hint} — щёлкните по строке в правой таблице`;
+  else if(step.mode==='col') instr.textContent=`Шаг ${idx+1}: ${step.hint} — щёлкните по заголовку [N] столбца`;
+  else if(step.mode==='select') instr.textContent=`Шаг ${idx+1}: ${step.hint} — выберите вариант в левой панели`;
+  const sp=document.getElementById('wiz-sign-panel');
+  sp.classList.toggle('visible',step.mode==='select');
+  updateWizHighlights();
+}
+
+function clearWizStep(idx){delete wizValues[WIZ_STEPS[idx].key];renderWizSteps();setWizStep(idx);}
+
+function renderWizPreview(p){
+  const wrap=document.getElementById('wiz-preview-wrap');
+  const raw=p?.raw_preview;
+  if(!raw||!raw.columns||!raw.rows){wrap.innerHTML='<div style="padding:20px;color:var(--muted)">Предпросмотр недоступен</div>';return;}
+  let html=`<table class="wiz-table" id="wiz-table"><thead><tr>
+    <th class="rn" style="width:36px">#</th>`;
+  raw.columns.forEach(c=>html+=`<th id="wth-${c}" style="width:120px" onclick="wizColClick(${c})" onmouseenter="wizColHover(${c},true)" onmouseleave="wizColHover(${c},false)">[${c}]</th>`);
+  html+=`</tr></thead><tbody>`;
+  raw.rows.forEach((row,ri)=>{
+    html+=`<tr id="wrow-${ri}" onclick="wizRowClick(${ri})"><td class="rn">${ri}</td>`;
+    row.forEach((v,ci)=>html+=`<td id="wtd-${ri}-${ci}" onmouseenter="wizColHover(${ci},true)" onmouseleave="wizColHover(${ci},false)">${esc(String(v||'').slice(0,35))}</td>`);
+    html+=`</tr>`;
+  });
+  html+=`</tbody></table>`;
+  wrap.innerHTML=html;
+  initTableResize(document.getElementById('wiz-table'));
+  updateWizHighlights();
+}
+
+function wizRowClick(ri){
+  const step=WIZ_STEPS[wizActiveStep];
+  if(step.mode!=='row')return;
+  wizValues[step.key]=ri+1;
+  document.querySelectorAll('.wiz-row-selected').forEach(r=>r.classList.remove('wiz-row-selected'));
+  document.getElementById(`wrow-${ri}`)?.classList.add('wiz-row-selected');
+  renderWizSteps();
+  const next=wizActiveStep+1;if(next<WIZ_STEPS.length)setWizStep(next);
+}
+function wizColClick(ci){
+  const step=WIZ_STEPS[wizActiveStep];
+  if(step.mode!=='col')return;
+  wizValues[step.key]=ci;
+  renderWizSteps();updateWizHighlights();
+  const next=wizActiveStep+1;if(next<WIZ_STEPS.length)setWizStep(next);
+}
+function wizColHover(ci,on){
+  document.getElementById(`wth-${ci}`)?.classList.toggle('col-hover',on);
+  document.querySelectorAll(`[id^="wtd-"]`).forEach(td=>{
+    if(parseInt(td.id.split('-')[2])===ci)td.classList.toggle('col-hover',on);
+  });
+}
+function updateWizHighlights(){
+  document.querySelectorAll('.col-active,.col-assigned').forEach(el=>el.classList.remove('col-active','col-assigned'));
+  WIZ_STEPS.forEach((s,i)=>{
+    if(s.mode==='col'&&wizValues[s.key]!==undefined&&i!==wizActiveStep){
+      const ci=wizValues[s.key];
+      document.getElementById(`wth-${ci}`)?.classList.add('col-assigned');
+      document.querySelectorAll(`[id^="wtd-"]`).forEach(td=>{if(parseInt(td.id.split('-')[2])===ci)td.classList.add('col-assigned');});
+    }
+  });
+  const step=WIZ_STEPS[wizActiveStep];
+  if(step.mode==='col'&&wizValues[step.key]!==undefined){
+    const ci=wizValues[step.key];
+    const th=document.getElementById(`wth-${ci}`);
+    if(th){th.classList.remove('col-assigned');th.classList.add('col-active');}
+    document.querySelectorAll(`[id^="wtd-"]`).forEach(td=>{if(parseInt(td.id.split('-')[2])===ci){td.classList.remove('col-assigned');td.classList.add('col-active');}});
+  }
+  if(wizValues.data_start_row!==undefined){
+    const ri=wizValues.data_start_row-1;
+    document.getElementById(`wrow-${ri}`)?.classList.add('wiz-row-selected');
+  }
+}
+function applyWizard(){
+  const toN=v=>v===undefined||v===''?null:parseInt(v);
+  const profile={
+    data_start_row:wizValues.data_start_row||1,
+    date_col:toN(wizValues.date_col),doc_col:toN(wizValues.doc_col),
+    doc_num_col:toN(wizValues.doc_num_col),doc_type_col:toN(wizValues.doc_type_col),
+    debit_col:toN(wizValues.debit_col),credit_col:toN(wizValues.credit_col),
+    amount_col:toN(wizValues.amount_col),amount_sign:wizValues.amount_sign||'unknown',
+    footer_keywords:document.getElementById('wiz-kw').value.split(',').map(s=>s.trim()).filter(Boolean),
+    confidence:'manual',
+  };
+  if(wizNum===1)profile1=profile;else profile2=profile;
+  const f=wizNum===1?file1:file2;
+  const se=document.getElementById(`file${wizNum}-status`);
+  se.className='file-status ok';se.textContent=`✓ ${f?.name||''} • Ручная настройка`;
+  const p=wizNum===1?preview1:preview2;
+  if(p?.table)renderTable(wizNum,p.table,null,p.raw_rows);
+  closeWizard();updateRunBtn();showToast('✓ Настройка применена','success');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  RESIZE
+// ════════════════════════════════════════════════════════════════════
+function initTableResize(tableEl){
+  if(!tableEl)return;
+  tableEl.querySelectorAll('th').forEach(th=>{
+    th.querySelectorAll('.rh').forEach(h=>h.remove());
+    const handle=document.createElement('div');
+    handle.className='rh';
+    th.appendChild(handle);
+    let startX,startW;
+    handle.addEventListener('mousedown',e=>{
+      e.preventDefault();e.stopPropagation();
+      handle.classList.add('dragging');
+      startX=e.clientX;startW=th.offsetWidth;
+      const onMove=ev=>{
+        const newW=Math.max(50,startW+(ev.clientX-startX));
+        th.style.width=newW+'px';th.style.minWidth=newW+'px';
+      };
+      const onUp=()=>{
+        handle.classList.remove('dragging');
+        document.removeEventListener('mousemove',onMove);
+        document.removeEventListener('mouseup',onUp);
+      };
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+    });
+  });
+}
+
+// ── Render table ──────────────────────────────────────────────────
+function renderTable(num,td,hl,rawRowsOverride){
+  const wrap=document.getElementById(`table${num}-wrap`);
+  if(!td||!td.rows||!td.rows.length){wrap.innerHTML='<div class="empty-state">Нет данных</div>';return;}
+  const h=hl||{};
+  const missing=new Set(num===1?h.missing1:h.missing2),amt=new Set(num===1?h.amt_diff1:h.amt_diff2);
+  const sign=new Set(num===1?h.sign1:h.sign2),date=new Set(num===1?h.date1:h.date2);
+  const rr=rawRowsOverride||td.raw_rows||[];
+  let html='<table class="data-table"><thead><tr>';
+  td.columns.forEach(c=>html+=`<th style="width:140px">${esc(c)}</th>`);
+  html+='</tr></thead><tbody>';
+  td.rows.forEach((row,i)=>{
+    const r=rr[i]!==undefined?rr[i]:i;
+    let cls='';
+    if(missing.has(r))cls='row-missing';else if(sign.has(r))cls='row-sign';
+    else if(amt.has(r))cls='row-amount';else if(date.has(r))cls='row-date';
+    html+=`<tr class="${cls}">`;
+    td.columns.forEach(c=>html+=`<td title="${esc(row[c]||'')}">${esc(trunc(row[c]||'',80))}</td>`);
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  wrap.innerHTML=html;
+  initTableResize(wrap.querySelector('.data-table'));
+}
+
+// ── Multi-filter ──────────────────────────────────────────────────
+function toggleFilter(type,btn){
+  if(type==='all'){
+    activeFilters=new Set(['all']);
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }else{
+    activeFilters.delete('all');document.getElementById('fb-all').classList.remove('active');
+    if(btn.classList.contains('active')){btn.classList.remove('active');activeFilters.delete(type);if(activeFilters.size===0){activeFilters.add('all');document.getElementById('fb-all').classList.add('active');}}
+    else{btn.classList.add('active');activeFilters.add(type);}
+  }
+  applyDiscFilter();
+}
+function applyDiscFilter(){
+  document.querySelectorAll('#disc-body tr[data-type]').forEach(r=>r.style.display=(activeFilters.has('all')||activeFilters.has(r.dataset.type))?'':'none');
+}
+
+// ── Reconcile ──────────────────────────────────────────────────────
+async function runReconcile(){
+  if(!file1||!file2)return;
+  const btn=document.getElementById('btn-run');btn.disabled=true;
+  setProgress(10,'Загрузка файлов...');
+  const settings={
+    find_missing:document.getElementById('cfg-missing').checked,
+    find_amount_diff:document.getElementById('cfg-amount').checked,
+    find_sign_mismatch:document.getElementById('cfg-sign').checked,
+    find_date_diff:document.getElementById('cfg-date').checked,
+    date_window_payment:parseInt(document.getElementById('cfg-dw-pay').value)||5,
+    date_window_delivery:parseInt(document.getElementById('cfg-dw-del').value)||3,
+    min_amount:parseFloat(document.getElementById('cfg-min-amt').value)||0,
+    ai_comment:document.getElementById('cfg-ai').checked,
+  };
+  const fd=new FormData();
+  fd.append('file1',file1);fd.append('file2',file2);fd.append('settings',JSON.stringify(settings));
+  if(profile1)fd.append('profile1',JSON.stringify(profile1));
+  if(profile2)fd.append('profile2',JSON.stringify(profile2));
+  try{
+    setProgress(30,'Анализ структуры...');
+    const resp=await fetch('/api/reconcile',{method:'POST',headers:authHeaders(),body:fd});
+    setProgress(70,'Сверка...');
+    const data=await resp.json();
+    if(!resp.ok){showToast(data.detail||'Ошибка сервера','error');setProgress(0,'Ошибка');btn.disabled=false;return;}
+    if(data.logs)data.logs.forEach(l=>setProgress(null,l));
+    setProgress(100,'✓ Сверка завершена');
+    if(data.history_saved===false && !isLoggedIn()){
+      setProgress(100,'✓ Сверка завершена (история не сохранена — гостевой режим)');
+    }
+    displayResults(data);
+  }catch(err){showToast('Ошибка: '+err.message,'error');setProgress(0,'Ошибка');}
+  btn.disabled=false;
+}
+
+function displayResults(data){
+  lastResult=data;allDisc=data.discrepancies||[];
+  renderTable(1,data.table1,data.highlight);renderTable(2,data.table2,data.highlight);
+  renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
+  renderSummary(data.summary);
+  if(isLoggedIn())loadHistory();
+  document.getElementById('btn-export').disabled=false;
+  const cnt=data.summary.total_discrepancies;
+  const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
+  if(cnt===0)showToast('✓ Расхождений не обнаружено','success');
+  else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
+  switchTab('discrepancies');
+  initTableResize(document.getElementById('disc-table-el'));
+}
+
+function setProgress(pct,msg){
+  const bar=document.getElementById('progress-bar'),txt=document.getElementById('progress-msg'),spin=document.getElementById('spinner');
+  if(pct!==null)bar.style.width=pct+'%';if(msg)txt.textContent=msg;
+  spin.classList.toggle('active',pct!==null&&pct>0&&pct<100);
+}
+
+// ── Discrepancies ─────────────────────────────────────────────────
+const TYPE_MAP={missing_in_counterparty:['❌ Нет у контрагента','badge-red'],missing_in_company:['❌ Нет у организации','badge-red'],amount_diff:['💰 Разница в суммах','badge-yellow'],date_diff:['📅 Разница в датах','badge-gray'],sign_mismatch:['🔀 Зеркальная КСФ','badge-blue']};
+const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray']};
+function renderDiscrepancies(discs,f1='',f2=''){
+  document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
+  document.getElementById('disc-col-ctr').textContent=f2?`У контрагента (${sn(f2)})`:'У контрагента';
+  const body=document.getElementById('disc-body');
+  if(!discs||!discs.length){body.innerHTML='<tr><td colspan="8" class="empty-state" style="color:var(--green)">✓ Расхождений не обнаружено</td></tr>';return;}
+  body.innerHTML=discs.map((d,i)=>{
+    const[tl,tb]=TYPE_MAP[d.type]||[d.type,'badge-gray'];
+    const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
+    const tc=d.type==='sign_mismatch'?'type-sign':`sev-${d.severity}`;
+    return`<tr class="${tc}" data-type="${d.type}"><td>${i+1}</td><td><span class="badge ${tb}">${tl}</span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
+  }).join('');
+  applyDiscFilter();
+}
+
+// ── Summary ───────────────────────────────────────────────────────
+function renderSummary(s){
+  const critical=s.critical_count||0;
+  document.getElementById('summary-cards').innerHTML=`
+    <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${s.total_discrepancies>0?'red':''}">${s.total_discrepancies}</div></div>
+    <div class="stat-card"><div class="label">Критических</div><div class="value ${critical>0?'red':''}">${critical}</div></div>
+    <div class="stat-card"><div class="label">Точных совпадений</div><div class="value">${s.exact_matches||0}</div></div>
+    <div class="stat-card"><div class="label">Нечётких совпадений</div><div class="value">${s.fuzzy_count||0}</div></div>`;
+  const dc=document.getElementById('debt-card');
+  if(s.debt_label){dc.style.display='block';document.getElementById('debt-label').textContent=s.debt_label;document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:'';}
+  const ac=document.getElementById('ai-card');
+  if(s.ai_comment){ac.style.display='block';document.getElementById('ai-text').innerHTML=md(s.ai_comment);}
+  else ac.style.display='none';
+}
+function md(t){
+  if(!t)return'';
+  t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  t=t.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
+  t=t.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
+  t=t.replace(/^### (.+)$/gm,'<h3>$1</h3>');t=t.replace(/^## (.+)$/gm,'<h2>$1</h2>');t=t.replace(/^# (.+)$/gm,'<h1>$1</h1>');
+  t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
+  t=t.replace(/^[-*] (.+)$/gm,'<li>$1</li>');t=t.replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>');
+  t=t.replace(/\n\n+/g,'</p><p>');return'<p>'+t+'</p>';
+}
+
+// ── Export ────────────────────────────────────────────────────────
+function openExportModal(){if(!lastResult)return;document.getElementById('exp-overlay').style.display='flex';}
+function closeExportModal(){document.getElementById('exp-overlay').style.display='none';}
+async function doExport(){
+  if(!lastResult)return;closeExportModal();
+  const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
+  const filtered=lastResult.discrepancies.filter(d=>allowed.has(d.type));
+  try{
+    const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
+      body:JSON.stringify({discrepancies:filtered,summary:lastResult.summary,file1_name:lastResult.file1_name,file2_name:lastResult.file2_name})});
+    if(!resp.ok){showToast('Ошибка экспорта','error');return;}
+    const blob=await resp.blob(),url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=`SverkAI_${today()}.xlsx`;a.click();
+    URL.revokeObjectURL(url);showToast('✓ Отчёт скачан','success');
+  }catch(e){showToast('Ошибка: '+e.message,'error');}
+}
+
+// ── History ───────────────────────────────────────────────────────
+async function loadHistory(){
+  const body=document.getElementById('hist-body');
+  if(!isLoggedIn()){
+    body.innerHTML='<tr><td colspan="6" class="empty-hist">Войдите с личным API-ключом для сохранения истории</td></tr>';
+    return;
+  }
+  try{
+    const resp=await fetch('/api/history',{headers:authHeaders()}),data=await resp.json();
+    historyData=[...data].reverse();
+    if(!data||!data.length){
+      body.innerHTML='<tr><td colspan="6" class="empty-hist">История пуста — выполните первую сверку</td></tr>';
+      return;
+    }
+    body.innerHTML=historyData.map((h,i)=>{
+      const hasResult=!!(h.result?.discrepancies);
+      return`<tr onclick="loadHistoryItem(${i})" title="${hasResult?'Нажмите для восстановления результатов':'Нет сохранённых данных'}">
+        <td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td>
+        <td>${h.total||0}</td><td>${h.critical||0}</td>
+        <td>${esc(trunc(h.debt_label||'',50))}${hasResult?' <span style="color:var(--green);font-size:11px">↩ восстановить</span>':''}</td>
+      </tr>`;
+    }).join('');
+  }catch{}
+}
+
+function loadHistoryItem(idx){
+  const h=historyData[idx];
+  if(!h?.result?.discrepancies){showToast('Нет сохранённых данных для этой записи','warn');return;}
+  const r=h.result;
+  lastResult={
+    discrepancies: r.discrepancies||[],
+    summary:       r.summary||{},
+    table1:        r.table1||{columns:[],rows:[],raw_rows:[]},
+    table2:        r.table2||{columns:[],rows:[],raw_rows:[]},
+    highlight:     r.highlight||{},
+    file1_name:    r.file1_name||h.file1||'',
+    file2_name:    r.file2_name||h.file2||'',
+  };
+  document.querySelectorAll('#hist-body tr').forEach((tr,i)=>tr.classList.toggle('hist-active',i===idx));
+  displayResults(lastResult);
+  showToast(`✓ Восстановлена сверка от ${h.date}`,'success');
+}
+
+// ── Search ────────────────────────────────────────────────────────
+function searchTable(num,q){
+  document.getElementById(`table${num}-wrap`).querySelectorAll('tbody tr').forEach(r=>
+    r.style.display=(!q||[...r.cells].some(c=>c.textContent.toLowerCase().includes(q.toLowerCase())))?'':'none');
+}
+
+// ── Utils ─────────────────────────────────────────────────────────
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function trunc(s,n){return s.length>n?s.slice(0,n)+'…':s;}
+function sn(n){const p=n.lastIndexOf('.');return p>0?n.slice(0,p):n;}
+function today(){return new Date().toISOString().slice(0,10).replace(/-/g,'');}
+function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className=`show ${type}`;setTimeout(()=>t.classList.remove('show'),4500);}
+
+// Init disc table resize after page load
+document.addEventListener('DOMContentLoaded',()=>{
+  initTableResize(document.getElementById('disc-table-el'));
+});
+</script>
+</body>
+</html>

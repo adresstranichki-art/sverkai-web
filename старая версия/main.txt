@@ -26,42 +26,12 @@ _REPORT_DIR = Path(tempfile.gettempdir()) / "sverkai_reports"
 _REPORT_DIR.mkdir(exist_ok=True)
 _DATA_DIR = Path(__file__).parent / "data"
 _DATA_DIR.mkdir(exist_ok=True)
-_HISTORY_FILE      = _DATA_DIR / "history.json"         # legacy (не используется)
-_ALLOWED_KEYS_FILE = _DATA_DIR / "allowed_keys.json"    # белый список (хеши ключей)
-ADMIN_SECRET       = os.environ.get("ADMIN_SECRET", "") # для управления белым списком
+_HISTORY_FILE = _DATA_DIR / "history.json"   # legacy / гостевая (не используется для хранения)
 
 
 # ════════════════════════════════════════════════════════════════════
 #  АВТОРИЗАЦИЯ / ИСТОРИЯ ПО ПОЛЬЗОВАТЕЛЯМ
 # ════════════════════════════════════════════════════════════════════
-
-def _load_allowed_keys() -> list:
-    """Загружает белый список. Каждая запись: {hash, label, added}."""
-    if _ALLOWED_KEYS_FILE.exists():
-        try:
-            with open(_ALLOWED_KEYS_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
-
-
-def _save_allowed_keys(entries: list) -> None:
-    with open(_ALLOWED_KEYS_FILE, "w", encoding="utf-8") as f:
-        json.dump(entries, f, ensure_ascii=False, indent=2)
-
-
-def _is_key_allowed(api_key: str) -> bool:
-    """Проверяет, есть ли ключ в белом списке.
-    Если файла нет или список пуст — dev-режим, всё разрешено."""
-    if not _ALLOWED_KEYS_FILE.exists():
-        return True
-    entries = _load_allowed_keys()
-    if not entries:
-        return True
-    h = _user_id(api_key)
-    return any(e.get("hash") == h for e in entries)
-
 
 def _user_id(api_key: str) -> str:
     """Хеш API-ключа — безопасный идентификатор пользователя."""
@@ -202,140 +172,6 @@ def parse_counterparty(path: str) -> pd.DataFrame:
         doc_num = _normalize_doc_num(m_num.group(1)) if m_num else None
         rows.append({'date': date_parsed, 'date_str': date_str, 'document': doc_val,
                      'doc_num': doc_num, 'debit': _to_float(debit), 'credit': _to_float(credit), 'raw_row': idx})
-    return pd.DataFrame(rows)
-
-
-def parse_standard_act(path: str) -> pd.DataFrame:
-    """Парсит одностороннний акт сверки формата М221:
-    col 0 = дата, col 1 = документ, col 10 = дебет, col 12 = кредит."""
-    ext = Path(path).suffix.lower()
-    engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
-    raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
-    date_re = re.compile(r'^\d{2}\.\d{2}\.\d{4}$')
-    _DOC_NUM_PATTERNS = [
-        re.compile(r'[No№#]\s*(М-\d+|\d[\w/-]*)'),
-        re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от'),
-        re.compile(r'\b(\d{4,})\b'),
-    ]
-    def _exnum(doc):
-        for p in _DOC_NUM_PATTERNS:
-            m = p.search(doc)
-            if m: return _normalize_doc_num(m.group(1))
-        return None
-    # Автодетект колонок дебет/кредит: сканируем 30 строк, ищем два чередующихся числовых столбца.
-    # Столбец «сумма документа» присутствует в каждой строке → его исключаем.
-    debit_col, credit_col = 10, 12
-    from collections import Counter
-    col_hits: Counter = Counter()
-    scan_rows = []
-    for i in range(6, min(50, len(raw))):
-        if date_re.match(str(raw.iloc[i, 0]).strip()):
-            scan_rows.append(i)
-            if len(scan_rows) >= 30: break
-    if scan_rows:
-        for i in scan_rows:
-            for c in range(2, len(raw.columns)):
-                v = str(raw.iloc[i, c]).strip()
-                if v in ('', 'nan', '-', '—'): continue
-                try: float(v.replace(',', '.').replace(' ', '').replace('\xa0', '')); col_hits[c] += 1
-                except: pass
-        # столбец с максимальным числом попаданий = сумма документа → исключаем
-        if col_hits:
-            max_col = col_hits.most_common(1)[0][0]
-            candidates = {c: n for c, n in col_hits.items() if c != max_col}
-            sorted_cands = sorted(candidates.keys())
-            if len(sorted_cands) >= 2:
-                debit_col, credit_col = sorted_cands[0], sorted_cands[1]
-            elif len(sorted_cands) == 1:
-                credit_col = sorted_cands[0]
-    rows = []
-    for idx in range(6, len(raw)):
-        row = raw.iloc[idx]
-        date_val = str(row[0]).strip() if pd.notna(row[0]) else ''
-        doc_val  = str(row[1]).strip() if pd.notna(row[1]) else ''
-        if not date_val or date_val == 'nan' or not date_re.match(date_val): continue
-        if not doc_val or doc_val == 'nan': continue
-        if any(kw in doc_val.lower() for kw in ['обороты', 'сальдо конечное']): break
-        d_raw = str(row[debit_col]).strip()  if debit_col  < len(row) and pd.notna(row[debit_col])  else ''
-        c_raw = str(row[credit_col]).strip() if credit_col < len(row) and pd.notna(row[credit_col]) else ''
-        debit  = _to_float(d_raw)
-        credit = _to_float(c_raw)
-        if debit is None and credit is None: continue
-        date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
-        doc_num = _exnum(doc_val)
-        rows.append({'date': date_parsed, 'date_str': date_val, 'document': doc_val,
-                     'doc_num': doc_num, 'debit': debit, 'credit': credit, 'raw_row': idx})
-    return pd.DataFrame(rows)
-
-
-def parse_two_sided_act(path: str) -> pd.DataFrame:
-    """Парсит двусторонний акт сверки (формат 220): обе стороны в одном листе.
-    Читает только сторону организации (левая половина):
-    col 1 = дата, col 2 = документ, col 4 = дебет, col 6 = кредит (позиции авто-определяются)."""
-    ext = Path(path).suffix.lower()
-    engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
-    raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
-    date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
-    _DOC_NUM_PATTERNS = [
-        re.compile(r'[No№#]\s*(М-\d+|\d[\w/-]*)'),
-        re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от'),
-        re.compile(r'\b(\d{4,})\b'),
-    ]
-    def _exnum(doc):
-        for p in _DOC_NUM_PATTERNS:
-            m = p.search(doc)
-            if m: return _normalize_doc_num(m.group(1))
-        return None
-    # Автодетект колонок дебет/кредит: сканируем левую половину листа по нескольким строкам.
-    date_col, doc_col, debit_col, credit_col = 1, 2, 4, 6
-    from collections import Counter
-    col_hits: Counter = Counter()
-    mid = max(len(raw.columns) // 2, 8)
-    scan_rows = []
-    for i in range(5, min(50, len(raw))):
-        if date_re.match(str(raw.iloc[i, 1]).strip()):
-            scan_rows.append(i)
-            if len(scan_rows) >= 30: break
-    for i in scan_rows:
-        for c in range(3, mid):
-            v = str(raw.iloc[i, c]).strip()
-            if v in ('', 'nan', '-', '—'): continue
-            try: float(v.replace(',', '.').replace(' ', '').replace('\xa0', '')); col_hits[c] += 1
-            except: pass
-    if col_hits:
-        sorted_cands = sorted(col_hits.keys())
-        if len(sorted_cands) >= 2:
-            debit_col, credit_col = sorted_cands[0], sorted_cands[1]
-        elif len(sorted_cands) == 1:
-            credit_col = sorted_cands[0]
-    rows = []
-    for idx in range(5, len(raw)):
-        row = raw.iloc[idx]
-        date_val = str(row[date_col]).strip() if pd.notna(row[date_col]) else ''
-        doc_val  = str(row[doc_col]).strip()  if pd.notna(row[doc_col])  else ''
-        if not date_val or date_val == 'nan' or not date_re.match(date_val): continue
-        if not doc_val  or doc_val  == 'nan': continue
-        if any(kw in doc_val.lower() for kw in ['обороты', 'сальдо конечное']): break
-        # Деб/кред: у двустороннего акта числа могут быть отрицательными (сторно)
-        d_raw = str(row[debit_col]).strip()  if debit_col  < len(row) and pd.notna(row[debit_col])  else ''
-        c_raw = str(row[credit_col]).strip() if credit_col < len(row) and pd.notna(row[credit_col]) else ''
-        debit  = _to_float(d_raw)
-        credit = _to_float(c_raw)
-        if debit is None and credit is None: continue
-        # Конвертация даты (поддержка 2-значного года)
-        date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
-        if pd.isna(date_parsed):
-            try:
-                parts = date_val.split('.')
-                if len(parts) == 3 and len(parts[2]) == 2:
-                    parts[2] = '20' + parts[2]
-                    date_parsed = pd.to_datetime('.'.join(parts), dayfirst=True, errors='coerce')
-            except Exception:
-                pass
-        date_str = date_parsed.strftime('%d.%m.%Y') if pd.notna(date_parsed) else date_val
-        doc_num = _exnum(doc_val)
-        rows.append({'date': date_parsed, 'date_str': date_str, 'document': doc_val,
-                     'doc_num': doc_num, 'debit': debit, 'credit': credit, 'raw_row': idx})
     return pd.DataFrame(rows)
 
 
@@ -539,43 +375,8 @@ def detect_file_type(path: str) -> str:
             for match in re.finditer(r'По данным [А-Яа-я]+ "(?!ПРООПТ)', text):
                 other_pos = match.start(); break
             if proopt_pos != -1 and (other_pos == -1 or proopt_pos < other_pos): return 'proopt'
-            if other_pos != -1 and (proopt_pos == -1 or other_pos < proopt_pos):
-                # Определяем: двусторонний или обычный контрагентский формат
-                try:
-                    raw_full = pd.read_excel(path, header=None, dtype=str, nrows=20)
-                    date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
-                    # Двусторонний: NaN в col 0, дата в col 1
-                    has_two_sided = any(
-                        pd.isna(raw_full.iloc[i, 0]) and date_re.match(str(raw_full.iloc[i, 1]).strip())
-                        for i in range(8, min(15, len(raw_full)))
-                    )
-                    # Однострочный с датой в col 0 (нестандартный контрагент / формат МА)
-                    has_date_col0 = any(
-                        date_re.match(str(raw_full.iloc[i, 0]).strip())
-                        for i in range(8, min(15, len(raw_full)))
-                    )
-                    if has_two_sided: return 'two_sided_act'
-                    if has_date_col0: return 'standard_act'
-                except Exception:
-                    pass
-                return 'counterparty'
+            if other_pos != -1 and (proopt_pos == -1 or other_pos < proopt_pos): return 'counterparty'
             if 'ПРООПТ' in text: return 'proopt'
-            # Проверяем также без явного «контрагента»
-            try:
-                raw_full = pd.read_excel(path, header=None, dtype=str, nrows=20)
-                date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
-                has_two_sided = any(
-                    pd.isna(raw_full.iloc[i, 0]) and date_re.match(str(raw_full.iloc[i, 1]).strip())
-                    for i in range(8, min(15, len(raw_full)))
-                )
-                has_date_col0 = any(
-                    date_re.match(str(raw_full.iloc[i, 0]).strip())
-                    for i in range(8, min(15, len(raw_full)))
-                )
-                if has_two_sided: return 'two_sided_act'
-                if has_date_col0: return 'standard_act'
-            except Exception:
-                pass
             return 'counterparty'
     except Exception:
         pass
@@ -611,27 +412,17 @@ def claude_detect_columns(path: str, api_key: str) -> Optional[dict]:
 ФРАГМЕНТ ФАЙЛА (первые 30 строк, колонки пронумерованы с 0):
 {preview}
 
-ВАЖНЫЕ ПРАВИЛА АНАЛИЗА:
-1. Если лист двусторонний (обе стороны рядом — «По данным X» и «По данным Y»),
-   читай ТОЛЬКО левую сторону организации (меньшие индексы колонок).
-2. Дата может быть в формате ДД.ММ.ГГ или ДД.ММ.ГГГГ.
-3. «Сумма документа» — вспомогательная колонка (присутствует в каждой строке).
-   Дебет и Кредит — взаимоисключающие: в каждой строке заполнена только одна из них.
-4. Суммы со знаком минус (сторно/возврат) — это нормально, не путай с кредитом.
-5. Строки-заголовки, сальдо начальное, «обороты за период», «сальдо конечное» — НЕ данные.
-6. Если есть отдельная колонка с типом операции (Оплата / Продажа / Приход) — укажи doc_type_col.
-
 Верни ТОЛЬКО корректный JSON без markdown, без комментариев:
 {{
   "header_row": <номер строки с заголовками (0-based), или null>,
   "data_start_row": <номер первой строки с данными транзакций (0-based)>,
   "date_col": <индекс колонки с датой операции (0-based)>,
-  "doc_col": <индекс колонки с наименованием/описанием документа (0-based)>,
-  "doc_num_col": <индекс колонки ТОЛЬКО с номером документа (0-based), или null>,
+  "doc_col": <индекс колонки с наименованием документа (0-based)>,
+  "doc_num_col": <индекс колонки с ТОЛЬКО номером документа (0-based), или null>,
   "doc_type_col": <индекс колонки с типом операции (0-based), или null>,
-  "debit_col": <индекс колонки Дебет — поступления/продажи (0-based), или null>,
-  "credit_col": <индекс колонки Кредит — оплаты/погашения (0-based), или null>,
-  "amount_col": <индекс единственной колонки суммы если нет раздельных дебет/кредит (0-based), или null>,
+  "debit_col": <индекс колонки Дебет (0-based), или null>,
+  "credit_col": <индекс колонки Кредит (0-based), или null>,
+  "amount_col": <индекс единственной колонки суммы (0-based), или null>,
   "amount_sign": <"positive_is_credit" | "positive_is_debit" | "signed" | "unknown">,
   "footer_keywords": ["обороты за период", "сальдо конечное"],
   "confidence": <"high" | "medium" | "low">
@@ -995,66 +786,29 @@ def hybrid_reconcile(df1, df2, type1, type2, client, progress_cb=None, settings=
 # ════════════════════════════════════════════════════════════════════
 
 def _load_and_parse(path: str, logs: list, api_key: str = ""):
-    """Универсальная загрузка файла.
-
-    Порядок приоритетов:
-    1. Кеш профиля (col_profiles.json) — мгновенно, без API-вызова.
-    2. Форматы с уникальными маркерами (ПРООПТ, ЭМЕКС, PDF) — специализированные парсеры.
-    3. Всё остальное → claude_detect_columns → parse_with_profile.
-       Результат кешируется, следующий файл того же шаблона идёт по пути 1.
-    """
-    eff_key = _effective_key(api_key)
-    display_df = parse_generic(path)
-    fname = Path(path).name
-
-    # ── 1. Кеш профиля ─────────────────────────────────────────────
-    cache_file = _DATA_DIR / 'col_profiles.json'
-    cache: dict = {}
-    if cache_file.exists():
-        try:
-            with open(cache_file, encoding='utf-8') as f:
-                cache = json.load(f)
-        except Exception:
-            pass
-    cache_key = f"col_profile_{fname}"
-    if cache_key in cache:
-        logs.append(f"Использую сохранённый профиль для {fname}")
-        profile = cache[cache_key]
-        df = parse_with_profile(path, profile)
-        if not df.empty:
-            return df, display_df, 'generic_detected', 'Кеш профиля'
-
-    # ── 2. Форматы с уникальными маркерами ─────────────────────────
     ftype = detect_file_type(path)
+    display_df = parse_generic(path)
     if ftype == 'proopt':
         return parse_proopt(path), display_df, ftype, 'ПРООПТ'
-    if ftype == 'emex':
+    elif ftype == 'emex':
         return parse_emex(path), display_df, ftype, 'ЭМЕКС'
-    if ftype == 'pdf_act':
+    elif ftype == 'counterparty':
+        return parse_counterparty(path), display_df, 'generic_detected', 'Акт сверки (контрагент)'
+    elif ftype == 'pdf_act':
         return parse_pdf_act_to_structured(path), display_df, 'generic_detected', 'PDF акт сверки'
-
-    # ── 3. Универсальный путь через Claude ─────────────────────────
-    if not eff_key:
-        raise HTTPException(status_code=422,
-            detail=f"Формат файла '{fname}' требует API-ключ для автоматического распознавания структуры.")
-
-    logs.append(f"Анализирую структуру {fname} через AI...")
-    profile = claude_detect_columns(path, eff_key)
-
-    if not profile or profile.get('confidence') == 'low':
-        raise HTTPException(status_code=422,
-            detail=f"Не удалось определить структуру файла '{fname}'. "
-                   "Попробуйте другой файл или обратитесь к администратору.")
-
-    df = parse_with_profile(path, profile)
-    if df.empty:
-        raise HTTPException(status_code=422,
-            detail=f"Файл '{fname}' распознан, но не содержит транзакций. "
-                   "Проверьте, что файл не пустой и содержит данные сверки.")
-
-    confidence = profile.get('confidence', 'medium')
-    logs.append(f"Структура {fname} определена (уверенность: {confidence}), строк: {len(df)}")
-    return df, display_df, 'generic_detected', f'Автодетект AI ({confidence})'
+    else:
+        eff_key = _effective_key(api_key)
+        if not eff_key:
+            raise HTTPException(status_code=422,
+                detail=f"Формат файла '{Path(path).name}' не распознан. "
+                       "Необходим API-ключ для автодетекта.")
+        logs.append(f"Анализирую структуру {Path(path).name} через AI...")
+        profile = claude_detect_columns(path, eff_key)
+        if not profile or profile.get('confidence') == 'low':
+            raise HTTPException(status_code=422,
+                detail=f"Не удалось определить структуру файла '{Path(path).name}'. "
+                       "Обратитесь к администратору.")
+        return parse_with_profile(path, profile), display_df, 'generic_detected', 'Автодетект AI'
 
 
 def _df_to_records(df: pd.DataFrame):
@@ -1077,16 +831,12 @@ def _df_to_records(df: pd.DataFrame):
 
 @app.post("/api/validate-key")
 async def validate_key(payload: dict):
-    """Проверяет Anthropic API-ключ: формат → белый список → реальный вызов."""
+    """Проверяет Anthropic API-ключ пользователя."""
     key = payload.get("api_key", "").strip()
     if not key:
         return JSONResponse({"valid": False, "error": "Ключ не указан"})
     if not key.startswith("sk-ant-"):
         return JSONResponse({"valid": False, "error": "Неверный формат ключа (должен начинаться с sk-ant-)"})
-    # Проверка белого списка
-    if not _is_key_allowed(key):
-        return JSONResponse({"valid": False, "error": "Ключ не входит в список разрешённых. Обратитесь к администратору."})
-    # Проверка через реальный вызов к Anthropic
     try:
         client = Anthropic(api_key=key)
         client.messages.create(
@@ -1099,51 +849,6 @@ async def validate_key(payload: dict):
         if "authentication" in err.lower() or "401" in err:
             return JSONResponse({"valid": False, "error": "Ключ недействителен"})
         return JSONResponse({"valid": False, "error": f"Ошибка проверки: {err[:120]}"})
-
-
-# ── Управление белым списком (только для администратора) ─────────────
-
-@app.post("/api/admin/add-key")
-async def admin_add_key(payload: dict):
-    """Добавляет ключ в белый список. Требует ADMIN_SECRET в теле."""
-    if not ADMIN_SECRET or payload.get("admin_secret") != ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Нет доступа")
-    key  = payload.get("api_key", "").strip()
-    label = payload.get("label", "").strip() or "—"
-    if not key:
-        raise HTTPException(status_code=400, detail="api_key не указан")
-    h = _user_id(key)
-    entries = _load_allowed_keys()
-    if any(e.get("hash") == h for e in entries):
-        return JSONResponse({"ok": False, "message": "Ключ уже в списке", "hash": h})
-    entries.append({"hash": h, "label": label, "added": datetime.now().strftime("%Y-%m-%d")})
-    _save_allowed_keys(entries)
-    return JSONResponse({"ok": True, "hash": h, "label": label, "total": len(entries)})
-
-
-@app.post("/api/admin/remove-key")
-async def admin_remove_key(payload: dict):
-    """Удаляет ключ из белого списка по хешу или по api_key."""
-    if not ADMIN_SECRET or payload.get("admin_secret") != ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Нет доступа")
-    h = payload.get("hash", "").strip()
-    if not h and payload.get("api_key"):
-        h = _user_id(payload["api_key"].strip())
-    entries = _load_allowed_keys()
-    before  = len(entries)
-    entries = [e for e in entries if e.get("hash") != h]
-    _save_allowed_keys(entries)
-    removed = before - len(entries)
-    return JSONResponse({"ok": True, "removed": removed, "total": len(entries)})
-
-
-@app.get("/api/admin/list-keys")
-async def admin_list_keys(request: Request):
-    """Возвращает белый список (без реальных ключей — только хеши и метки)."""
-    secret = request.headers.get("X-Admin-Secret", "")
-    if not ADMIN_SECRET or secret != ADMIN_SECRET:
-        raise HTTPException(status_code=403, detail="Нет доступа")
-    return JSONResponse({"entries": _load_allowed_keys()})
 
 
 @app.post("/api/reconcile")
