@@ -191,6 +191,13 @@ def _extract_period_bounds(text: str) -> tuple[Optional[pd.Timestamp], Optional[
                 pd.to_datetime(match.group(1), dayfirst=True, errors='coerce'),
                 pd.to_datetime(match.group(2), dayfirst=True, errors='coerce'),
             )
+    match = re.search(r'за период[:\s]+(\d{4})\s*г', compact, re.IGNORECASE)
+    if match:
+        year = int(match.group(1))
+        return (
+            pd.Timestamp(year=year, month=1, day=1),
+            pd.Timestamp(year=year, month=12, day=31),
+        )
     match = re.search(r'([1-4])\s*квартал\s*(\d{4})', compact, re.IGNORECASE)
     if match:
         quarter = int(match.group(1))
@@ -225,20 +232,46 @@ def _extract_balance_meta(raw: pd.DataFrame) -> dict:
         if not row_vals:
             continue
         row_text = ' '.join(row_vals).lower()
-        if start_balance is None and 'сальдо' in row_text and 'началь' in row_text:
-            for value in raw.iloc[idx].tolist():
-                amount = _to_float(value)
-                if amount is not None:
-                    start_balance = amount
-                    start_row_text = ' '.join(row_vals)
-                    break
-        if end_balance is None and 'сальдо' in row_text and 'конеч' in row_text:
-            for value in raw.iloc[idx].tolist():
-                amount = _to_float(value)
-                if amount is not None:
-                    end_balance = amount
-                    end_row_text = ' '.join(row_vals)
-                    break
+        numeric_candidates = []
+        for col_idx, value in enumerate(raw.iloc[idx].tolist()):
+            parsed = _to_float(value)
+            if parsed is not None:
+                numeric_candidates.append((col_idx, float(parsed)))
+        if not numeric_candidates:
+            continue
+        amount_candidates = numeric_candidates
+        # В строках сальдо некоторых актов по краям стоят порядковые номера строк
+        # обеих сторон. Если крайние значения одинаковые и между ними есть
+        # существенно большая сумма, отбрасываем эти служебные номера.
+        if len(numeric_candidates) >= 3:
+            first_val = numeric_candidates[0][1]
+            last_val = numeric_candidates[-1][1]
+            middle_candidates = numeric_candidates[1:-1]
+            if (
+                middle_candidates
+                and abs(first_val - last_val) <= 0.01
+                and abs(first_val) < max(abs(v) for _, v in middle_candidates)
+            ):
+                amount_candidates = middle_candidates
+        amount = amount_candidates[-1][1]
+        has_saldo = 'сальдо' in row_text
+        if not has_saldo:
+            continue
+        if start_balance is None and 'началь' in row_text:
+            start_balance = amount
+            start_row_text = ' '.join(row_vals)
+            continue
+        if end_balance is None and 'конеч' in row_text:
+            end_balance = amount
+            end_row_text = ' '.join(row_vals)
+            continue
+        if 'началь' not in row_text and 'конеч' not in row_text:
+            if start_balance is None:
+                start_balance = amount
+                start_row_text = ' '.join(row_vals)
+            else:
+                end_balance = amount
+                end_row_text = ' '.join(row_vals)
     if period_from is None:
         period_from = _extract_any_date(start_row_text)
     if period_to is None:
@@ -263,6 +296,32 @@ def _attach_meta(df: pd.DataFrame, **meta) -> pd.DataFrame:
             continue
         df.attrs[key] = value
     return df
+
+
+def _balance_state_doc_type(doc: str) -> str:
+    text = str(doc or '').lower()
+    if 'оплата' in text:
+        return 'оплата'
+    if 'ксф' in text or 'коррект' in text:
+        return 'корректировка'
+    if 'поступление тмц' in text:
+        return 'поставка'
+    return ''
+
+
+def _balance_state_doc_num(doc: str) -> Optional[str]:
+    text = str(doc or '')
+    doc_type = _balance_state_doc_type(text)
+    if doc_type == 'поставка':
+        match = re.search(r'№\s*([A-Za-zА-Яа-я-]*\d[\w/-]*)', text, re.IGNORECASE)
+        if match:
+            return _normalize_doc_num(match.group(1))
+        return _extract_doc_num(text)
+    if doc_type == 'корректировка':
+        match = re.search(r',\s*([A-Za-zА-Яа-я]+-\d+)\)', text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip().lower().replace('-', '_')
+    return None
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -339,6 +398,43 @@ def parse_partner_ledger_act(path: str) -> pd.DataFrame:
             'credit': credit,
             'match_date': match_date,
             'signed_amount': float(debit or 0) - float(credit or 0),
+            'raw_row': idx,
+        })
+    return _attach_meta(pd.DataFrame(rows), **meta)
+
+
+def parse_balance_state_act(path: str) -> pd.DataFrame:
+    ext = Path(path).suffix.lower()
+    engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
+    raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
+    rows = []
+    meta = _extract_balance_meta(raw)
+    for idx in range(6, len(raw)):
+        row = raw.iloc[idx]
+        doc_val = str(row[2]).strip() if pd.notna(row[2]) else ''
+        if not doc_val or doc_val == 'nan':
+            continue
+        doc_low = doc_val.lower()
+        if 'сальдо' in doc_low or 'обороты' in doc_low:
+            continue
+        debit = _to_float(row[3]) if len(row) > 3 else None
+        credit = _to_float(row[4]) if len(row) > 4 else None
+        if debit is None and credit is None:
+            continue
+        match_date = _extract_any_date(doc_val)
+        date_parsed = match_date if pd.notna(match_date) else pd.NaT
+        date_str = date_parsed.strftime('%d.%m.%Y') if pd.notna(date_parsed) else ''
+        doc_type = _balance_state_doc_type(doc_val)
+        rows.append({
+            'date': date_parsed,
+            'date_str': date_str,
+            'document': doc_val,
+            'doc_num': _balance_state_doc_num(doc_val),
+            'doc_type': doc_type,
+            'debit': debit,
+            'credit': credit,
+            'match_date': match_date,
+            'signed_amount': float(credit or 0) - float(debit or 0),
             'raw_row': idx,
         })
     return _attach_meta(pd.DataFrame(rows), **meta)
@@ -710,12 +806,16 @@ def detect_file_type(path: str) -> str:
     try:
         raw = pd.read_excel(path, header=None, dtype=str, nrows=15)
         text = ' '.join(str(v) for v in raw.values.flatten() if pd.notna(v))
+        text_lower = text.lower()
         if 'Номер документа' in text and 'Эмекс' in text: return 'emex'
         if 'Дата операции' in text and 'Тип документа' in text: return 'emex'
+        if ('№ п/п' in text and 'наименование операции, документы' in text_lower
+                and 'по состоянию на' in text_lower and 'акт сверки' in text_lower):
+            return 'balance_state_act'
         if ('Наименование договора' in text and 'Номер С/Ф' in text and 'Дата С/Ф' in text
                 and 'По данным' in text and 'Сальдо начальное' in text):
             return 'partner_ledger_act'
-        is_act = ('акт сверки' in text.lower() or 'взаимных расчетов' in text.lower() or 'По данным ООО' in text)
+        is_act = ('акт сверки' in text_lower or 'взаимных расчетов' in text_lower or 'По данным ООО' in text)
         if is_act:
             raw_full = None
             has_two_sided = False
@@ -1103,6 +1203,12 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     if end1 is not None and end2 is not None:
         closing_diff = round(float(end1) - float(end2), 2)
 
+    transaction_net_diff = net_period_txn
+    if opening_diff is not None and closing_diff is not None:
+        transaction_net_diff = round(closing_diff - opening_diff, 2)
+    elif closing_diff is not None and opening_diff is None:
+        transaction_net_diff = closing_diff
+
     net_period = net_period_txn
     if closing_diff is not None:
         if abs(abs(net_period_txn) - abs(closing_diff)) <= 0.01 and abs(net_period_txn) >= 0.01:
@@ -1173,7 +1279,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                     'period_mismatch': bool(period1_str and period2_str and period1_str != period2_str),
                     'opening_balance_difference': opening_diff,
                     'closing_balance_difference': closing_diff,
-                    'transaction_net_difference': net_period_txn},
+                    'transaction_net_difference': transaction_net_diff},
         'matched1': list(matched1), 'matched2': list(matched2),
         'missing_rows1': list(missing_in_2['raw_row'].tolist()),
         'missing_rows2': list(missing_in_1['raw_row'].tolist()),
@@ -1275,6 +1381,11 @@ def _load_and_parse(path: str, logs: list, api_key: str = "", original_filename:
         df = parse_partner_ledger_act(path)
         if not df.empty:
             return df, display_df, 'generic_detected', 'Акт сверки (реестр проводок)'
+
+    if ftype == 'balance_state_act':
+        df = parse_balance_state_act(path)
+        if not df.empty:
+            return df, display_df, 'generic_detected', 'Акт сверки (сальдо по операциям)'
 
     if ftype == 'pdf_act':
         return parse_pdf_act_to_structured(path), display_df, 'generic_detected', 'PDF акт сверки'
@@ -1565,6 +1676,8 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
             df = parse_emex(path); label = "ЭМЕКС"
         elif ftype == "pdf_act":
             df = parse_pdf_act_to_structured(path); label = "PDF акт сверки"; ftype = "generic_detected"
+        elif ftype == "balance_state_act":
+            df = parse_balance_state_act(path); label = "Акт сверки (сальдо по операциям)"; ftype = "generic_detected"
         elif ftype == "standard_act":
             df = parse_standard_act(path); label = "Акт сверки (односторонний)"; ftype = "generic_detected"
         elif ftype == "two_sided_act":
