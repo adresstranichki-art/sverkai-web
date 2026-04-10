@@ -587,17 +587,8 @@ def detect_file_type(path: str) -> str:
 # ════════════════════════════════════════════════════════════════════
 
 def claude_detect_columns(path: str, api_key: str) -> Optional[dict]:
-    cache_key = f"col_profile_{Path(path).name}"
-    cache_file = _DATA_DIR / 'col_profiles.json'
-    cache = {}
-    if cache_file.exists():
-        try:
-            with open(cache_file, encoding='utf-8') as f:
-                cache = json.load(f)
-        except Exception:
-            pass
-    if cache_key in cache:
-        return cache[cache_key]
+    """Определяет структуру колонок файла через Claude API.
+    Кеширование профилей выполняется в _load_and_parse по оригинальному имени файла."""
     try:
         ext = Path(path).suffix.lower()
         engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
@@ -654,12 +645,7 @@ def claude_detect_columns(path: str, api_key: str) -> Optional[dict]:
         else:
             profile = json.loads(text)
         if profile.get('confidence') != 'low':
-            cache[cache_key] = profile
-            try:
-                with open(cache_file, 'w', encoding='utf-8') as f:
-                    json.dump(cache, f, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
+            pass  # кеширование выполняется в _load_and_parse
         return profile
     except Exception:
         return None
@@ -994,20 +980,53 @@ def hybrid_reconcile(df1, df2, type1, type2, client, progress_cb=None, settings=
 #  ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ЗАГРУЗКИ
 # ════════════════════════════════════════════════════════════════════
 
-def _load_and_parse(path: str, logs: list, api_key: str = ""):
+def _load_and_parse(path: str, logs: list, api_key: str = "", original_filename: str = ""):
     """Универсальная загрузка файла.
 
     Порядок приоритетов:
-    1. Кеш профиля (col_profiles.json) — мгновенно, без API-вызова.
-    2. Форматы с уникальными маркерами (ПРООПТ, ЭМЕКС, PDF) — специализированные парсеры.
-    3. Всё остальное → claude_detect_columns → parse_with_profile.
-       Результат кешируется, следующий файл того же шаблона идёт по пути 1.
+    1. Форматы с уникальными маркерами (ПРООПТ, ЭМЕКС, PDF, стандартные акты)
+       — определяются по содержимому, API-ключ не нужен.
+    2. Неизвестный формат → claude_detect_columns → parse_with_profile.
+       Профиль кешируется по оригинальному имени файла, чтобы повторный
+       файл с таким же именем обрабатывался без API-вызова.
+
+    Кеш строится по original_filename (имя, данное пользователем), а НЕ по
+    временному пути на диске — иначе все файлы с именем file1.xlsx получали
+    бы один и тот же профиль независимо от содержимого.
     """
     eff_key = _effective_key(api_key)
     display_df = parse_generic(path)
-    fname = Path(path).name
+    # Используем оригинальное имя для кеша; если не передано — имя tempfile
+    cache_name = original_filename or Path(path).name
 
-    # ── 1. Кеш профиля ─────────────────────────────────────────────
+    # ── 1. Определяем тип по содержимому ───────────────────────────
+    ftype = detect_file_type(path)
+
+    if ftype == 'proopt':
+        return parse_proopt(path), display_df, ftype, 'ПРООПТ'
+
+    if ftype == 'emex':
+        return parse_emex(path), display_df, ftype, 'ЭМЕКС'
+
+    if ftype == 'pdf_act':
+        return parse_pdf_act_to_structured(path), display_df, 'generic_detected', 'PDF акт сверки'
+
+    if ftype == 'standard_act':
+        df = parse_standard_act(path)
+        if not df.empty:
+            return df, display_df, 'generic_detected', 'Акт сверки (односторонний)'
+
+    if ftype == 'two_sided_act':
+        df = parse_two_sided_act(path)
+        if not df.empty:
+            return df, display_df, 'generic_detected', 'Акт сверки (двусторонний)'
+
+    if ftype == 'counterparty':
+        df = parse_counterparty(path)
+        if not df.empty:
+            return df, display_df, 'generic_detected', 'Акт сверки (контрагент)'
+
+    # ── 2. Неизвестный формат — кеш профиля или Claude ─────────────
     cache_file = _DATA_DIR / 'col_profiles.json'
     cache: dict = {}
     if cache_file.exists():
@@ -1016,44 +1035,43 @@ def _load_and_parse(path: str, logs: list, api_key: str = ""):
                 cache = json.load(f)
         except Exception:
             pass
-    cache_key = f"col_profile_{fname}"
+    cache_key = f"col_profile_{cache_name}"
     if cache_key in cache:
-        logs.append(f"Использую сохранённый профиль для {fname}")
+        logs.append(f"Использую сохранённый профиль для {cache_name}")
         profile = cache[cache_key]
         df = parse_with_profile(path, profile)
         if not df.empty:
             return df, display_df, 'generic_detected', 'Кеш профиля'
 
-    # ── 2. Форматы с уникальными маркерами ─────────────────────────
-    ftype = detect_file_type(path)
-    if ftype == 'proopt':
-        return parse_proopt(path), display_df, ftype, 'ПРООПТ'
-    if ftype == 'emex':
-        return parse_emex(path), display_df, ftype, 'ЭМЕКС'
-    if ftype == 'pdf_act':
-        return parse_pdf_act_to_structured(path), display_df, 'generic_detected', 'PDF акт сверки'
-
-    # ── 3. Универсальный путь через Claude ─────────────────────────
     if not eff_key:
         raise HTTPException(status_code=422,
-            detail=f"Формат файла '{fname}' требует API-ключ для автоматического распознавания структуры.")
+            detail=f"Формат файла '{cache_name}' не распознан автоматически. "
+                   "Укажите API-ключ для определения структуры через AI.")
 
-    logs.append(f"Анализирую структуру {fname} через AI...")
+    logs.append(f"Анализирую структуру {cache_name} через AI...")
     profile = claude_detect_columns(path, eff_key)
 
     if not profile or profile.get('confidence') == 'low':
         raise HTTPException(status_code=422,
-            detail=f"Не удалось определить структуру файла '{fname}'. "
+            detail=f"Не удалось определить структуру файла '{cache_name}'. "
                    "Попробуйте другой файл или обратитесь к администратору.")
 
     df = parse_with_profile(path, profile)
     if df.empty:
         raise HTTPException(status_code=422,
-            detail=f"Файл '{fname}' распознан, но не содержит транзакций. "
-                   "Проверьте, что файл не пустой и содержит данные сверки.")
+            detail=f"Файл '{cache_name}' распознан, но не содержит транзакций. "
+                   "Проверьте, что файл содержит данные сверки.")
+
+    # Кешируем профиль по оригинальному имени файла
+    cache[cache_key] = profile
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
     confidence = profile.get('confidence', 'medium')
-    logs.append(f"Структура {fname} определена (уверенность: {confidence}), строк: {len(df)}")
+    logs.append(f"Структура {cache_name} определена (уверенность: {confidence}), строк: {len(df)}")
     return df, display_df, 'generic_detected', f'Автодетект AI ({confidence})'
 
 
@@ -1173,12 +1191,12 @@ async def reconcile(
 
         logs = []
         try:
-            df1p, df1d, ft1, lb1 = _load_and_parse(p1, logs, user_key)
+            df1p, df1d, ft1, lb1 = _load_and_parse(p1, logs, user_key, file1.filename)
         except HTTPException: raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Ошибка чтения файла 1 ({file1.filename}): {e}")
         try:
-            df2p, df2d, ft2, lb2 = _load_and_parse(p2, logs, user_key)
+            df2p, df2d, ft2, lb2 = _load_and_parse(p2, logs, user_key, file2.filename)
         except HTTPException: raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Ошибка чтения файла 2 ({file2.filename}): {e}")
@@ -1277,15 +1295,20 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
             df = parse_proopt(path); label = "ПРООПТ"
         elif ftype == "emex":
             df = parse_emex(path); label = "ЭМЕКС"
-        elif ftype == "counterparty":
-            df = parse_counterparty(path); label = "Акт сверки (контрагент)"; ftype = "generic_detected"
         elif ftype == "pdf_act":
             df = parse_pdf_act_to_structured(path); label = "PDF акт сверки"; ftype = "generic_detected"
+        elif ftype == "standard_act":
+            df = parse_standard_act(path); label = "Акт сверки (односторонний)"; ftype = "generic_detected"
+        elif ftype == "two_sided_act":
+            df = parse_two_sided_act(path); label = "Акт сверки (двусторонний)"; ftype = "generic_detected"
+        elif ftype == "counterparty":
+            df = parse_counterparty(path); label = "Акт сверки (контрагент)"; ftype = "generic_detected"
         else:
             if eff_key:
                 profile = claude_detect_columns(path, eff_key)
                 if profile and profile.get("confidence") != "low":
-                    df = parse_with_profile(path, profile); label = "Автодетект AI"; ftype = "generic_detected"
+                    df = parse_with_profile(path, profile)
+                    label = "Автодетект AI"; ftype = "generic_detected"
                 else:
                     df = parse_generic(path); label = "Требуется настройка"; needs_manual = True
             else:
