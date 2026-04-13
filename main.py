@@ -90,6 +90,15 @@ def _save_user_history(history: list, api_key: str = "") -> None:
     with open(f, "w", encoding="utf-8") as fp:
         json.dump(history[-50:], fp, ensure_ascii=False, indent=2)
 
+
+def _clear_user_history(api_key: str = "") -> None:
+    """Очищает историю текущего авторизованного пользователя."""
+    if not api_key or not api_key.strip():
+        return
+    f = _user_history_file(api_key)
+    if f.exists():
+        f.unlink()
+
 def _get_user_key(request: Request) -> str:
     """Извлекает личный API-ключ пользователя из заголовка запроса."""
     return request.headers.get("X-Api-Key", "").strip()
@@ -996,6 +1005,18 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         if _sf(r.get('credit')) is not None: return 'credit'
         return None
 
+    def _display_effect(r):
+        return round((_sf(r.get('debit')) or 0.0) - (_sf(r.get('credit')) or 0.0), 2)
+
+    def _side_label(r):
+        debit = _sf(r.get('debit'))
+        credit = _sf(r.get('credit'))
+        if debit is not None:
+            return f"Дебет: {debit:+,.2f} руб."
+        if credit is not None:
+            return f"Кредит: {credit:+,.2f} руб."
+        return ''
+
     def _has_sign_hint(r):
         text = f"{r.get('doc_type', '')} {r.get('document', '')}"
         return bool(_sign_pat.search(text))
@@ -1229,19 +1250,27 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
 
     if cfg.get('find_sign_mismatch', True):
         for ro, rc in smm_pairs:
-            oc = _sf(ro.get('credit')); od = _sf(ro.get('debit'))
-            if oc is not None:
-                oa = abs(oc); ca = abs(_sf(rc.get('debit')) or 0.0)
-                ol = f"Кредит: +{oa:,.2f} руб."; cl = f"Дебет: -{ca:,.2f} руб."
-            else:
-                oa = abs(od or 0.0); ca = abs(_sf(rc.get('credit')) or 0.0)
-                ol = f"Дебет: -{oa:,.2f} руб."; cl = f"Кредит: +{ca:,.2f} руб."
-            if min_amount and (oa + ca) / 2 < min_amount: continue
-            discrepancies.append({'type':'sign_mismatch','document_number':ro.get('document',''),
-                'description':'Одна операция, противоположный знак',
-                'company_value':ol,'supplier_value':cl,'difference':f"{oa + ca:,.2f}",
-                'severity':'high','row_company':ro.get('raw_row',0),'row_supplier':rc.get('raw_row',0),
-                'date':ro.get('date_str','')})
+            effect_company = _display_effect(ro)
+            effect_supplier = _display_effect(rc)
+            effect_diff = round(abs(effect_company - effect_supplier), 2)
+            amount = max(abs(effect_company), abs(effect_supplier))
+            if min_amount and amount < min_amount: continue
+            is_technical = effect_diff <= 0.01
+            discrepancies.append({
+                'type':'technical_mirror' if is_technical else 'sign_mismatch',
+                'document_number':ro.get('document',''),
+                'description':(
+                    'Разная сторона отражения сторно, влияние на сальдо совпадает'
+                    if is_technical else
+                    'Одна операция отражена с противоположным влиянием на сальдо'
+                ),
+                'company_value':f"{_side_label(ro)}; эффект {effect_company:+,.2f} руб.",
+                'supplier_value':f"{_side_label(rc)}; эффект {effect_supplier:+,.2f} руб.",
+                'difference':f"{effect_diff:,.2f}",
+                'severity':'low' if is_technical else 'high',
+                'row_company':ro.get('raw_row',0),'row_supplier':rc.get('raw_row',0),
+                'date':ro.get('date_str','')
+            })
 
     if cfg.get('find_amount_diff', True):
         for r1, r2, s1, s2 in amount_diff_pairs:
@@ -1347,10 +1376,11 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
 
     window_suggestion = _build_window_suggestion(missing_in_2, missing_in_1)
     critical = sum(1 for d in discrepancies if d['severity'] == 'high')
+    technical_mirror_count = sum(1 for d in discrepancies if d.get('type') == 'technical_mirror')
     ai_comment = ''
     if client and discrepancies and cfg.get('ai_comment', True):
         try:
-            sample = [d for d in discrepancies if d['type'] != 'date_diff'][:30]
+            sample = [d for d in discrepancies if d['type'] not in ('date_diff', 'technical_mirror')][:30]
             if sample:
                 msg = client.messages.create(model=MODEL_MAIN, max_tokens=600, temperature=0,
                     system="Ты бухгалтер-аналитик. Дай краткое резюме расхождений в акте сверки. 3-5 предложений на русском языке. Только суть, без лишних слов.",
@@ -1377,7 +1407,8 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                     'opening_balance_difference': opening_diff,
                     'closing_balance_difference': closing_diff,
                     'transaction_net_difference': transaction_net_diff,
-                    'window_suggestion': window_suggestion},
+                    'window_suggestion': window_suggestion,
+                    'technical_mirror_count': technical_mirror_count},
         'matched1': list(matched1), 'matched2': list(matched2),
         'missing_rows1': list(missing_in_2['raw_row'].tolist()),
         'missing_rows2': list(missing_in_1['raw_row'].tolist()),
@@ -1658,7 +1689,9 @@ def _score_reconcile_candidate(result: dict, cand1: dict, cand2: dict) -> float:
     score += cand1['score'] + cand2['score']
     score += coverage_ratio * 160
     score += exact * 0.12 + fuzzy * 0.05
-    score -= len(discrepancies) * 4.5
+    technical_mirror_count = counts.get('technical_mirror', 0)
+    score -= (len(discrepancies) - technical_mirror_count) * 4.5
+    score -= technical_mirror_count * 0.5
     score -= critical * 12
     score -= counts.get('amount_diff', 0) * 10
     score -= (counts.get('missing_in_counterparty', 0) + counts.get('missing_in_company', 0)) * 6
@@ -2104,12 +2137,14 @@ async def export_report(payload: dict):
         ws.write(0,col,hdr,h); ws.set_column(col,col,w)
     ws.set_row(0,35)
     TYPE_RU = {'missing_in_counterparty':'❌ Нет у контрагента','missing_in_company':'❌ Нет у организации',
-               'amount_diff':'💰 Разница в суммах','date_diff':'📅 Разница в датах','sign_mismatch':'🔀 Зеркальная корректировка'}
+               'amount_diff':'💰 Разница в суммах','date_diff':'📅 Разница в датах',
+               'sign_mismatch':'🔀 Зеркальная корректировка',
+               'technical_mirror':'🔁 Техническое зеркало'}
     SEV_RU = {'high':'Высокий','medium':'Средний','low':'Низкий'}
     for ri, d in enumerate(discs, 1):
         sev = d.get('severity','low')
         tp  = d.get('type','')
-        fmt = red if sev=='high' and tp!='sign_mismatch' else blu if tp=='sign_mismatch' else yel if sev=='medium' else gry
+        fmt = red if sev=='high' and tp!='sign_mismatch' else blu if tp in ('sign_mismatch', 'technical_mirror') else yel if sev=='medium' else gry
         ws.write(ri,0,ri,fmt); ws.write(ri,1,TYPE_RU.get(tp,tp),fmt)
         ws.write(ri,2,d.get('date',''),fmt); ws.write(ri,3,d.get('document_number',''),fmt)
         ws.write(ri,4,d.get('company_value',''),fmt); ws.write(ri,5,d.get('supplier_value',''),fmt)
@@ -2124,6 +2159,7 @@ async def export_report(payload: dict):
         ('Итог', summary.get('debt_label','')),
         ('Всего расхождений', summary.get('total_discrepancies',0)),
         ('Критических', summary.get('critical_count',0)),
+        ('Технических зеркал', summary.get('technical_mirror_count',0)),
         ('Нечётких совпадений', summary.get('fuzzy_count',0)),
         ('Точных совпадений', summary.get('exact_matches',0)),
         ('Период', summary.get('period','')),
@@ -2140,6 +2176,16 @@ async def get_history(request: Request):
     """Возвращает историю только для авторизованных пользователей."""
     user_key = _get_user_key(request)
     return JSONResponse(_load_user_history(user_key))
+
+
+@app.delete("/api/history")
+async def clear_history(request: Request):
+    """Очищает историю текущего авторизованного пользователя."""
+    user_key = _get_user_key(request)
+    if not user_key:
+        return JSONResponse({"ok": False, "error": "История доступна только с личным API-ключом"}, status_code=401)
+    _clear_user_history(user_key)
+    return JSONResponse({"ok": True})
 
 
 # ── Статика ──────────────────────────────────────────────────────────────────

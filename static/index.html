@@ -182,6 +182,7 @@
   .disc-table tr.sev-medium td { border-left: 3px solid #f59f00; }
   .disc-table tr.sev-low td    { border-left: 3px solid #b2bec3; }
   .disc-table tr.type-sign td  { border-left: 3px solid var(--blue); }
+  .disc-table tr.type-technical td  { border-left: 3px solid #8aa4b8; }
   .badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
   .badge-red    { background: #ffebee; color: var(--red); }
   .badge-yellow { background: #fff8e1; color: var(--yellow); }
@@ -232,6 +233,10 @@
 
   /* ── History ── */
   .hist-wrap { overflow: auto; }
+  .hist-head { padding: 10px 14px; background: #fafafa; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .hist-clear-btn { border: 1.5px solid #ffd1d1; background: #fff5f5; color: var(--red); border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .hist-clear-btn:hover:not(:disabled) { background: #ffebee; border-color: var(--red); }
+  .hist-clear-btn:disabled { opacity: .45; cursor: not-allowed; }
   .hist-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .hist-table th { background: #eef1f5; color: var(--muted); font-weight: 700; padding: 9px 14px; text-align: left; border-bottom: 2px solid var(--border); cursor: default; }
   .hist-table td { padding: 9px 14px; border-bottom: 1px solid #eee; }
@@ -416,7 +421,7 @@
     <span class="settings-title">⚙ Настройки</span>
     <label><input type="checkbox" id="cfg-missing" checked> Отсутствующие <span class="tip">Документ есть у одной стороны, но отсутствует у другой</span></label>
     <label><input type="checkbox" id="cfg-amount" checked> Разница в суммах <span class="tip">Один документ у обеих сторон, но суммы не совпадают</span></label>
-    <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Корректировки с противоположным знаком: одна сторона ставит +, другая −</span></label>
+    <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Если эффект на сальдо совпадает, показываем как техническое зеркало; если отличается — как критическое расхождение</span></label>
     <label><input type="checkbox" id="cfg-date" checked> Разница в датах <span class="tip">Документ совпадает по номеру/сумме, но даты отличаются (низкий приоритет)</span></label>
     <label>Окно оплат (дн): <input type="number" id="cfg-dw-pay" value="5" min="0" max="30"> <span class="tip">Макс. расхождение в датах при поиске пар оплат</span></label>
     <label>Окно поставок (дн): <input type="number" id="cfg-dw-del" value="3" min="0" max="30"> <span class="tip">То же для накладных и КСФ</span></label>
@@ -469,6 +474,7 @@
       <button class="filter-btn" id="fb-missing_in_company"      onclick="toggleFilter('missing_in_company',this)">❌ Нет у организации</button>
       <button class="filter-btn" id="fb-amount_diff"             onclick="toggleFilter('amount_diff',this)">💰 Разница в суммах</button>
       <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">🔀 Зеркальные КСФ</button>
+      <button class="filter-btn" id="fb-technical_mirror"        onclick="toggleFilter('technical_mirror',this)">🔁 Технические зеркала</button>
       <button class="filter-btn" id="fb-date_diff"               onclick="toggleFilter('date_diff',this)">📅 Разница в датах</button>
     </div>
     <div class="disc-suggest-banner" id="disc-window-suggest" style="display:none">
@@ -514,8 +520,9 @@
   </div>
 
   <div class="tab-content" id="tab-history">
-    <div style="padding:10px 14px;background:#fafafa;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)">
-      Нажмите на запись для восстановления результатов сверки
+    <div class="hist-head">
+      <span>Нажмите на запись для восстановления результатов сверки</span>
+      <button class="hist-clear-btn" id="hist-clear-btn" onclick="clearHistory()" disabled>Очистить</button>
     </div>
     <div class="hist-wrap">
       <table class="hist-table">
@@ -633,6 +640,7 @@
       <label><input type="checkbox" id="ex-missing_in_company" checked> ❌ Нет у организации</label>
       <label><input type="checkbox" id="ex-amount_diff" checked> 💰 Разница в суммах</label>
       <label><input type="checkbox" id="ex-sign_mismatch" checked> 🔀 Зеркальные КСФ</label>
+      <label><input type="checkbox" id="ex-technical_mirror" checked> 🔁 Технические зеркала</label>
       <label><input type="checkbox" id="ex-date_diff" checked> 📅 Разница в датах</label>
     </div>
     <div class="exp-footer">
@@ -769,6 +777,7 @@ function logout() {
   // Очищаем историю в UI
   document.getElementById('hist-body').innerHTML =
     '<tr><td colspan="6" class="empty-hist">Войдите с личным API-ключом для просмотра истории</td></tr>';
+  document.getElementById('hist-clear-btn').disabled = true;
   showToast('Вы вышли — переключились в гостевой режим', 'warn');
 }
 
@@ -1137,10 +1146,13 @@ function displayResults(data){
   if(isLoggedIn())loadHistory();
   document.getElementById('btn-export').disabled=false;
   const cnt=data.summary.total_discrepancies;
+  const tech=data.summary.technical_mirror_count||0;
+  const financialCnt=Math.max(0,cnt-tech);
   const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
   if(cnt===0)showToast('✓ Расхождений не обнаружено','success');
+  else if(financialCnt===0)showToast(`Найдены только технические зеркала: ${tech}`,'warn');
   else if(data.summary.window_suggestion?.candidate_pairs)showToast('Найдены вероятные совпадения с разницей по датам. Можно расширить окна и пересчитать.','warn');
-  else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
+  else showToast(`Найдено финансовых расхождений: ${financialCnt}, критических: ${data.summary.critical_count}`,'error');
   switchTab('discrepancies');
   initTableResize(document.getElementById('disc-table-el'));
 }
@@ -1152,7 +1164,7 @@ function setProgress(pct,msg){
 }
 
 // ── Discrepancies ─────────────────────────────────────────────────
-const TYPE_MAP={missing_in_counterparty:['❌ Нет у контрагента','badge-red'],missing_in_company:['❌ Нет у организации','badge-red'],amount_diff:['💰 Разница в суммах','badge-yellow'],date_diff:['📅 Разница в датах','badge-gray'],sign_mismatch:['🔀 Зеркальная КСФ','badge-blue']};
+const TYPE_MAP={missing_in_counterparty:['❌ Нет у контрагента','badge-red'],missing_in_company:['❌ Нет у организации','badge-red'],amount_diff:['💰 Разница в суммах','badge-yellow'],date_diff:['📅 Разница в датах','badge-gray'],sign_mismatch:['🔀 Зеркальная КСФ','badge-blue'],technical_mirror:['🔁 Техническое зеркало','badge-gray']};
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray']};
 function renderDiscrepancies(discs,f1='',f2=''){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
@@ -1170,7 +1182,7 @@ function renderDiscrepancies(discs,f1='',f2=''){
   body.innerHTML=discs.map((d,i)=>{
     const[tl,tb]=TYPE_MAP[d.type]||[d.type,'badge-gray'];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
-    const tc=d.type==='sign_mismatch'?'type-sign':`sev-${d.severity}`;
+    const tc=d.type==='sign_mismatch'?'type-sign':d.type==='technical_mirror'?'type-technical':`sev-${d.severity}`;
     return`<tr class="${tc}" data-type="${d.type}"><td>${i+1}</td><td><span class="badge ${tb}">${tl}</span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
   applyDiscFilter();
@@ -1179,9 +1191,11 @@ function renderDiscrepancies(discs,f1='',f2=''){
 // ── Summary ───────────────────────────────────────────────────────
 function renderSummary(s,file1Name='',file2Name=''){
   const critical=s.critical_count||0;
+  const financialTotal=Math.max(0,(s.total_discrepancies||0)-(s.technical_mirror_count||0));
   document.getElementById('summary-cards').innerHTML=`
-    <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${s.total_discrepancies>0?'red':''}">${s.total_discrepancies}</div></div>
+    <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${financialTotal>0?'red':''}">${s.total_discrepancies||0}</div></div>
     <div class="stat-card"><div class="label">Критических</div><div class="value ${critical>0?'red':''}">${critical}</div></div>
+    <div class="stat-card"><div class="label">Технических зеркал</div><div class="value dark">${s.technical_mirror_count||0}</div></div>
     <div class="stat-card"><div class="label">Точных совпадений</div><div class="value">${s.exact_matches||0}</div></div>
     <div class="stat-card"><div class="label">Нечётких совпадений</div><div class="value">${s.fuzzy_count||0}</div></div>`;
   const dc=document.getElementById('debt-card');
@@ -1308,7 +1322,7 @@ function openExportModal(){if(!lastResult)return;document.getElementById('exp-ov
 function closeExportModal(){document.getElementById('exp-overlay').style.display='none';}
 async function doExport(){
   if(!lastResult)return;closeExportModal();
-  const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
+  const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','technical_mirror','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
   const filtered=lastResult.discrepancies.filter(d=>allowed.has(d.type));
   try{
     const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
@@ -1323,6 +1337,8 @@ async function doExport(){
 // ── History ───────────────────────────────────────────────────────
 async function loadHistory(){
   const body=document.getElementById('hist-body');
+  const clearBtn=document.getElementById('hist-clear-btn');
+  if(clearBtn)clearBtn.disabled=true;
   if(!isLoggedIn()){
     body.innerHTML='<tr><td colspan="6" class="empty-hist">Войдите с личным API-ключом для сохранения истории</td></tr>';
     return;
@@ -1334,6 +1350,7 @@ async function loadHistory(){
       body.innerHTML='<tr><td colspan="6" class="empty-hist">История пуста — выполните первую сверку</td></tr>';
       return;
     }
+    if(clearBtn)clearBtn.disabled=false;
     body.innerHTML=historyData.map((h,i)=>{
       const hasResult=!!(h.result?.discrepancies);
       return`<tr onclick="loadHistoryItem(${i})" title="${hasResult?'Нажмите для восстановления результатов':'Нет сохранённых данных'}">
@@ -1342,7 +1359,28 @@ async function loadHistory(){
         <td>${esc(trunc(h.debt_label||'',50))}</td>
       </tr>`;
     }).join('');
-  }catch{}
+  }catch{
+    body.innerHTML='<tr><td colspan="6" class="empty-hist">Не удалось загрузить историю</td></tr>';
+  }
+}
+
+async function clearHistory(){
+  if(!isLoggedIn()){showToast('История доступна только с личным API-ключом','warn');return;}
+  if(!historyData.length){showToast('История уже пуста','warn');return;}
+  if(!confirm('Очистить всю историю сверок? Это действие нельзя отменить.'))return;
+  const btn=document.getElementById('hist-clear-btn');
+  if(btn)btn.disabled=true;
+  try{
+    const resp=await fetch('/api/history',{method:'DELETE',headers:authHeaders()});
+    const data=await resp.json().catch(()=>({}));
+    if(!resp.ok){showToast(data.error||'Не удалось очистить историю','error');return;}
+    historyData=[];
+    document.getElementById('hist-body').innerHTML='<tr><td colspan="6" class="empty-hist">История пуста — выполните первую сверку</td></tr>';
+    showToast('История очищена','success');
+  }catch(e){
+    showToast('Ошибка: '+e.message,'error');
+    if(btn)btn.disabled=false;
+  }
 }
 
 let _pendingRestoreIdx = null;
@@ -1364,8 +1402,8 @@ function closeRestoreModal(){
 }
 
 function confirmRestore(){
-  closeRestoreModal();
   const idx=_pendingRestoreIdx;
+  closeRestoreModal();
   if(idx===null)return;
   const h=historyData[idx];
   const r=h.result;

@@ -165,6 +165,12 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertEqual(cand1['label'], 'Акт сверки (односторонний)')
         self.assertEqual(cand2['label'], 'Акт сверки (двусторонний)')
         self.assertEqual(len(result['discrepancies']), 8)
+        self.assertEqual(result['summary']['critical_count'], 2)
+        self.assertEqual(result['summary']['technical_mirror_count'], 5)
+        self.assertEqual(
+            sum(1 for d in result['discrepancies'] if d['type'] == 'technical_mirror'),
+            5,
+        )
         self.assertAlmostEqual(result['summary']['net_period'], 1436253.6, places=2)
 
 
