@@ -2453,6 +2453,9 @@ app.mount("/static", StaticFiles(directory=str(_static)), name="static")
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
+    ico_path = _static / "favicon.ico"
+    if ico_path.exists():
+        return FileResponse(str(ico_path), media_type="image/x-icon")
     return FileResponse(str(_static / "favicon.svg"), media_type="image/svg+xml")
 
 @app.get("/")
