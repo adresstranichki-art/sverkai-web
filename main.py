@@ -19,6 +19,13 @@ MODEL_MAIN = "claude-sonnet-4-6"
 MODEL_FAST = "claude-haiku-4-5-20251001"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 AUTH_ALLOW_ALL = os.environ.get("SVERKAI_AUTH_ALLOW_ALL", "").strip().lower() in {"1", "true", "yes", "on"}
+APP_ENV = os.environ.get("SVERKAI_ENV") or os.environ.get("RAILWAY_ENVIRONMENT_NAME") or "local"
+APP_VERSION = (
+    os.environ.get("SVERKAI_VERSION")
+    or os.environ.get("RAILWAY_GIT_COMMIT_SHA")
+    or os.environ.get("GIT_COMMIT")
+    or ""
+)[:12]
 
 app = FastAPI(title="sverkAI API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -2476,4 +2483,7 @@ async def health():
         "auth_allow_all": AUTH_ALLOW_ALL,
         "allowed_user_keys": len(allowed_users),
         "guest_keys_blocked": len(_guest_key_hashes()),
+        "app_env": APP_ENV,
+        "version": APP_VERSION,
+        "admin_enabled": bool(ADMIN_SECRET),
     }

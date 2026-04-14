@@ -509,6 +509,68 @@
   .hist-table tr:hover td { background: rgba(31,122,67,.045); cursor: pointer; }
   .hist-table tr.hist-active td { background: #e4f2e8; font-weight: 700; }
   .empty-hist { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; }
+  .admin-tab { display: none; }
+  .admin-tab.visible { display: block; }
+
+  /* ── Guide and admin ── */
+  .guide-pad, .admin-pad { padding: 18px; }
+  .guide-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap: 14px; }
+  .guide-card, .admin-card {
+    background: #fff;
+    border: 1px solid rgba(210,216,209,.9);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 8px 16px rgba(20,28,35,.04);
+  }
+  .guide-card h3, .admin-card h3 { font-size: 15px; margin-bottom: 10px; color: var(--text); }
+  .guide-card p, .guide-card li, .admin-card p { color: var(--muted); font-size: 13px; line-height: 1.55; }
+  .guide-card ol, .guide-card ul { margin-left: 18px; display: grid; gap: 6px; }
+  .guide-note {
+    margin-top: 14px;
+    border-left: 4px solid var(--yellow);
+    background: #fff8e7;
+    color: #7a5800;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .admin-grid { display: grid; grid-template-columns: minmax(280px,380px) minmax(0,1fr); gap: 14px; align-items: start; }
+  .admin-form { display: grid; gap: 10px; }
+  .admin-form label { display: grid; gap: 5px; font-size: 12px; color: var(--muted); font-weight: 700; }
+  .admin-form input, .admin-form select {
+    width: 100%;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 11px;
+    font-size: 13px;
+    background: white;
+    color: var(--text);
+  }
+  .admin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .admin-status { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: 8px; margin-top: 12px; }
+  .admin-status-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: #fafbfa; }
+  .admin-status-item .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .admin-status-item .v { font-size: 15px; font-weight: 800; color: var(--text); margin-top: 3px; }
+  .admin-table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 12px; }
+  .admin-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 720px; }
+  .admin-table th { background: #f3f5f2; text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  .admin-table td { padding: 9px 12px; border-bottom: 1px solid #edf1ec; vertical-align: middle; }
+  .admin-table tr:last-child td { border-bottom: none; }
+  .admin-muted { color: var(--muted); font-size: 12px; }
+  .admin-danger { color: var(--red); border-color: rgba(184,59,54,.24); background: #fff6f6; }
+  .env-badge {
+    display: none;
+    margin-bottom: 14px;
+    border: 1px solid #e0c06d;
+    border-left: 4px solid var(--yellow);
+    background: #fff8e7;
+    color: #735200;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 700;
+  }
 
   /* ════════════════════════════════════════
      LOGIN MODAL
@@ -625,6 +687,7 @@
     .disc-filter::-webkit-scrollbar { height: 6px; }
     .wiz-left { width: 250px; }
     .login-modes { flex-direction: column; }
+    .admin-grid { grid-template-columns: 1fr; }
   }
 
   @media (max-width: 560px) {
@@ -685,6 +748,7 @@
     Вы работаете в <strong>гостевом режиме</strong> — используется общий API, история сверок не сохраняется.
     <a onclick="openLoginModal()">Войдите с выданным ключом доступа</a> для сохранения истории.
   </div>
+  <div class="env-badge" id="env-badge"></div>
 
   <div class="upload-row">
     <div class="upload-card">
@@ -746,6 +810,8 @@
     <div class="tab" data-tab="discrepancies">Расхождения <span class="tab-badge" id="badge-disc" style="display:none">0</span></div>
     <div class="tab" data-tab="summary">Сводка</div>
     <div class="tab" data-tab="history">История</div>
+    <div class="tab" data-tab="guide">Как читать</div>
+    <div class="tab admin-tab" data-tab="admin" id="admin-tab">Админ</div>
   </div>
 
   <div class="tab-content active" id="tab-compare">
@@ -835,6 +901,98 @@
         <thead><tr><th>Дата</th><th>Файл организации</th><th>Файл контрагента</th><th>Расхождений</th><th>Критических</th><th>Итог</th></tr></thead>
         <tbody id="hist-body"><tr><td colspan="6" class="empty-hist">История пуста</td></tr></tbody>
       </table>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-guide">
+    <div class="guide-pad">
+      <div class="guide-grid">
+        <div class="guide-card">
+          <h3>Как пользоваться</h3>
+          <ol>
+            <li>Загрузите акт организации и акт контрагента в два поля сверху.</li>
+            <li>Если структура файла распознана неверно, нажмите «Настроить вручную» и укажите колонки.</li>
+            <li>Проверьте окна допусков по датам: отдельно для оплат и поставок.</li>
+            <li>Нажмите «Сверить документы» и дождитесь сводки.</li>
+            <li>При необходимости скачайте Excel-отчет.</li>
+          </ol>
+        </div>
+        <div class="guide-card">
+          <h3>Как читать расхождения</h3>
+          <ul>
+            <li><strong>Нет у контрагента</strong> — документ есть в акте организации, но не найден у второй стороны.</li>
+            <li><strong>Нет у организации</strong> — документ есть у контрагента, но не найден в вашем акте.</li>
+            <li><strong>Разница в суммах</strong> — документ похож на один и тот же, но сумма отличается.</li>
+            <li><strong>Зеркальная КСФ</strong> — операция отражена противоположным знаком и влияет на сальдо.</li>
+            <li><strong>Разница в датах</strong> — документ совпал по смыслу, но проведен другой датой.</li>
+          </ul>
+        </div>
+        <div class="guide-card">
+          <h3>Что смотреть в первую очередь</h3>
+          <ol>
+            <li>Разницу конечного сальдо в «Сводке».</li>
+            <li>Критические расхождения с высоким уровнем.</li>
+            <li>Отсутствующие документы и разницу в суммах.</li>
+            <li>Период актов и начальное сальдо, если итог не сходится.</li>
+          </ol>
+        </div>
+        <div class="guide-card">
+          <h3>Что скрывается автоматически</h3>
+          <p>Технические зеркала, которые не влияют на сальдо, распознаются внутри алгоритма и не показываются как расхождения. Они не должны отвлекать от денежных ошибок.</p>
+          <div class="guide-note">Сервис помогает быстро найти вероятные расхождения. Итоговый вывод по акту должен проверить бухгалтер или ответственный специалист.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-admin">
+    <div class="admin-pad">
+      <div class="admin-grid">
+        <div class="admin-card">
+          <h3>Администрирование</h3>
+          <div class="admin-form">
+            <label>ADMIN_SECRET
+              <input type="password" id="admin-secret" placeholder="Введите секрет администратора" autocomplete="off">
+            </label>
+            <div class="admin-actions">
+              <button class="btn btn-green" onclick="adminLoad()">Открыть админку</button>
+              <button class="btn btn-ghost" onclick="adminForget()">Забыть секрет</button>
+            </div>
+            <p class="admin-muted">Секрет хранится только в текущей вкладке браузера и нужен для управления белым списком ключей.</p>
+          </div>
+          <div class="admin-status" id="admin-status"></div>
+        </div>
+        <div class="admin-card">
+          <h3>Добавить ключ доступа</h3>
+          <div class="admin-form">
+            <label>Метка
+              <input type="text" id="admin-key-label" placeholder="Например: Бухгалтер ПРООПТ">
+            </label>
+            <label>Роль
+              <select id="admin-key-role">
+                <option value="user">Пользователь</option>
+                <option value="guest">Гостевой ключ</option>
+              </select>
+            </label>
+            <label>Ключ
+              <input type="password" id="admin-key-value" placeholder="sk-ant-...">
+            </label>
+            <div class="admin-actions">
+              <button class="btn btn-green" onclick="adminAddKey()">Добавить</button>
+              <button class="btn btn-ghost" onclick="adminClearKeyForm()">Очистить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="admin-card" style="margin-top:14px">
+        <h3>Ключи доступа</h3>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>Метка</th><th>Роль</th><th>Статус</th><th>Источник</th><th>Хеш</th><th>Добавлен</th><th></th></tr></thead>
+            <tbody id="admin-keys-body"><tr><td colspan="7" class="empty-hist">Введите ADMIN_SECRET и нажмите «Открыть админку»</td></tr></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 </main>
@@ -965,12 +1123,14 @@ let activeFilters=new Set(['all']);
 let historyData=[];
 let loginMode='key'; // 'key' | 'guest'
 let abortController=null; // для отмены сверки
+let healthInfo={};
 
 // ════════════════════════════════════════════════════════════════════
 //  АВТОРИЗАЦИЯ
 // ════════════════════════════════════════════════════════════════════
 
 const LS_KEY = 'sverkai_api_key';
+const SS_ADMIN_SECRET = 'sverkai_admin_secret';
 
 function getStoredKey() {
   return localStorage.getItem(LS_KEY) || '';
@@ -1104,10 +1264,19 @@ function logout() {
 async function checkHealth(){
   try{
     const r=await fetch('/api/health'),d=await r.json();
+    healthInfo=d;
     const dot=document.getElementById('status-dot'),txt=document.getElementById('status-text');
     if(d.status==='ok'){
       dot.classList.add('ok');
-      txt.textContent = isLoggedIn() ? 'Готов • Личный доступ' : (d.api_key_set ? 'Готов • Общий AI' : 'Готов');
+      const env=(d.app_env||'').toLowerCase();
+      const envLabel=env&&env!=='production'&&env!=='prod'?` • ${d.app_env}`:'';
+      txt.textContent = (isLoggedIn() ? 'Готов • Личный доступ' : (d.api_key_set ? 'Готов • Общий AI' : 'Готов')) + envLabel;
+      const envBadge=document.getElementById('env-badge');
+      if(envBadge&&env&&env!=='production'&&env!=='prod'){
+        envBadge.textContent=`Текущий стенд: ${d.app_env}${d.version?' • версия '+d.version:''}`;
+        envBadge.style.display='block';
+      }
+      renderAdminStatus(d);
     }
   }catch{
     document.getElementById('status-text').textContent='Сервер недоступен';
@@ -1133,6 +1302,121 @@ function switchTab(n){
   document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
   const t=document.querySelector(`.tab[data-tab="${n}"]`);if(t)t.classList.add('active');
   const c=document.getElementById('tab-'+n);if(c)c.classList.add('active');
+}
+
+function initAdminVisibility(){
+  const params=new URLSearchParams(window.location.search);
+  const shouldShow=params.has('admin')||window.location.hash==='#admin'||!!sessionStorage.getItem(SS_ADMIN_SECRET);
+  const tab=document.getElementById('admin-tab');
+  if(tab)tab.classList.toggle('visible',shouldShow);
+  const stored=sessionStorage.getItem(SS_ADMIN_SECRET)||'';
+  const inp=document.getElementById('admin-secret');
+  if(inp&&stored)inp.value=stored;
+  if(shouldShow&&(params.has('admin')||window.location.hash==='#admin'))switchTab('admin');
+}
+initAdminVisibility();
+
+function getAdminSecret(){
+  return (document.getElementById('admin-secret')?.value||sessionStorage.getItem(SS_ADMIN_SECRET)||'').trim();
+}
+
+function renderAdminStatus(d=healthInfo){
+  const wrap=document.getElementById('admin-status');
+  if(!wrap||!d)return;
+  wrap.innerHTML=`
+    <div class="admin-status-item"><div class="k">Стенд</div><div class="v">${esc(d.app_env||'local')}</div></div>
+    <div class="admin-status-item"><div class="k">Версия</div><div class="v">${esc(d.version||'—')}</div></div>
+    <div class="admin-status-item"><div class="k">Пользователи</div><div class="v">${d.allowed_user_keys??'—'}</div></div>
+    <div class="admin-status-item"><div class="k">Гостевые</div><div class="v">${d.guest_keys_blocked??'—'}</div></div>
+    <div class="admin-status-item"><div class="k">ADMIN_SECRET</div><div class="v">${d.admin_enabled?'Включен':'Нет'}</div></div>`;
+}
+
+function renderAdminKeys(entries=[]){
+  const body=document.getElementById('admin-keys-body');
+  if(!body)return;
+  if(!entries.length){
+    body.innerHTML='<tr><td colspan="7" class="empty-hist">Белый список пуст</td></tr>';
+    return;
+  }
+  body.innerHTML=entries.map(e=>{
+    const src=e.source||'file';
+    const canRemove=src==='file';
+    const role=e.role==='guest'?'Гостевой':'Пользователь';
+    const enabled=e.enabled===false?'Отключен':'Включен';
+    return`<tr>
+      <td>${esc(e.label||'—')}</td>
+      <td>${role}</td>
+      <td>${enabled}</td>
+      <td>${esc(src)}</td>
+      <td><code>${esc(e.hash||'')}</code></td>
+      <td>${esc(e.added||'—')}</td>
+      <td>${canRemove?`<button class="btn btn-outline admin-danger" onclick="adminRemoveKey('${esc(e.hash||'')}')">Удалить</button>`:'<span class="admin-muted">env</span>'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function adminLoad(){
+  const secret=getAdminSecret();
+  if(!secret){showToast('Введите ADMIN_SECRET','warn');return;}
+  try{
+    const [healthResp, keysResp]=await Promise.all([
+      fetch('/api/health'),
+      fetch('/api/admin/list-keys',{headers:{'X-Admin-Secret':secret}})
+    ]);
+    const health=await healthResp.json().catch(()=>({}));
+    const keys=await keysResp.json().catch(()=>({}));
+    if(!keysResp.ok){showToast(keys.detail||'Нет доступа к админке','error');return;}
+    sessionStorage.setItem(SS_ADMIN_SECRET,secret);
+    document.getElementById('admin-tab')?.classList.add('visible');
+    healthInfo=health;
+    renderAdminStatus(health);
+    renderAdminKeys(keys.entries||[]);
+    showToast('Админка открыта','success');
+  }catch(e){showToast('Ошибка админки: '+e.message,'error');}
+}
+
+async function adminAddKey(){
+  const secret=getAdminSecret();
+  const apiKey=document.getElementById('admin-key-value').value.trim();
+  const label=document.getElementById('admin-key-label').value.trim();
+  const role=document.getElementById('admin-key-role').value;
+  if(!secret){showToast('Введите ADMIN_SECRET','warn');return;}
+  if(!apiKey){showToast('Введите ключ доступа','warn');return;}
+  try{
+    const resp=await fetch('/api/admin/add-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_secret:secret,api_key:apiKey,label,role})});
+    const data=await resp.json().catch(()=>({}));
+    if(!resp.ok){showToast(data.detail||'Не удалось добавить ключ','error');return;}
+    if(data.ok===false){showToast(data.message||'Ключ уже есть в списке','warn');return;}
+    adminClearKeyForm();
+    await adminLoad();
+    showToast('Ключ добавлен','success');
+  }catch(e){showToast('Ошибка: '+e.message,'error');}
+}
+
+async function adminRemoveKey(hash){
+  const secret=getAdminSecret();
+  if(!secret){showToast('Введите ADMIN_SECRET','warn');return;}
+  if(!confirm('Удалить этот ключ доступа?'))return;
+  try{
+    const resp=await fetch('/api/admin/remove-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({admin_secret:secret,hash})});
+    const data=await resp.json().catch(()=>({}));
+    if(!resp.ok){showToast(data.detail||'Не удалось удалить ключ','error');return;}
+    await adminLoad();
+    showToast(data.removed?'Ключ удален':'Ключ не найден в файловом списке',data.removed?'success':'warn');
+  }catch(e){showToast('Ошибка: '+e.message,'error');}
+}
+
+function adminClearKeyForm(){
+  document.getElementById('admin-key-label').value='';
+  document.getElementById('admin-key-value').value='';
+  document.getElementById('admin-key-role').value='user';
+}
+
+function adminForget(){
+  sessionStorage.removeItem(SS_ADMIN_SECRET);
+  document.getElementById('admin-secret').value='';
+  document.getElementById('admin-keys-body').innerHTML='<tr><td colspan="7" class="empty-hist">Введите ADMIN_SECRET и нажмите «Открыть админку»</td></tr>';
+  showToast('Секрет забыт в этой вкладке','warn');
 }
 
 // ── File drop ──────────────────────────────────────────────────────
