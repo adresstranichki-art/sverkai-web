@@ -1,5 +1,6 @@
 import importlib
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -172,6 +173,60 @@ class RegressionReconcileTests(unittest.TestCase):
             5,
         )
         self.assertAlmostEqual(result['summary']['net_period'], 1436253.6, places=2)
+
+
+class AuthKeyTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        _install_stubs()
+        repo_root = Path(__file__).resolve().parents[1]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        cls.main = importlib.import_module('main')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.orig_allowed_file = self.main._ALLOWED_KEYS_FILE
+        self.orig_api_key = self.main.ANTHROPIC_API_KEY
+        self.orig_allow_all = self.main.AUTH_ALLOW_ALL
+        self.main._ALLOWED_KEYS_FILE = Path(self.tmp.name) / 'allowed_keys.json'
+        self.main.ANTHROPIC_API_KEY = ''
+        self.main.AUTH_ALLOW_ALL = False
+
+    def tearDown(self):
+        self.main._ALLOWED_KEYS_FILE = self.orig_allowed_file
+        self.main.ANTHROPIC_API_KEY = self.orig_api_key
+        self.main.AUTH_ALLOW_ALL = self.orig_allow_all
+        self.tmp.cleanup()
+
+    def test_empty_allowlist_rejects_user_login_by_default(self):
+        ok, reason = self.main._key_access_status('sk-ant-api03-arbitrary')
+        self.assertFalse(ok)
+        self.assertEqual(reason, 'no_allowlist')
+
+    def test_user_role_allows_login_and_guest_role_blocks_login(self):
+        user_key = 'sk-ant-api03-user'
+        guest_key = 'sk-ant-api03-guest'
+        self.main._save_allowed_keys([
+            {'hash': self.main._user_id(user_key), 'label': 'User', 'role': 'user', 'enabled': True},
+            {'hash': self.main._user_id(guest_key), 'label': 'Guest', 'role': 'guest', 'enabled': True},
+        ])
+
+        self.assertTrue(self.main._is_key_allowed(user_key))
+        ok, reason = self.main._key_access_status(guest_key)
+        self.assertFalse(ok)
+        self.assertEqual(reason, 'guest_key')
+
+    def test_system_api_key_cannot_be_used_as_user_login(self):
+        guest_key = 'sk-ant-api03-system'
+        self.main.ANTHROPIC_API_KEY = guest_key
+        self.main._save_allowed_keys([
+            {'hash': self.main._user_id(guest_key), 'label': 'System', 'role': 'user', 'enabled': True},
+        ])
+
+        ok, reason = self.main._key_access_status(guest_key)
+        self.assertFalse(ok)
+        self.assertEqual(reason, 'guest_key')
 
 
 if __name__ == '__main__':

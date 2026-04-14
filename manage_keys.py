@@ -4,6 +4,7 @@ manage_keys.py — управление белым списком API-ключе
 
 Использование:
   python manage_keys.py add    sk-ant-...  "Иванов Иван"
+  python manage_keys.py add-guest sk-ant-... "Общий гостевой ключ"
   python manage_keys.py remove sk-ant-...
   python manage_keys.py list
   python manage_keys.py hash   sk-ant-...   # только показать хеш, не добавлять
@@ -44,24 +45,34 @@ def save(entries: list) -> None:
 def cmd_list():
     entries = load()
     if not entries:
-        print("Белый список пуст (разрешён вход для всех — dev-режим).")
+        print("Белый список пуст: пользовательский вход закрыт, кроме явного SVERKAI_AUTH_ALLOW_ALL=1.")
         return
-    print(f"{'#':<4} {'Метка':<25} {'Хеш':<28} {'Добавлен'}")
-    print("-" * 70)
+    print(f"{'#':<4} {'Метка':<25} {'Роль':<8} {'Вкл':<5} {'Хеш':<28} {'Добавлен'}")
+    print("-" * 88)
     for i, e in enumerate(entries, 1):
-        print(f"{i:<4} {e.get('label','—'):<25} {e.get('hash',''):<28} {e.get('added','')}")
+        print(
+            f"{i:<4} {e.get('label','—'):<25} {e.get('role','user'):<8} "
+            f"{str(e.get('enabled', True)):<5} {e.get('hash',''):<28} {e.get('added','')}"
+        )
     print(f"\nВсего: {len(entries)}")
 
 
-def cmd_add(key: str, label: str = ""):
+def cmd_add(key: str, label: str = "", role: str = "user"):
     h = _user_id(key)
+    role = role if role in {"user", "guest"} else "user"
     entries = load()
-    if any(e.get("hash") == h for e in entries):
+    if any(e.get("hash") == h and e.get("role", "user") == role for e in entries):
         print(f"⚠  Ключ уже в списке (хеш {h})")
         return
-    entries.append({"hash": h, "label": label or "—", "added": datetime.now().strftime("%Y-%m-%d")})
+    entries.append({
+        "hash": h,
+        "label": label or "—",
+        "role": role,
+        "enabled": True,
+        "added": datetime.now().strftime("%Y-%m-%d"),
+    })
     save(entries)
-    print(f"✓ Добавлен: хеш={h}, метка='{label or '—'}'  (всего {len(entries)})")
+    print(f"✓ Добавлен: хеш={h}, роль={role}, метка='{label or '—'}'  (всего {len(entries)})")
 
 
 def cmd_remove(key: str):
@@ -89,7 +100,9 @@ if __name__ == "__main__":
     if cmd == "list":
         cmd_list()
     elif cmd == "add" and len(args) >= 2:
-        cmd_add(args[1], " ".join(args[2:]))
+        cmd_add(args[1], " ".join(args[2:]), "user")
+    elif cmd == "add-guest" and len(args) >= 2:
+        cmd_add(args[1], " ".join(args[2:]), "guest")
     elif cmd == "remove" and len(args) >= 2:
         cmd_remove(args[1])
     elif cmd == "hash" and len(args) >= 2:

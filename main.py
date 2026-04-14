@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 MODEL_MAIN = "claude-sonnet-4-6"
 MODEL_FAST = "claude-haiku-4-5-20251001"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+AUTH_ALLOW_ALL = os.environ.get("SVERKAI_AUTH_ALLOW_ALL", "").strip().lower() in {"1", "true", "yes", "on"}
 
 app = FastAPI(title="sverkAI API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -35,37 +36,156 @@ ADMIN_SECRET       = os.environ.get("ADMIN_SECRET", "") # для управле�
 #  АВТОРИЗАЦИЯ / ИСТОРИЯ ПО ПОЛЬЗОВАТЕЛЯМ
 # ════════════════════════════════════════════════════════════════════
 
-def _load_allowed_keys() -> list:
-    """Загружает белый список. Каждая запись: {hash, label, added}."""
+def _user_id(api_key: str) -> str:
+    """Хеш API-ключа — безопасный идентификатор пользователя."""
+    return hashlib.sha256(api_key.strip().encode()).hexdigest()[:24]
+
+
+def _normalize_key_entries(entries: list, source: str = "file") -> list:
+    """Приводит записи whitelist к единому виду.
+
+    role=user разрешает вход в приложение, role=guest документирует общий ключ и
+    запрещает использовать его как пользовательскую учетку.
+    """
+    normalized = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        h = str(entry.get("hash", "")).strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{24,64}", h):
+            continue
+        role = str(entry.get("role") or "user").strip().lower()
+        if role not in {"user", "guest"}:
+            role = "user"
+        normalized.append({
+            "hash": h[:24],
+            "label": str(entry.get("label") or "—"),
+            "role": role,
+            "enabled": entry.get("enabled", True) is not False,
+            "added": str(entry.get("added") or ""),
+            "source": source,
+        })
+    return normalized
+
+
+def _parse_env_key_hashes(raw: str, source: str) -> list:
+    """Парсит SVERKAI_ALLOWED_KEY_HASHES: hash или hash:label через запятую/перенос."""
+    entries = []
+    for item in re.split(r"[\n,;]+", raw or ""):
+        item = item.strip()
+        if not item:
+            continue
+        parts = item.split(":", 2)
+        h = parts[0].strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{24,64}", h):
+            continue
+        entries.append({
+            "hash": h[:24],
+            "label": parts[1].strip() if len(parts) > 1 and parts[1].strip() else source,
+            "role": parts[2].strip().lower() if len(parts) > 2 and parts[2].strip() else "user",
+            "enabled": True,
+            "added": "env",
+        })
+    return _normalize_key_entries(entries, source)
+
+
+def _load_allowed_keys_from_file() -> list:
+    """Загружает белый список из файла. Каждая запись: {hash, label, role, enabled, added}."""
     if _ALLOWED_KEYS_FILE.exists():
         try:
             with open(_ALLOWED_KEYS_FILE, encoding="utf-8") as f:
-                return json.load(f)
+                return _normalize_key_entries(json.load(f), "file")
         except Exception:
             pass
     return []
 
 
+def _load_allowed_keys_from_env() -> list:
+    entries = []
+    for name in ("SVERKAI_ALLOWED_KEY_HASHES", "ALLOWED_API_KEY_HASHES"):
+        entries.extend(_parse_env_key_hashes(os.environ.get(name, ""), name))
+    return entries
+
+
+def _load_allowed_keys() -> list:
+    """Возвращает белый список из файла и env-переменных без реальных ключей."""
+    seen = set()
+    merged = []
+    for entry in [*_load_allowed_keys_from_file(), *_load_allowed_keys_from_env()]:
+        key = (entry["hash"], entry["role"])
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(entry)
+    return merged
+
+
 def _save_allowed_keys(entries: list) -> None:
+    entries = _normalize_key_entries(entries, "file")
+    for entry in entries:
+        entry.pop("source", None)
     with open(_ALLOWED_KEYS_FILE, "w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
 
-def _is_key_allowed(api_key: str) -> bool:
-    """Проверяет, есть ли ключ в белом списке.
-    Если файла нет или список пуст — dev-режим, всё разрешено."""
-    if not _ALLOWED_KEYS_FILE.exists():
-        return True
+def _guest_key_hashes() -> set[str]:
+    hashes = set()
+    if ANTHROPIC_API_KEY.strip():
+        hashes.add(_user_id(ANTHROPIC_API_KEY))
+    for name in ("SVERKAI_GUEST_KEY_HASHES", "GUEST_API_KEY_HASHES"):
+        for entry in _parse_env_key_hashes(os.environ.get(name, ""), name):
+            hashes.add(entry["hash"])
+    for entry in _load_allowed_keys():
+        if entry.get("role") == "guest" and entry.get("enabled", True):
+            hashes.add(entry["hash"])
+    return hashes
+
+
+def _key_access_status(api_key: str) -> tuple[bool, str]:
+    """Проверяет, может ли ключ быть пользовательским логином SverkAI."""
+    key = (api_key or "").strip()
+    if not key:
+        return False, "missing"
+    if not key.startswith("sk-ant-"):
+        return False, "bad_format"
+    h = _user_id(key)
+    if h in _guest_key_hashes():
+        return False, "guest_key"
     entries = _load_allowed_keys()
-    if not entries:
-        return True
-    h = _user_id(api_key)
-    return any(e.get("hash") == h for e in entries)
+    user_entries = [e for e in entries if e.get("role", "user") == "user" and e.get("enabled", True)]
+    if not user_entries:
+        return (True, "dev_allow_all") if AUTH_ALLOW_ALL else (False, "no_allowlist")
+    return (True, "allowed") if any(e.get("hash") == h for e in user_entries) else (False, "not_allowed")
 
 
-def _user_id(api_key: str) -> str:
-    """Хеш API-ключа — безопасный идентификатор пользователя."""
-    return hashlib.sha256(api_key.strip().encode()).hexdigest()[:24]
+def _is_key_allowed(api_key: str) -> bool:
+    return _key_access_status(api_key)[0]
+
+
+def _key_error_message(reason: str) -> str:
+    messages = {
+        "missing": "Ключ не указан",
+        "bad_format": "Неверный формат ключа",
+        "guest_key": "Этот ключ используется как гостевой общий API и не может быть пользовательским входом.",
+        "no_allowlist": "Вход по личным ключам временно закрыт: список разрешенных ключей не настроен.",
+        "not_allowed": "Ключ не входит в список разрешенных. Обратитесь к администратору SverkAI.",
+    }
+    return messages.get(reason, "Ключ не прошел проверку доступа")
+
+
+def _authorized_user_key_or_raise(request: Request) -> str:
+    """Возвращает пользовательский ключ или пустую строку для гостя.
+
+    Если клиент прислал X-Api-Key, он обязан быть разрешенным пользовательским
+    ключом. Это закрывает обход формы входа прямыми API-запросами.
+    """
+    user_key = _get_user_key(request)
+    if not user_key:
+        return ""
+    ok, reason = _key_access_status(user_key)
+    if not ok:
+        raise HTTPException(status_code=403, detail=_key_error_message(reason))
+    return user_key
 
 def _user_history_file(api_key: str) -> Path:
     return _DATA_DIR / f"history_{_user_id(api_key)}.json"
@@ -1729,6 +1849,20 @@ def _quick_pair_score(cand1: dict, cand2: dict) -> float:
     return round(score, 2)
 
 
+def _detailed_pair_limit() -> int:
+    try:
+        return max(1, min(9, int(os.environ.get("SVERKAI_DETAILED_PAIR_LIMIT", "2"))))
+    except Exception:
+        return 2
+
+
+def _detailed_pair_row_limit() -> int:
+    try:
+        return max(0, int(os.environ.get("SVERKAI_DETAILED_PAIR_ROW_LIMIT", "350")))
+    except Exception:
+        return 350
+
+
 def _select_best_candidate_pair(candidates1: list, candidates2: list, cfg: dict, logs: list):
     if not candidates1 or not candidates2:
         raise HTTPException(status_code=422, detail="Не удалось построить структурированные кандидаты для сверки.")
@@ -1744,7 +1878,17 @@ def _select_best_candidate_pair(candidates1: list, candidates2: list, cfg: dict,
                 'quick_score': _quick_pair_score(cand1, cand2),
             })
     pair_queue.sort(key=lambda item: item['quick_score'], reverse=True)
-    detailed_pairs = pair_queue[:1]
+    limit = _detailed_pair_limit()
+    top_quick = pair_queue[0]['quick_score'] if pair_queue else 0
+    cutoff = top_quick - max(8.0, abs(top_quick) * 0.03)
+    top_max_rows = max(len(pair_queue[0]['cand1']['df']), len(pair_queue[0]['cand2']['df'])) if pair_queue else 0
+    row_limit = _detailed_pair_row_limit()
+    if row_limit and top_max_rows > row_limit:
+        detailed_pairs = pair_queue[:1]
+    else:
+        detailed_pairs = [p for p in pair_queue if p['quick_score'] >= cutoff][:limit]
+    if not detailed_pairs and pair_queue:
+        detailed_pairs = pair_queue[:1]
     best = None
 
     for pair in detailed_pairs:
@@ -1849,15 +1993,11 @@ def _df_to_records(df: pd.DataFrame):
 
 @app.post("/api/validate-key")
 async def validate_key(payload: dict):
-    """Проверяет Anthropic API-ключ: формат → белый список → реальный вызов."""
+    """Проверяет ключ доступа SverkAI: формат -> белый список -> реальный вызов."""
     key = payload.get("api_key", "").strip()
-    if not key:
-        return JSONResponse({"valid": False, "error": "Ключ не указан"})
-    if not key.startswith("sk-ant-"):
-        return JSONResponse({"valid": False, "error": "Неверный формат ключа (должен начинаться с sk-ant-)"})
-    # Проверка белого списка
-    if not _is_key_allowed(key):
-        return JSONResponse({"valid": False, "error": "Ключ не входит в список разрешённых. Обратитесь к администратору."})
+    ok, reason = _key_access_status(key)
+    if not ok:
+        return JSONResponse({"valid": False, "error": _key_error_message(reason)})
     # Проверка через реальный вызов к Anthropic
     try:
         client = Anthropic(api_key=key)
@@ -1882,15 +2022,29 @@ async def admin_add_key(payload: dict):
         raise HTTPException(status_code=403, detail="Нет доступа")
     key  = payload.get("api_key", "").strip()
     label = payload.get("label", "").strip() or "—"
+    role = payload.get("role", "user").strip().lower() if isinstance(payload.get("role", "user"), str) else "user"
+    if role not in {"user", "guest"}:
+        role = "user"
     if not key:
         raise HTTPException(status_code=400, detail="api_key не указан")
     h = _user_id(key)
-    entries = _load_allowed_keys()
+    if role == "user" and h in _guest_key_hashes():
+        raise HTTPException(status_code=400, detail="Гостевой ключ нельзя добавить как пользовательский")
+    entries = _load_allowed_keys_from_file()
+    all_entries = _load_allowed_keys()
+    if any(e.get("hash") == h and e.get("role", "user") == role for e in all_entries):
+        return JSONResponse({"ok": False, "message": "Ключ уже в списке", "hash": h})
     if any(e.get("hash") == h for e in entries):
         return JSONResponse({"ok": False, "message": "Ключ уже в списке", "hash": h})
-    entries.append({"hash": h, "label": label, "added": datetime.now().strftime("%Y-%m-%d")})
+    entries.append({
+        "hash": h,
+        "label": label,
+        "role": role,
+        "enabled": True,
+        "added": datetime.now().strftime("%Y-%m-%d"),
+    })
     _save_allowed_keys(entries)
-    return JSONResponse({"ok": True, "hash": h, "label": label, "total": len(entries)})
+    return JSONResponse({"ok": True, "hash": h, "label": label, "role": role, "total": len(entries)})
 
 
 @app.post("/api/admin/remove-key")
@@ -1901,7 +2055,7 @@ async def admin_remove_key(payload: dict):
     h = payload.get("hash", "").strip()
     if not h and payload.get("api_key"):
         h = _user_id(payload["api_key"].strip())
-    entries = _load_allowed_keys()
+    entries = _load_allowed_keys_from_file()
     before  = len(entries)
     entries = [e for e in entries if e.get("hash") != h]
     _save_allowed_keys(entries)
@@ -1925,7 +2079,7 @@ async def reconcile(
     file2: UploadFile = File(...),
     settings: str = Form(default="{}")
 ):
-    user_key = _get_user_key(request)
+    user_key = _authorized_user_key_or_raise(request)
     eff_key  = _effective_key(user_key)
 
     try:
@@ -2041,7 +2195,7 @@ async def reconcile(
 @app.post("/api/preview")
 async def preview_file(request: Request, file: UploadFile = File(...)):
     """Парсит один файл и возвращает таблицу для предпросмотра + статус детекта."""
-    user_key = _get_user_key(request)
+    user_key = _authorized_user_key_or_raise(request)
     eff_key  = _effective_key(user_key)
 
     tmpdir = None
@@ -2114,7 +2268,8 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
 
 
 @app.post("/api/export")
-async def export_report(payload: dict):
+async def export_report(payload: dict, request: Request):
+    _authorized_user_key_or_raise(request)
     report_id = str(uuid.uuid4())[:8]
     fname = f"sverkAI_{datetime.now().strftime('%Y%m%d_%H%M')}_{report_id}.xlsx"
     fpath = _REPORT_DIR / fname
@@ -2174,14 +2329,14 @@ async def export_report(payload: dict):
 @app.get("/api/history")
 async def get_history(request: Request):
     """Возвращает историю только для авторизованных пользователей."""
-    user_key = _get_user_key(request)
+    user_key = _authorized_user_key_or_raise(request)
     return JSONResponse(_load_user_history(user_key))
 
 
 @app.delete("/api/history")
 async def clear_history(request: Request):
     """Очищает историю текущего авторизованного пользователя."""
-    user_key = _get_user_key(request)
+    user_key = _authorized_user_key_or_raise(request)
     if not user_key:
         return JSONResponse({"ok": False, "error": "История доступна только с личным API-ключом"}, status_code=401)
     _clear_user_history(user_key)
@@ -2193,6 +2348,10 @@ _static = Path(__file__).parent / "static"
 _static.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(_static)), name="static")
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(str(_static / "favicon.svg"), media_type="image/svg+xml")
+
 @app.get("/")
 @app.head("/")
 async def root():
@@ -2201,4 +2360,14 @@ async def root():
 @app.head("/api/health")
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "api_key_set": bool(ANTHROPIC_API_KEY)}
+    allowed_users = [
+        e for e in _load_allowed_keys()
+        if e.get("role", "user") == "user" and e.get("enabled", True)
+    ]
+    return {
+        "status": "ok",
+        "api_key_set": bool(ANTHROPIC_API_KEY),
+        "auth_allow_all": AUTH_ALLOW_ALL,
+        "allowed_user_keys": len(allowed_users),
+        "guest_keys_blocked": len(_guest_key_hashes()),
+    }
