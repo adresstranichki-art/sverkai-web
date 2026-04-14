@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 Ключ API*.txt
 data/history*.json
+local_cases/

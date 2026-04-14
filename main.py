@@ -1153,6 +1153,59 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             return False
         return (v1 * v2 < 0) or (_row_side(r1) != _row_side(r2))
 
+    _DOC_TOKEN_PATTERNS = (
+        re.compile(r'(?:№|#|No)\s*([A-Za-zА-Яа-яЁё]*-?\d[\w/-]*)', re.IGNORECASE),
+        re.compile(r'\b([A-Za-zА-Яа-яЁё]+-\d[\w/-]*)\b', re.IGNORECASE),
+        re.compile(r'\b(\d{4,}[\w/-]*)\b', re.IGNORECASE),
+    )
+
+    def _doc_identity_tokens(r):
+        tokens = {'norm': set(), 'raw': set(), 'prefix': set()}
+        doc_num = str(r.get('doc_num') or '').strip()
+        if doc_num:
+            tokens['norm'].add(_normalize_doc_num(doc_num))
+        text = f"{r.get('document', '')} {r.get('doc_type', '')}"
+        for pattern in _DOC_TOKEN_PATTERNS:
+            for match in pattern.finditer(text):
+                raw = str(match.group(1)).strip().lower()
+                if not raw or re.fullmatch(r'(?:19|20)\d{2}', raw):
+                    continue
+                tokens['raw'].add(raw)
+                tokens['norm'].add(_normalize_doc_num(raw))
+                prefix = re.match(r'([a-zа-яё]+)-', raw, re.IGNORECASE)
+                if prefix:
+                    tokens['prefix'].add(prefix.group(1).lower())
+        return tokens
+
+    def _doc_identity_score(r1, r2, sum1=None, sum2=None):
+        score = 0.0
+        t1 = _doc_identity_tokens(r1)
+        t2 = _doc_identity_tokens(r2)
+        if t1['raw'] & t2['raw']:
+            score += 35
+        if t1['norm'] & t2['norm']:
+            score += 25
+        if t1['prefix'] and t2['prefix'] and t1['prefix'] & t2['prefix']:
+            score += 8
+        if sum1 is not None and sum2 is not None:
+            diff = abs(abs(sum1) - abs(sum2))
+            if diff <= 0.01:
+                score += 45
+            else:
+                score += max(0, 18 - min(diff / 1000, 18))
+        d1, d2 = _md(r1), _md(r2)
+        if pd.notna(d1) and pd.notna(d2):
+            dd = abs((d1 - d2).days)
+            if dd == 0:
+                score += 18
+            elif dd <= 7:
+                score += max(0, 12 - dd)
+        type1 = str(r1.get('doc_type') or '').strip().lower()
+        type2 = str(r2.get('doc_type') or '').strip().lower()
+        if type1 and type1 not in ('nan', 'none') and type1 == type2:
+            score += 5
+        return score
+
     exact_pairs, amount_diff_pairs, seed_sign_mismatch_pairs = [], [], []
     for _, r1 in df1.iterrows():
         norm1 = _normalize_doc_num(r1['doc_num']) if r1.get('doc_num') else None
@@ -1161,17 +1214,34 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         if not candidates: continue
         sum1 = _sf(r1.get('debit')) or _sf(r1.get('credit'))
         best = None
+        best_score = None
+        best_amount_diff = None
+        amount_diff_scored = []
         for r2 in candidates:
             sum2 = _sf(r2.get('debit')) or _sf(r2.get('credit'))
             if sum1 is not None and sum2 is not None and abs(abs(sum1) - abs(sum2)) <= 0.01:
-                best = r2; break
+                score = _doc_identity_score(r1, r2, sum1, sum2)
+                if best is None or score > best_score:
+                    best = r2
+                    best_score = score
+            elif sum1 is not None and sum2 is not None:
+                amount_diff_scored.append((_doc_identity_score(r1, r2, sum1, sum2), r2, sum2))
         if best is None and len(candidates) == 1:
             best = candidates[0]
             sum2 = _sf(best.get('debit')) or _sf(best.get('credit'))
             if sum1 is not None and sum2 is not None and abs(abs(sum1) - abs(sum2)) > 0.01:
-                amount_diff_pairs.append((r1, best, sum1, sum2))
+                best_amount_diff = (r1, best, sum1, sum2)
+        elif best is None and amount_diff_scored:
+            top_score, top_candidate, top_sum = max(amount_diff_scored, key=lambda item: item[0])
+            other_scores = [score for score, candidate, _ in amount_diff_scored if candidate is not top_candidate]
+            next_score = max(other_scores) if other_scores else None
+            if top_score >= 45 and (next_score is None or top_score - next_score >= 8):
+                best = top_candidate
+                best_amount_diff = (r1, best, sum1, top_sum)
         if best is not None:
             matched1.add(r1['raw_row']); matched2.add(best['raw_row'])
+            if best_amount_diff is not None:
+                amount_diff_pairs.append(best_amount_diff)
             if _is_sign_mismatch_pair(r1, best):
                 seed_sign_mismatch_pairs.append((r1, best))
             else:
@@ -1198,20 +1268,27 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
 
     unmatched1 = df1[~df1['raw_row'].isin(matched1)].copy()
     unmatched2 = df2[~df2['raw_row'].isin(matched2)].copy()
+    unmatched2_amount_index = {}
+    for _, r2 in unmatched2.iterrows():
+        for side in ('debit', 'credit'):
+            v2 = _sf(r2.get(side))
+            if v2 is None:
+                continue
+            key = (side, round(abs(v2), 2))
+            unmatched2_amount_index.setdefault(key, []).append(r2)
 
     for _, r1 in unmatched1.iterrows():
         d1 = _md(r1); cat1 = _cat(r1); found = False
         for s1, s2 in [('debit','credit'),('credit','debit'),('debit','debit'),('credit','credit')]:
             v1 = _sf(r1.get(s1))
             if v1 is None: continue
-            for _, r2 in unmatched2.iterrows():
+            for r2 in unmatched2_amount_index.get((s2, round(abs(v1), 2)), []):
                 if r2['raw_row'] in matched2: continue
                 if any(t in str(r2.get('doc_type','')).lower()+' '+str(r2.get('document','')).lower() for t in PENALTY_KW): continue
                 cat2 = _cat(r2)
                 if cat1 != 'прочее' and cat2 != 'прочее' and cat1 != cat2: continue
                 v2 = _sf(r2.get(s2))
                 if v2 is None: continue
-                if abs(abs(v1) - abs(v2)) > 0.01: continue
                 if cat1 == 'корректировка' and cat2 == 'корректировка' and s1 != s2 and v1 * v2 < 0: continue
                 d2 = _md(r2)
                 dw = dw_payment if cat1 == 'оплата' else dw_delivery

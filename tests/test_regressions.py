@@ -174,6 +174,48 @@ class RegressionReconcileTests(unittest.TestCase):
         )
         self.assertAlmostEqual(result['summary']['net_period'], 1436253.6, places=2)
 
+    def test_prefixed_document_number_wins_over_plain_number_duplicate(self):
+        pd = self.main.pd
+        df1 = pd.DataFrame([
+            {
+                'date': pd.Timestamp('2026-03-01'),
+                'date_str': '01.03.2026',
+                'document': 'Корректировка М-156 от 01.03.2026',
+                'doc_num': '156',
+                'debit': 100.0,
+                'credit': None,
+                'raw_row': 10,
+            },
+        ])
+        df2 = pd.DataFrame([
+            {
+                'date': pd.Timestamp('2026-03-01'),
+                'date_str': '01.03.2026',
+                'document': 'Платеж №156 от 01.03.2026',
+                'doc_num': '156',
+                'debit': 100.0,
+                'credit': None,
+                'raw_row': 20,
+            },
+            {
+                'date': pd.Timestamp('2026-03-01'),
+                'date_str': '01.03.2026',
+                'document': 'Корректировка М-156 от 01.03.2026',
+                'doc_num': '156',
+                'debit': 100.0,
+                'credit': None,
+                'raw_row': 21,
+            },
+        ])
+
+        result = self.main._reconcile_structured(
+            df1, df2, 'generic_detected', 'generic_detected', None, lambda *_: None, self.cfg
+        )
+
+        self.assertIn(10, result['matched1'])
+        self.assertIn(21, result['matched2'])
+        self.assertIn(20, result['missing_rows2'])
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod
