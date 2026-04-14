@@ -171,13 +171,12 @@ class RegressionReconcileTests(unittest.TestCase):
         )
         self.assertEqual(cand1['label'], 'Акт сверки (односторонний)')
         self.assertEqual(cand2['label'], 'Акт сверки (двусторонний)')
-        self.assertEqual(len(result['discrepancies']), 8)
+        self.assertEqual(len(result['discrepancies']), 3)
         self.assertEqual(result['summary']['critical_count'], 2)
         self.assertEqual(result['summary']['technical_mirror_count'], 5)
-        self.assertEqual(
-            sum(1 for d in result['discrepancies'] if d['type'] == 'technical_mirror'),
-            5,
-        )
+        self.assertEqual(result['summary']['total_discrepancies'], 3)
+        self.assertEqual(sum(1 for d in result['discrepancies'] if d['type'] == 'technical_mirror'), 0)
+        self.assertEqual(sum(1 for d in result['discrepancies'] if d['type'] == 'sign_mismatch'), 0)
         self.assertAlmostEqual(result['summary']['net_period'], 1436253.6, places=2)
 
     def test_prefixed_document_number_wins_over_plain_number_duplicate(self):

@@ -1448,6 +1448,8 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         return 0.0
 
     discrepancies = []
+    technical_mirror_pairs = []
+    technical_mirror_row_pairs = set()
 
     if cfg.get('find_missing', True):
         for _, r in missing_in_2.iterrows():
@@ -1475,12 +1477,14 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             amount = max(abs(effect_company), abs(effect_supplier))
             if min_amount and amount < min_amount: continue
             is_technical = same_document and effect_diff <= 0.01
+            if is_technical:
+                technical_mirror_pairs.append((ro, rc))
+                technical_mirror_row_pairs.add((ro['raw_row'], rc['raw_row']))
+                continue
             discrepancies.append({
-                'type':'technical_mirror' if is_technical else 'sign_mismatch',
+                'type':'sign_mismatch',
                 'document_number':ro.get('document',''),
                 'description':(
-                    'Разная сторона отражения сторно, влияние на сальдо совпадает'
-                    if is_technical else
                     'Похожая зеркальная операция без совпадающего номера документа влияет на сальдо'
                     if not same_document else
                     'Одна операция отражена с противоположным влиянием на сальдо'
@@ -1488,7 +1492,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                 'company_value':f"{_side_label(ro)}; эффект {effect_company:+,.2f} руб.",
                 'supplier_value':f"{_side_label(rc)}; эффект {effect_supplier:+,.2f} руб.",
                 'difference':f"{effect_diff:,.2f}",
-                'severity':'low' if is_technical else 'high',
+                'severity':'high',
                 'row_company':ro.get('raw_row',0),'row_supplier':rc.get('raw_row',0),
                 'date':ro.get('date_str','')
             })
@@ -1597,7 +1601,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
 
     window_suggestion = _build_window_suggestion(missing_in_2, missing_in_1)
     critical = sum(1 for d in discrepancies if d['severity'] == 'high')
-    technical_mirror_count = sum(1 for d in discrepancies if d.get('type') == 'technical_mirror')
+    technical_mirror_count = len(technical_mirror_pairs)
     ai_comment = ''
     if client and discrepancies and cfg.get('ai_comment', True):
         try:
@@ -1637,8 +1641,8 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         'amount_diff_rows2': [r2['raw_row'] for r1,r2,s1,s2 in amount_diff_pairs],
         'fuzzy_rows1': [r1['raw_row'] for r1,_ in fuzzy_matches],
         'fuzzy_rows2': [r2['raw_row'] for _,r2 in fuzzy_matches],
-        'sign_mismatch_rows1': [ro['raw_row'] for ro,_ in smm_pairs],
-        'sign_mismatch_rows2': [rc['raw_row'] for _,rc in smm_pairs],
+        'sign_mismatch_rows1': [ro['raw_row'] for ro, rc in smm_pairs if (ro['raw_row'], rc['raw_row']) not in technical_mirror_row_pairs],
+        'sign_mismatch_rows2': [rc['raw_row'] for ro, rc in smm_pairs if (ro['raw_row'], rc['raw_row']) not in technical_mirror_row_pairs],
         'date_diff_rows1': list({r1['raw_row'] for r1,r2 in exact_pairs+fuzzy_matches
             if pd.notna(r1.get('date')) and pd.notna(r2.get('date')) and abs((r1['date']-r2['date']).days) > 0}),
         'date_diff_rows2': list({r2['raw_row'] for r1,r2 in exact_pairs+fuzzy_matches
@@ -2394,13 +2398,12 @@ async def export_report(payload: dict, request: Request):
     ws.set_row(0,35)
     TYPE_RU = {'missing_in_counterparty':'❌ Нет у контрагента','missing_in_company':'❌ Нет у организации',
                'amount_diff':'💰 Разница в суммах','date_diff':'📅 Разница в датах',
-               'sign_mismatch':'🔀 Зеркальная корректировка',
-               'technical_mirror':'🔁 Техническое зеркало'}
+               'sign_mismatch':'🔀 Зеркальная корректировка'}
     SEV_RU = {'high':'Высокий','medium':'Средний','low':'Низкий'}
     for ri, d in enumerate(discs, 1):
         sev = d.get('severity','low')
         tp  = d.get('type','')
-        fmt = red if sev=='high' and tp!='sign_mismatch' else blu if tp in ('sign_mismatch', 'technical_mirror') else yel if sev=='medium' else gry
+        fmt = red if sev=='high' and tp!='sign_mismatch' else blu if tp == 'sign_mismatch' else yel if sev=='medium' else gry
         ws.write(ri,0,ri,fmt); ws.write(ri,1,TYPE_RU.get(tp,tp),fmt)
         ws.write(ri,2,d.get('date',''),fmt); ws.write(ri,3,d.get('document_number',''),fmt)
         ws.write(ri,4,d.get('company_value',''),fmt); ws.write(ri,5,d.get('supplier_value',''),fmt)
@@ -2415,7 +2418,6 @@ async def export_report(payload: dict, request: Request):
         ('Итог', summary.get('debt_label','')),
         ('Всего расхождений', summary.get('total_discrepancies',0)),
         ('Критических', summary.get('critical_count',0)),
-        ('Технических зеркал', summary.get('technical_mirror_count',0)),
         ('Нечётких совпадений', summary.get('fuzzy_count',0)),
         ('Точных совпадений', summary.get('exact_matches',0)),
         ('Период', summary.get('period','')),

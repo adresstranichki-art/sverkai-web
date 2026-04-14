@@ -693,7 +693,7 @@
     <span class="settings-title">Настройки</span>
     <label><input type="checkbox" id="cfg-missing" checked> Отсутствующие <span class="tip">Документ есть у одной стороны, но отсутствует у другой</span></label>
     <label><input type="checkbox" id="cfg-amount" checked> Разница в суммах <span class="tip">Один документ у обеих сторон, но суммы не совпадают</span></label>
-    <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Если эффект на сальдо совпадает, показываем как техническое зеркало; если отличается — как критическое расхождение</span></label>
+    <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Показывать только зеркальные операции, которые влияют на сальдо; технические зеркала распознаются и скрываются</span></label>
     <label><input type="checkbox" id="cfg-date" checked> Разница в датах <span class="tip">Документ совпадает по номеру/сумме, но даты отличаются (низкий приоритет)</span></label>
     <label>Окно оплат (дн): <input type="number" id="cfg-dw-pay" value="5" min="0" max="30"> <span class="tip">Макс. расхождение в датах при поиске пар оплат</span></label>
     <label>Окно поставок (дн): <input type="number" id="cfg-dw-del" value="3" min="0" max="30"> <span class="tip">То же для накладных и КСФ</span></label>
@@ -746,7 +746,6 @@
       <button class="filter-btn" id="fb-missing_in_company"      onclick="toggleFilter('missing_in_company',this)">Нет у организации</button>
       <button class="filter-btn" id="fb-amount_diff"             onclick="toggleFilter('amount_diff',this)">Разница в суммах</button>
       <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">Зеркальные КСФ</button>
-      <button class="filter-btn" id="fb-technical_mirror"        onclick="toggleFilter('technical_mirror',this)">Технические зеркала</button>
       <button class="filter-btn" id="fb-date_diff"               onclick="toggleFilter('date_diff',this)">Разница в датах</button>
     </div>
     <div class="disc-suggest-banner" id="disc-window-suggest" style="display:none">
@@ -911,7 +910,6 @@
       <label><input type="checkbox" id="ex-missing_in_company" checked> Нет у организации</label>
       <label><input type="checkbox" id="ex-amount_diff" checked> Разница в суммах</label>
       <label><input type="checkbox" id="ex-sign_mismatch" checked> Зеркальные КСФ</label>
-      <label><input type="checkbox" id="ex-technical_mirror" checked> Технические зеркала</label>
       <label><input type="checkbox" id="ex-date_diff" checked> Разница в датах</label>
     </div>
     <div class="exp-footer">
@@ -1430,20 +1428,21 @@ async function applySuggestedWindows(payDays, delDays){
 }
 
 function displayResults(data){
-  lastResult=data;allDisc=data.discrepancies||[];
+  const visibleDiscrepancies=(data.discrepancies||[]).filter(d=>d.type!=='technical_mirror');
+  if(visibleDiscrepancies.length!==(data.discrepancies||[]).length){
+    data={...data,discrepancies:visibleDiscrepancies,summary:{...(data.summary||{}),total_discrepancies:visibleDiscrepancies.length}};
+  }
+  lastResult=data;allDisc=visibleDiscrepancies;
   renderTable(1,data.table1,data.highlight);renderTable(2,data.table2,data.highlight);
   renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
   renderSummary(data.summary,data.file1_name,data.file2_name);
   if(isLoggedIn())loadHistory();
   document.getElementById('btn-export').disabled=false;
   const cnt=data.summary.total_discrepancies;
-  const tech=data.summary.technical_mirror_count||0;
-  const financialCnt=Math.max(0,cnt-tech);
   const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
   if(cnt===0)showToast('Расхождений не обнаружено','success');
-  else if(financialCnt===0)showToast(`Найдены только технические зеркала: ${tech}`,'warn');
   else if(data.summary.window_suggestion?.candidate_pairs)showToast('Найдены вероятные совпадения с разницей по датам. Можно расширить окна и пересчитать.','warn');
-  else showToast(`Найдено финансовых расхождений: ${financialCnt}, критических: ${data.summary.critical_count}`,'error');
+  else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
   switchTab('discrepancies');
   initTableResize(document.getElementById('disc-table-el'));
 }
@@ -1455,7 +1454,7 @@ function setProgress(pct,msg){
 }
 
 // ── Discrepancies ─────────────────────────────────────────────────
-const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red'],missing_in_company:['Нет у организации','badge-red'],amount_diff:['Разница в суммах','badge-yellow'],date_diff:['Разница в датах','badge-gray'],sign_mismatch:['Зеркальная КСФ','badge-blue'],technical_mirror:['Техническое зеркало','badge-gray']};
+const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red'],missing_in_company:['Нет у организации','badge-red'],amount_diff:['Разница в суммах','badge-yellow'],date_diff:['Разница в датах','badge-gray'],sign_mismatch:['Зеркальная КСФ','badge-blue']};
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray']};
 function renderDiscrepancies(discs,f1='',f2=''){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
@@ -1473,7 +1472,7 @@ function renderDiscrepancies(discs,f1='',f2=''){
   body.innerHTML=discs.map((d,i)=>{
     const[tl,tb]=TYPE_MAP[d.type]||[d.type,'badge-gray'];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
-    const tc=d.type==='sign_mismatch'?'type-sign':d.type==='technical_mirror'?'type-technical':`sev-${d.severity}`;
+    const tc=d.type==='sign_mismatch'?'type-sign':`sev-${d.severity}`;
     return`<tr class="${tc}" data-type="${d.type}"><td>${i+1}</td><td><span class="badge ${tb}">${tl}</span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
   applyDiscFilter();
@@ -1482,11 +1481,9 @@ function renderDiscrepancies(discs,f1='',f2=''){
 // ── Summary ───────────────────────────────────────────────────────
 function renderSummary(s,file1Name='',file2Name=''){
   const critical=s.critical_count||0;
-  const financialTotal=Math.max(0,(s.total_discrepancies||0)-(s.technical_mirror_count||0));
   document.getElementById('summary-cards').innerHTML=`
-    <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${financialTotal>0?'red':''}">${s.total_discrepancies||0}</div></div>
+    <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${(s.total_discrepancies||0)>0?'red':''}">${s.total_discrepancies||0}</div></div>
     <div class="stat-card"><div class="label">Критических</div><div class="value ${critical>0?'red':''}">${critical}</div></div>
-    <div class="stat-card"><div class="label">Технических зеркал</div><div class="value dark">${s.technical_mirror_count||0}</div></div>
     <div class="stat-card"><div class="label">Точных совпадений</div><div class="value">${s.exact_matches||0}</div></div>
     <div class="stat-card"><div class="label">Нечётких совпадений</div><div class="value">${s.fuzzy_count||0}</div></div>`;
   const dc=document.getElementById('debt-card');
@@ -1613,7 +1610,7 @@ function openExportModal(){if(!lastResult)return;document.getElementById('exp-ov
 function closeExportModal(){document.getElementById('exp-overlay').style.display='none';}
 async function doExport(){
   if(!lastResult)return;closeExportModal();
-  const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','technical_mirror','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
+  const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
   const filtered=lastResult.discrepancies.filter(d=>allowed.has(d.type));
   try{
     const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
