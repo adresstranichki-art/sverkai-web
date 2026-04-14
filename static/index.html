@@ -223,10 +223,10 @@
     border-radius: 16px;
     padding: 14px 16px;
     margin-bottom: 14px;
-    display: grid;
-    grid-template-columns: auto repeat(auto-fit, minmax(220px, 1fr));
+    display: flex;
+    flex-wrap: wrap;
     gap: 10px 14px;
-    align-items: start;
+    align-items: center;
     box-shadow: var(--shadow);
   }
   .settings-title {
@@ -246,9 +246,9 @@
     gap: 8px;
     cursor: pointer;
     position: relative;
-    padding: 10px 12px;
+    padding: 7px 10px;
     border: 1px solid rgba(210,216,209,.8);
-    border-radius: 12px;
+    border-radius: 999px;
     background: rgba(248,250,248,.75);
   }
   .settings-bar label:hover { border-color: rgba(31,122,67,.35); background: #fff; }
@@ -597,9 +597,7 @@
     .compare-grid { grid-template-columns: 1fr; }
     .actions-col { flex-direction: row; flex-wrap: wrap; padding-top: 0; }
     .actions-col .btn { flex: 1 1 210px; justify-content: center; }
-    .settings-bar { grid-template-columns: 1fr; }
     .settings-title { padding-top: 0; }
-    .settings-bar label { width: 100%; }
     .disc-filter { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
     .disc-filter::-webkit-scrollbar { height: 6px; }
     .wiz-left { width: 250px; }

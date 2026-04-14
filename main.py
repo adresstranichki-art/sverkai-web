@@ -1206,6 +1206,28 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             score += 5
         return score
 
+    def _has_strong_doc_identity(r1, r2):
+        t1 = _doc_identity_tokens(r1)
+        t2 = _doc_identity_tokens(r2)
+        return bool((t1['raw'] & t2['raw']) or (t1['norm'] & t2['norm']))
+
+    def _sign_pair_financial_effects(r1, r2, same_document: bool):
+        """Возвращает эффекты для классификации зеркал.
+
+        Если это один и тот же документ, разные технические способы записи
+        debit/credit могут давать одинаковый эффект через debit-credit. Если
+        сильного совпадения документа нет, похожая по сумме/дате зеркальная
+        операция считается финансовой: одинаковый display-эффект разворачиваем
+        у второй стороны, чтобы показать реальное влияние на расхождение.
+        """
+        effect1 = _display_effect(r1)
+        effect2 = _display_effect(r2)
+        if same_document or abs(effect1 - effect2) > 0.01:
+            return effect1, effect2
+        if _is_sign_mismatch_pair(r1, r2):
+            return effect1, -effect2
+        return effect1, effect2
+
     exact_pairs, amount_diff_pairs, seed_sign_mismatch_pairs = [], [], []
     for _, r1 in df1.iterrows():
         norm1 = _normalize_doc_num(r1['doc_num']) if r1.get('doc_num') else None
@@ -1447,18 +1469,20 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
 
     if cfg.get('find_sign_mismatch', True):
         for ro, rc in smm_pairs:
-            effect_company = _display_effect(ro)
-            effect_supplier = _display_effect(rc)
+            same_document = _has_strong_doc_identity(ro, rc)
+            effect_company, effect_supplier = _sign_pair_financial_effects(ro, rc, same_document)
             effect_diff = round(abs(effect_company - effect_supplier), 2)
             amount = max(abs(effect_company), abs(effect_supplier))
             if min_amount and amount < min_amount: continue
-            is_technical = effect_diff <= 0.01
+            is_technical = same_document and effect_diff <= 0.01
             discrepancies.append({
                 'type':'technical_mirror' if is_technical else 'sign_mismatch',
                 'document_number':ro.get('document',''),
                 'description':(
                     'Разная сторона отражения сторно, влияние на сальдо совпадает'
                     if is_technical else
+                    'Похожая зеркальная операция без совпадающего номера документа влияет на сальдо'
+                    if not same_document else
                     'Одна операция отражена с противоположным влиянием на сальдо'
                 ),
                 'company_value':f"{_side_label(ro)}; эффект {effect_company:+,.2f} руб.",
