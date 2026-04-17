@@ -397,6 +397,7 @@
   tr.row-amount td  { background: #fff0c9 !important; }
   tr.row-sign td    { background: #e3effa !important; }
   tr.row-date td    { background: #ececec !important; }
+  tr.row-focus td   { background: #dff3e6 !important; box-shadow: inset 0 0 0 2px var(--green); }
   tr.row-missing:hover td { background: #f8d4d4 !important; }
   tr.row-amount:hover td  { background: #ffe7ad !important; }
   tr.row-sign:hover td    { background: #d7e8f7 !important; }
@@ -427,6 +428,8 @@
                    overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 0; }
   .disc-table tr:nth-child(even) td { background: #fbfcfb; }
   .disc-table tr:hover td { background: rgba(31,122,67,.045); }
+  .disc-table tr.disc-clickable td { cursor: pointer; }
+  .disc-table tr.disc-clickable:hover td { background: rgba(31,122,67,.08); }
   .disc-table tr.sev-high td   { border-left: 3px solid var(--red); }
   .disc-table tr.sev-medium td { border-left: 3px solid #f59f00; }
   .disc-table tr.sev-low td    { border-left: 3px solid #b2bec3; }
@@ -1654,7 +1657,7 @@ function renderTable(num,td,hl,rawRowsOverride){
     let cls='';
     if(missing.has(r))cls='row-missing';else if(sign.has(r))cls='row-sign';
     else if(amt.has(r))cls='row-amount';else if(date.has(r))cls='row-date';
-    html+=`<tr class="${cls}">`;
+    html+=`<tr class="${cls}" data-raw-row="${esc(r)}">`;
     td.columns.forEach(c=>html+=`<td title="${esc(row[c]||'')}">${esc(trunc(row[c]||'',80))}</td>`);
     html+='</tr>';
   });
@@ -1811,9 +1814,80 @@ function renderDiscrepancies(discs,f1='',f2=''){
     const[tl,tb,ti]=TYPE_MAP[d.type]||[d.type,'badge-gray',''];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
     const tc=d.type==='sign_mismatch'?'type-sign':`sev-${d.severity}`;
-    return`<tr class="${tc}" data-type="${d.type}"><td>${i+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
+    return`<tr class="${tc} disc-clickable" data-type="${d.type}" data-disc-index="${i}" title="Показать строку на вкладке «Сравнение»"><td>${i+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
+  body.querySelectorAll('tr[data-disc-index]').forEach(row=>{
+    row.addEventListener('click',()=>goToDiscrepancy(Number(row.dataset.discIndex)));
+  });
   applyDiscFilter();
+}
+
+function sideHasValue(v){
+  const s=String(v??'').trim();
+  return s&&s!=='-';
+}
+
+function targetRowsForDiscrepancy(d){
+  const targets=[];
+  if(!d)return targets;
+  const hasCompanyRow=d.row_company!==undefined&&d.row_company!==null;
+  const hasSupplierRow=d.row_supplier!==undefined&&d.row_supplier!==null;
+  if(d.type==='missing_in_counterparty'){
+    if(hasCompanyRow)targets.push({table:1,row:String(d.row_company)});
+    return targets;
+  }
+  if(d.type==='missing_in_company'){
+    if(hasSupplierRow)targets.push({table:2,row:String(d.row_supplier)});
+    return targets;
+  }
+  if(hasCompanyRow&&sideHasValue(d.company_value)){
+    targets.push({table:1,row:String(d.row_company)});
+  }
+  if(hasSupplierRow&&sideHasValue(d.supplier_value)){
+    targets.push({table:2,row:String(d.row_supplier)});
+  }
+  return targets;
+}
+
+function resetCompareSearches(){
+  [1,2].forEach(num=>{
+    const input=document.getElementById(`search${num}`);
+    if(input)input.value='';
+    document.getElementById(`table${num}-wrap`)?.querySelectorAll('tbody tr').forEach(row=>row.style.display='');
+  });
+}
+
+function findCompareRow(tableNum,rawRow){
+  const wrap=document.getElementById(`table${tableNum}-wrap`);
+  if(!wrap)return null;
+  return [...wrap.querySelectorAll('tbody tr[data-raw-row]')].find(row=>row.dataset.rawRow===String(rawRow))||null;
+}
+
+function scrollTableRowIntoView(row){
+  const wrap=row?.closest('.table-wrap');
+  if(!wrap)return;
+  const top=row.offsetTop-(wrap.clientHeight/2)+(row.offsetHeight/2);
+  wrap.scrollTo({top:Math.max(0,top),behavior:'smooth'});
+}
+
+function goToDiscrepancy(idx){
+  const d=allDisc[idx];
+  if(!d)return;
+  switchTab('compare');
+  resetCompareSearches();
+  document.querySelectorAll('.data-table tr.row-focus').forEach(row=>row.classList.remove('row-focus'));
+  const rows=targetRowsForDiscrepancy(d).map(t=>findCompareRow(t.table,t.row)).filter(Boolean);
+  if(!rows.length){
+    showToast('Связанная строка не найдена на вкладке «Сравнение»','warn');
+    return;
+  }
+  document.getElementById('tab-compare')?.scrollIntoView({block:'start',behavior:'smooth'});
+  rows.forEach(row=>{
+    row.classList.add('row-focus');
+    scrollTableRowIntoView(row);
+  });
+  setTimeout(()=>rows.forEach(row=>row.classList.remove('row-focus')),5000);
+  showToast('Строка расхождения показана на вкладке «Сравнение»','success');
 }
 
 // ── Summary ───────────────────────────────────────────────────────
