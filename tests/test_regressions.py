@@ -234,17 +234,32 @@ class AuthKeyTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.orig_allowed_file = self.main._ALLOWED_KEYS_FILE
+        self.orig_guest_usage_file = self.main._GUEST_USAGE_FILE
         self.orig_api_key = self.main.ANTHROPIC_API_KEY
         self.orig_allow_all = self.main.AUTH_ALLOW_ALL
+        self.orig_guest_limit = self.main.GUEST_RECONCILE_LIMIT
+        self.orig_guest_window = self.main.GUEST_USAGE_WINDOW_DAYS
         self.main._ALLOWED_KEYS_FILE = Path(self.tmp.name) / 'allowed_keys.json'
+        self.main._GUEST_USAGE_FILE = Path(self.tmp.name) / 'guest_usage.json'
         self.main.ANTHROPIC_API_KEY = ''
         self.main.AUTH_ALLOW_ALL = False
+        self.main.GUEST_RECONCILE_LIMIT = 2
+        self.main.GUEST_USAGE_WINDOW_DAYS = 30
 
     def tearDown(self):
         self.main._ALLOWED_KEYS_FILE = self.orig_allowed_file
+        self.main._GUEST_USAGE_FILE = self.orig_guest_usage_file
         self.main.ANTHROPIC_API_KEY = self.orig_api_key
         self.main.AUTH_ALLOW_ALL = self.orig_allow_all
+        self.main.GUEST_RECONCILE_LIMIT = self.orig_guest_limit
+        self.main.GUEST_USAGE_WINDOW_DAYS = self.orig_guest_window
         self.tmp.cleanup()
+
+    def _guest_request(self, guest_id='browser-a', ip='10.0.0.1'):
+        req = types.SimpleNamespace()
+        req.headers = {'X-Guest-Id': guest_id, 'X-Forwarded-For': ip}
+        req.client = types.SimpleNamespace(host=ip)
+        return req
 
     def test_empty_allowlist_rejects_user_login_by_default(self):
         ok, reason = self.main._key_access_status('sk-ant-api03-arbitrary')
@@ -263,6 +278,25 @@ class AuthKeyTests(unittest.TestCase):
         ok, reason = self.main._key_access_status(guest_key)
         self.assertFalse(ok)
         self.assertEqual(reason, 'guest_key')
+
+    def test_guest_reconcile_limit_is_recorded_per_browser_and_ip(self):
+        req = self._guest_request()
+
+        status = self.main._guest_usage_status(req)
+        self.assertEqual(status['limit'], 2)
+        self.assertEqual(status['remaining'], 2)
+
+        status = self.main._record_guest_reconcile(req)
+        self.assertEqual(status['used'], 1)
+        self.assertEqual(status['remaining'], 1)
+
+        status = self.main._record_guest_reconcile(req)
+        self.assertEqual(status['used'], 2)
+        self.assertEqual(status['remaining'], 0)
+
+        with self.assertRaises(self.main.HTTPException) as cm:
+            self.main._guest_limit_or_raise(req)
+        self.assertEqual(cm.exception.status_code, 429)
 
     def test_system_api_key_cannot_be_used_as_user_login(self):
         guest_key = 'sk-ant-api03-system'

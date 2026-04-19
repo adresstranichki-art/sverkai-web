@@ -16,6 +16,9 @@
 - `ADMIN_SECRET=<секрет администратора>`
 - `SVERKAI_ALLOWED_KEY_HASHES=<хеши пользовательских ключей, если храним через env>`
 - `SVERKAI_GUEST_KEY_HASHES=<хеш гостевого ключа, чтобы он не мог быть личным входом>`
+- `SVERKAI_GUEST_RECONCILE_LIMIT=2`
+- `SVERKAI_GUEST_MAX_FILE_MB=2`
+- `SVERKAI_USER_MAX_FILE_MB=10`
 
 Деплой: из ветки `main`.
 
@@ -30,6 +33,9 @@
 - `ADMIN_SECRET=<отдельный секрет для staging>`
 - `SVERKAI_ALLOWED_KEY_HASHES=<тестовые пользователи>`
 - `SVERKAI_GUEST_KEY_HASHES=<хеш гостевого ключа>`
+- `SVERKAI_GUEST_RECONCILE_LIMIT=2`
+- `SVERKAI_GUEST_MAX_FILE_MB=2`
+- `SVERKAI_USER_MAX_FILE_MB=10`
 
 Деплой: из ветки `staging`.
 

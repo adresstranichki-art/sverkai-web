@@ -1,6 +1,6 @@
 """sverkAI v2.1 — веб-версия (FastAPI) с поддержкой личных API-ключей"""
 import os, re, json, tempfile, shutil, uuid, hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -36,7 +36,34 @@ _DATA_DIR = Path(__file__).parent / "data"
 _DATA_DIR.mkdir(exist_ok=True)
 _HISTORY_FILE      = _DATA_DIR / "history.json"         # legacy (не используется)
 _ALLOWED_KEYS_FILE = _DATA_DIR / "allowed_keys.json"    # белый список (хеши ключей)
+_GUEST_USAGE_FILE  = _DATA_DIR / "guest_usage.json"     # счетчик гостевых сверок без документов
 ADMIN_SECRET       = os.environ.get("ADMIN_SECRET", "") # для управления белым списком
+
+
+def _env_int(name: str, default: int, min_value: int = 0, max_value: int | None = None) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except Exception:
+        value = default
+    value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
+
+def _env_mb(name: str, default: float) -> int:
+    try:
+        mb = float(os.environ.get(name, default))
+    except Exception:
+        mb = default
+    return max(0, int(mb * 1024 * 1024))
+
+
+GUEST_RECONCILE_LIMIT = _env_int("SVERKAI_GUEST_RECONCILE_LIMIT", 2, 0, 50)
+GUEST_USAGE_WINDOW_DAYS = _env_int("SVERKAI_GUEST_USAGE_WINDOW_DAYS", 30, 1, 365)
+GUEST_MAX_FILE_BYTES = _env_mb("SVERKAI_GUEST_MAX_FILE_MB", 2)
+USER_MAX_FILE_BYTES = _env_mb("SVERKAI_USER_MAX_FILE_MB", 10)
+SUPPORTED_UPLOAD_EXTS = {".xlsx", ".xls"}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -173,7 +200,7 @@ def _key_error_message(reason: str) -> str:
     messages = {
         "missing": "Ключ не указан",
         "bad_format": "Неверный формат ключа",
-        "guest_key": "Этот ключ используется как гостевой общий API и не может быть пользовательским входом.",
+        "guest_key": "Этот ключ используется как общий гостевой доступ и не может быть пользовательским входом.",
         "no_allowlist": "Вход по личным ключам временно закрыт: список разрешенных ключей не настроен.",
         "not_allowed": "Ключ не входит в список разрешенных. Обратитесь к администратору SverkAI.",
     }
@@ -233,6 +260,150 @@ def _get_user_key(request: Request) -> str:
 def _effective_key(user_key: str) -> str:
     """Возвращает ключ пользователя, либо системный как fallback."""
     return user_key if user_key else ANTHROPIC_API_KEY
+
+
+def _format_bytes(size: int) -> str:
+    mb = size / 1024 / 1024
+    if mb >= 1:
+        text = f"{mb:.1f}".rstrip("0").rstrip(".")
+        return f"{text} МБ"
+    kb = max(1, round(size / 1024))
+    return f"{kb} КБ"
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",", 1)[0].strip()
+    if forwarded:
+        return forwarded
+    client = getattr(request, "client", None)
+    return getattr(client, "host", "") or "unknown"
+
+
+def _guest_subject(request: Request) -> str:
+    browser_id = request.headers.get("X-Guest-Id", "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._-]{12,96}", browser_id):
+        browser_id = "no-browser-id"
+    raw = f"{_client_ip(request)}|{browser_id}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def _load_guest_usage() -> dict:
+    if _GUEST_USAGE_FILE.exists():
+        try:
+            with open(_GUEST_USAGE_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_guest_usage(data: dict) -> None:
+    with open(_GUEST_USAGE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _guest_usage_entry(data: dict, subject: str, now: datetime) -> dict:
+    entry = data.get(subject) if isinstance(data.get(subject), dict) else {}
+    try:
+        start = datetime.fromisoformat(str(entry.get("period_start", "")))
+    except Exception:
+        start = now
+        entry = {}
+    if now - start >= timedelta(days=GUEST_USAGE_WINDOW_DAYS):
+        entry = {}
+        start = now
+    entry.setdefault("period_start", start.isoformat(timespec="seconds"))
+    entry["used"] = max(0, int(entry.get("used") or 0))
+    data[subject] = entry
+    return entry
+
+
+def _guest_usage_status(request: Request) -> dict:
+    if GUEST_RECONCILE_LIMIT <= 0:
+        return {"limit": 0, "used": 0, "remaining": None, "window_days": GUEST_USAGE_WINDOW_DAYS}
+    data = _load_guest_usage()
+    now = datetime.now()
+    entry = _guest_usage_entry(data, _guest_subject(request), now)
+    used = entry["used"]
+    remaining = max(0, GUEST_RECONCILE_LIMIT - used)
+    return {
+        "limit": GUEST_RECONCILE_LIMIT,
+        "used": used,
+        "remaining": remaining,
+        "window_days": GUEST_USAGE_WINDOW_DAYS,
+        "reset_at": (
+            datetime.fromisoformat(entry["period_start"]) + timedelta(days=GUEST_USAGE_WINDOW_DAYS)
+        ).isoformat(timespec="seconds"),
+    }
+
+
+def _guest_limit_or_raise(request: Request) -> None:
+    status = _guest_usage_status(request)
+    if status["limit"] > 0 and status["remaining"] <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Гостевой лимит исчерпан: доступны {status['limit']} бесплатные сверки "
+                f"за {status['window_days']} дней. Для продолжения войдите с выданным тестовым доступом."
+            ),
+        )
+
+
+def _record_guest_reconcile(request: Request) -> dict:
+    if GUEST_RECONCILE_LIMIT <= 0:
+        return _guest_usage_status(request)
+    data = _load_guest_usage()
+    now = datetime.now()
+    subject = _guest_subject(request)
+    entry = _guest_usage_entry(data, subject, now)
+    entry["used"] += 1
+    cutoff = now - timedelta(days=GUEST_USAGE_WINDOW_DAYS * 2)
+    for key, value in list(data.items()):
+        try:
+            if datetime.fromisoformat(str(value.get("period_start", ""))) < cutoff:
+                data.pop(key, None)
+        except Exception:
+            data.pop(key, None)
+    _save_guest_usage(data)
+    used = entry["used"]
+    return {
+        "limit": GUEST_RECONCILE_LIMIT,
+        "used": used,
+        "remaining": max(0, GUEST_RECONCILE_LIMIT - used),
+        "window_days": GUEST_USAGE_WINDOW_DAYS,
+        "reset_at": (
+            datetime.fromisoformat(entry["period_start"]) + timedelta(days=GUEST_USAGE_WINDOW_DAYS)
+        ).isoformat(timespec="seconds"),
+    }
+
+
+async def _save_upload_to_path(upload: UploadFile, path: str, user_key: str, label: str) -> int:
+    filename = upload.filename or label
+    ext = Path(filename).suffix.lower()
+    if ext not in SUPPORTED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail="Поддерживаются только файлы .xlsx и .xls")
+    max_bytes = USER_MAX_FILE_BYTES if user_key else GUEST_MAX_FILE_BYTES
+    total = 0
+    with open(path, "wb") as f:
+        while True:
+            chunk = await upload.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if max_bytes and total > max_bytes:
+                mode = "В гостевом режиме" if not user_key else "Для текущего доступа"
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"{label} слишком большой ({_format_bytes(total)}). "
+                        f"{mode} можно загружать файлы до {_format_bytes(max_bytes)}."
+                    ),
+                )
+            f.write(chunk)
+    if total <= 0:
+        raise HTTPException(status_code=400, detail=f"{label} пустой или не загрузился")
+    return total
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -2193,6 +2364,8 @@ async def reconcile(
 ):
     user_key = _authorized_user_key_or_raise(request)
     eff_key  = _effective_key(user_key)
+    if not user_key:
+        _guest_limit_or_raise(request)
 
     try:
         cfg = {**DEFAULT_RECON_SETTINGS, **json.loads(settings)}
@@ -2202,12 +2375,12 @@ async def reconcile(
     tmpdir = None
     try:
         tmpdir = tempfile.mkdtemp()
-        ext1 = Path(file1.filename).suffix.lower()
-        ext2 = Path(file2.filename).suffix.lower()
+        ext1 = Path(file1.filename or "").suffix.lower()
+        ext2 = Path(file2.filename or "").suffix.lower()
         p1 = os.path.join(tmpdir, f"file1{ext1}")
         p2 = os.path.join(tmpdir, f"file2{ext2}")
-        with open(p1, 'wb') as f: f.write(await file1.read())
-        with open(p2, 'wb') as f: f.write(await file2.read())
+        await _save_upload_to_path(file1, p1, user_key, "Файл 1")
+        await _save_upload_to_path(file2, p2, user_key, "Файл 2")
 
         logs = []
         try:
@@ -2286,6 +2459,7 @@ async def reconcile(
                 }
             })
             _save_user_history(history, user_key)
+        guest_usage = None if user_key else _record_guest_reconcile(request)
 
         return JSONResponse({'ok': True, 'logs': logs, 'summary': result['summary'],
             'discrepancies': result['discrepancies'],
@@ -2298,6 +2472,7 @@ async def reconcile(
             },
             'file1_name': file1.filename, 'file2_name': file2.filename,
             'history_saved': bool(user_key),
+            'guest_usage': guest_usage,
         })
     finally:
         if tmpdir and os.path.exists(tmpdir):
@@ -2313,9 +2488,9 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
     tmpdir = None
     try:
         tmpdir = tempfile.mkdtemp()
-        ext = Path(file.filename).suffix.lower()
+        ext = Path(file.filename or "").suffix.lower()
         path = os.path.join(tmpdir, f"preview{ext}")
-        with open(path, "wb") as f: f.write(await file.read())
+        await _save_upload_to_path(file, path, user_key, "Файл")
 
         label = ""
         needs_manual = False
@@ -2381,7 +2556,9 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
 
 @app.post("/api/export")
 async def export_report(payload: dict, request: Request):
-    _authorized_user_key_or_raise(request)
+    user_key = _authorized_user_key_or_raise(request)
+    if not user_key:
+        raise HTTPException(status_code=401, detail="Экспорт в Excel доступен только с выданным тестовым доступом")
     report_id = str(uuid.uuid4())[:8]
     fname = f"sverkAI_{datetime.now().strftime('%Y%m%d_%H%M')}_{report_id}.xlsx"
     fpath = _REPORT_DIR / fname
@@ -2440,6 +2617,8 @@ async def export_report(payload: dict, request: Request):
 async def get_history(request: Request):
     """Возвращает историю только для авторизованных пользователей."""
     user_key = _authorized_user_key_or_raise(request)
+    if not user_key:
+        return JSONResponse({"detail": "История доступна только с выданным тестовым доступом"}, status_code=401)
     return JSONResponse(_load_user_history(user_key))
 
 
@@ -2483,6 +2662,10 @@ async def health():
         "auth_allow_all": AUTH_ALLOW_ALL,
         "allowed_user_keys": len(allowed_users),
         "guest_keys_blocked": len(_guest_key_hashes()),
+        "guest_reconcile_limit": GUEST_RECONCILE_LIMIT,
+        "guest_usage_window_days": GUEST_USAGE_WINDOW_DAYS,
+        "guest_max_file_mb": round(GUEST_MAX_FILE_BYTES / 1024 / 1024, 2),
+        "user_max_file_mb": round(USER_MAX_FILE_BYTES / 1024 / 1024, 2),
         "app_env": APP_ENV,
         "version": APP_VERSION,
         "admin_enabled": bool(ADMIN_SECRET),

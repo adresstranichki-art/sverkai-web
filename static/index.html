@@ -748,8 +748,8 @@
 <main>
   <!-- Гостевое уведомление -->
   <div class="guest-notice" id="guest-notice">
-    Вы работаете в <strong>гостевом режиме</strong> — используется общий API, история сверок не сохраняется.
-    <a onclick="openLoginModal()">Войдите с выданным ключом доступа</a> для сохранения истории.
+    Гостевой режим: можно загрузить два акта, выполнить бесплатную сверку и посмотреть результат на сайте.
+    История и Excel-экспорт доступны с выданным тестовым доступом.
   </div>
   <div class="env-badge" id="env-badge"></div>
 
@@ -917,7 +917,7 @@
             <li>Если структура файла распознана неверно, нажмите «Настроить вручную» и укажите колонки.</li>
             <li>Проверьте окна допусков по датам: отдельно для оплат и поставок.</li>
             <li>Нажмите «Сверить документы» и дождитесь сводки.</li>
-            <li>При необходимости скачайте Excel-отчет.</li>
+            <li>При необходимости войдите с выданным тестовым доступом и скачайте Excel-отчет.</li>
           </ol>
         </div>
         <div class="guide-card">
@@ -1009,31 +1009,31 @@
     </div>
     <div class="login-body">
       <div class="login-info">
-        <strong>Зачем ключ доступа SverkAI?</strong><br>
-        С выданным ключом: история сверок сохраняется отдельно для пользователя, а доступ подтверждается белым списком администратора.<br>
-        Без ключа: гостевой режим — история не сохраняется, используется общий API.
+        <strong>Зачем тестовый доступ SverkAI?</strong><br>
+        С выданным доступом сохраняется история сверок и доступен Excel-экспорт.<br>
+        Без входа работает гостевой режим: можно проверить документы и посмотреть результат на сайте.
       </div>
 
       <div class="login-modes">
         <div class="mode-card selected" id="mode-key" onclick="selectMode('key')">
-        <div class="mc-title">Ключ доступа SverkAI</div>
-          <div class="mc-desc">История сохраняется. Войти можно только по ключу, который выдал администратор.</div>
+        <div class="mc-title">Тестовый доступ SverkAI</div>
+          <div class="mc-desc">История сохраняется, Excel-отчет доступен после сверки.</div>
         </div>
         <div class="mode-card" id="mode-guest" onclick="selectMode('guest')">
         <div class="mc-title">Гостевой режим</div>
-          <div class="mc-desc">Без сохранения истории. Работает на общем API.</div>
+          <div class="mc-desc">Без установки и оплаты. История и Excel-экспорт недоступны.</div>
         </div>
       </div>
 
       <hr class="mode-sep">
 
       <form class="key-section visible" id="key-section" onsubmit="event.preventDefault();doLogin()">
-        <label class="login-label">Ваш ключ доступа SverkAI</label>
+        <label class="login-label">Ваш тестовый доступ SverkAI</label>
         <input type="password" class="login-input" id="login-key-input"
-               placeholder="Вставьте выданный ключ" autocomplete="off"
+               placeholder="Вставьте выданный доступ" autocomplete="off"
                oninput="this.classList.remove('error');document.getElementById('login-error').textContent=''">
         <div class="login-hint">
-          Ключ выдает администратор SverkAI. Он хранится только в вашем браузере (localStorage).
+          Тестовый доступ выдает администратор SverkAI. Он хранится только в вашем браузере.
         </div>
         <div class="login-error" id="login-error"></div>
       </form>
@@ -1127,12 +1127,14 @@ let historyData=[];
 let loginMode='key'; // 'key' | 'guest'
 let abortController=null; // для отмены сверки
 let healthInfo={};
+let guestUsage=null;
 
 // ════════════════════════════════════════════════════════════════════
 //  АВТОРИЗАЦИЯ
 // ════════════════════════════════════════════════════════════════════
 
 const LS_KEY = 'sverkai_api_key';
+const LS_GUEST_ID = 'sverkai_guest_id';
 const SS_ADMIN_SECRET = 'sverkai_admin_secret';
 
 function getStoredKey() {
@@ -1143,9 +1145,59 @@ function isLoggedIn() {
   return !!getStoredKey();
 }
 
+function getGuestId() {
+  let id = localStorage.getItem(LS_GUEST_ID);
+  if (!id) {
+    id = ((window.crypto?.randomUUID && window.crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9._-]/g, '');
+    localStorage.setItem(LS_GUEST_ID, id);
+  }
+  return id;
+}
+
 function authHeaders() {
   const k = getStoredKey();
-  return k ? { 'X-Api-Key': k } : {};
+  return k ? { 'X-Api-Key': k } : { 'X-Guest-Id': getGuestId() };
+}
+
+function configuredLimit(name, fallback) {
+  const value = Number(healthInfo?.[name]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function guestLimitText() {
+  const limit = configuredLimit('guest_reconcile_limit', 2);
+  if (limit <= 0) return 'без фиксированного лимита сверок';
+  const days = configuredLimit('guest_usage_window_days', 30);
+  return `${limit} бесплатные сверки за ${days} дней`;
+}
+
+function currentMaxFileMb() {
+  return isLoggedIn()
+    ? configuredLimit('user_max_file_mb', 10)
+    : configuredLimit('guest_max_file_mb', 2);
+}
+
+function fmtMb(mb) {
+  return `${Number(mb).toFixed(1).replace(/\.0$/, '')} МБ`;
+}
+
+function fmtFileSize(bytes) {
+  const mb = bytes / 1024 / 1024;
+  if (mb >= 1) return fmtMb(mb);
+  return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+}
+
+function updateAccessActions() {
+  const exportBtn = document.getElementById('btn-export');
+  if (!exportBtn) return;
+  if (!lastResult) {
+    exportBtn.disabled = true;
+  } else {
+    exportBtn.disabled = !isLoggedIn();
+  }
+  exportBtn.title = isLoggedIn()
+    ? 'Скачать Excel-отчет'
+    : 'Excel-экспорт доступен с выданным тестовым доступом';
 }
 
 function resetAccessKey(message) {
@@ -1157,7 +1209,7 @@ function resetAccessKey(message) {
 
 function handleAuthError(resp, data) {
   if (resp.status !== 401 && resp.status !== 403) return false;
-  resetAccessKey(data?.detail || data?.error || 'Ключ доступа не прошел проверку. Войдите заново.');
+  resetAccessKey(data?.detail || data?.error || 'Тестовый доступ не прошел проверку. Войдите заново.');
   return true;
 }
 
@@ -1170,11 +1222,22 @@ function renderAuthArea() {
       <button class="btn-logout" onclick="logout()">Выйти</button>`;
     guestNotice.style.display = 'none';
   } else {
+    const usage = guestUsage?.limit > 0
+      ? `Осталось: ${guestUsage.remaining} из ${guestUsage.limit}`
+      : guestLimitText();
+    const maxFileMb = currentMaxFileMb();
+    const fileLimitText = maxFileMb > 0 ? `Лимит файла: до ${fmtMb(maxFileMb)}. ` : '';
     area.innerHTML = `
       <span class="auth-badge guest">Гостевой режим</span>
       <button class="btn-login" onclick="openLoginModal()">Войти</button>`;
+    guestNotice.innerHTML = `
+      <strong>Гостевой режим:</strong> ${usage}. Можно загрузить два акта и посмотреть результат на сайте.
+      ${fileLimitText}История и Excel-экспорт доступны с выданным тестовым доступом.
+      Результат требует проверки специалистом; для первого теста лучше использовать обезличенные документы.
+      <a onclick="openLoginModal()">Войти с тестовым доступом</a>.`;
     guestNotice.style.display = 'block';
   }
+  updateAccessActions();
 }
 
 function openLoginModal() {
@@ -1207,7 +1270,7 @@ async function doLogin() {
     renderAuthArea();
     loadHistory();
     closeLoginModal();
-    showToast('Вы вошли как гость — история не сохраняется', 'warn');
+    showToast('Гостевой режим: история и Excel-экспорт недоступны', 'warn');
     return;
   }
 
@@ -1218,7 +1281,7 @@ async function doLogin() {
 
   if (!key) {
     inp.classList.add('error');
-    errEl.textContent = 'Введите ключ доступа';
+    errEl.textContent = 'Введите тестовый доступ';
     return;
   }
 
@@ -1238,10 +1301,10 @@ async function doLogin() {
       renderAuthArea();
       loadHistory();
       closeLoginModal();
-      showToast('Вход выполнен. История сохраняется', 'success');
+      showToast('Вход выполнен. История и Excel-экспорт доступны', 'success');
     } else {
       inp.classList.add('error');
-      errEl.textContent = data.error || 'Ключ не прошёл проверку';
+      errEl.textContent = data.error || 'Доступ не прошёл проверку';
     }
   } catch(e) {
     errEl.textContent = 'Ошибка соединения: ' + e.message;
@@ -1256,7 +1319,7 @@ function logout() {
   renderAuthArea();
   // Очищаем историю в UI
   document.getElementById('hist-body').innerHTML =
-    '<tr><td colspan="6" class="empty-hist">Войдите с ключом доступа для просмотра истории</td></tr>';
+    '<tr><td colspan="6" class="empty-hist">Войдите с тестовым доступом для просмотра истории</td></tr>';
   document.getElementById('hist-clear-btn').disabled = true;
   showToast('Вы вышли — переключились в гостевой режим', 'warn');
 }
@@ -1273,13 +1336,14 @@ async function checkHealth(){
       dot.classList.add('ok');
       const env=(d.app_env||'').toLowerCase();
       const envLabel=env&&env!=='production'&&env!=='prod'?` • ${d.app_env}`:'';
-      txt.textContent = (isLoggedIn() ? 'Готов • Личный доступ' : (d.api_key_set ? 'Готов • Общий AI' : 'Готов')) + envLabel;
+      txt.textContent = (isLoggedIn() ? 'Готов • Личный доступ' : (d.api_key_set ? 'Готов • Гостевой режим' : 'Готов')) + envLabel;
       const envBadge=document.getElementById('env-badge');
       if(envBadge&&env&&env!=='production'&&env!=='prod'){
         envBadge.textContent=`Текущий стенд: ${d.app_env}${d.version?' • версия '+d.version:''}`;
         envBadge.style.display='block';
       }
       renderAdminStatus(d);
+      renderAuthArea();
     }
   }catch{
     document.getElementById('status-text').textContent='Сервер недоступен';
@@ -1435,6 +1499,15 @@ setupDrop('drop1','input1',1);setupDrop('drop2','input2',2);
 async function handleFile(f,num){
   if(!f)return;
   if(!/\.(xlsx|xls)$/i.test(f.name)){showToast('Поддерживаются: .xlsx, .xls','error');return;}
+  const maxMb=currentMaxFileMb();
+  if(maxMb>0&&f.size>maxMb*1024*1024){
+    const se=document.getElementById(`file${num}-status`);
+    if(se){se.className='file-status warn';se.textContent=`Файл слишком большой: ${fmtFileSize(f.size)}. Лимит: ${fmtMb(maxMb)}`;}
+    showToast(isLoggedIn()
+      ? `Файл больше лимита ${fmtMb(maxMb)}`
+      : `В гостевом режиме лимит файла ${fmtMb(maxMb)}. Для больших сверок войдите с тестовым доступом`, 'warn');
+    return;
+  }
   if(num===1){file1=f;profile1=null;preview1=null;}else{file2=f;profile2=null;preview2=null;}
   const se=document.getElementById(`file${num}-status`),te=document.getElementById(`t${num}-title`),we=document.getElementById(`table${num}-wrap`);
   se.className='file-status loading';se.textContent='⏳ Анализ...';
@@ -1699,6 +1772,11 @@ function cancelReconcile(){
 
 async function runReconcile(){
   if(!file1||!file2)return;
+  if(!isLoggedIn()&&guestUsage?.limit>0&&guestUsage.remaining<=0){
+    showToast('Гостевой лимит исчерпан. Войдите с тестовым доступом для продолжения','warn');
+    openLoginModal();
+    return;
+  }
   abortController=new AbortController();
   document.getElementById('btn-run').disabled=true;
   setCancelVisible(true);
@@ -1727,6 +1805,11 @@ async function runReconcile(){
       setProgress(0,'Ошибка');setCancelVisible(false);document.getElementById('btn-run').disabled=false;return;
     }
     if(data.logs)data.logs.forEach(l=>setProgress(null,l));
+    if(data.guest_usage){
+      guestUsage=data.guest_usage;
+      renderAuthArea();
+      if(guestUsage.remaining<=0)showToast('Гостевые сверки закончились. Для продолжения войдите с тестовым доступом','warn');
+    }
     const noHist=data.history_saved===false&&!isLoggedIn();
     setProgress(100,noHist?'Сверка завершена (гостевой режим — история не сохраняется)':'Сверка завершена');
     displayResults(data);
@@ -1759,7 +1842,7 @@ function displayResults(data){
   renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
   renderSummary(data.summary,data.file1_name,data.file2_name);
   if(isLoggedIn())loadHistory();
-  document.getElementById('btn-export').disabled=false;
+  updateAccessActions();
   const cnt=data.summary.total_discrepancies;
   const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
   if(cnt===0)showToast('Расхождений не обнаружено','success');
@@ -2018,10 +2101,19 @@ function md(t){
 }
 
 // ── Export ────────────────────────────────────────────────────────
-function openExportModal(){if(!lastResult)return;document.getElementById('exp-overlay').style.display='flex';}
+function openExportModal(){
+  if(!lastResult)return;
+  if(!isLoggedIn()){
+    showToast('Excel-экспорт доступен с выданным тестовым доступом','warn');
+    openLoginModal();
+    return;
+  }
+  document.getElementById('exp-overlay').style.display='flex';
+}
 function closeExportModal(){document.getElementById('exp-overlay').style.display='none';}
 async function doExport(){
   if(!lastResult)return;closeExportModal();
+  if(!isLoggedIn()){showToast('Excel-экспорт доступен с выданным тестовым доступом','warn');return;}
   const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
   const filtered=lastResult.discrepancies.filter(d=>allowed.has(d.type));
   try{
@@ -2044,7 +2136,7 @@ async function loadHistory(){
   const clearBtn=document.getElementById('hist-clear-btn');
   if(clearBtn)clearBtn.disabled=true;
   if(!isLoggedIn()){
-    body.innerHTML='<tr><td colspan="6" class="empty-hist">Войдите с ключом доступа для сохранения истории</td></tr>';
+    body.innerHTML='<tr><td colspan="6" class="empty-hist">Войдите с тестовым доступом для сохранения истории</td></tr>';
     return;
   }
   try{
@@ -2073,7 +2165,7 @@ async function loadHistory(){
 }
 
 async function clearHistory(){
-  if(!isLoggedIn()){showToast('История доступна только с ключом доступа','warn');return;}
+  if(!isLoggedIn()){showToast('История доступна только с тестовым доступом','warn');return;}
   if(!historyData.length){showToast('История уже пуста','warn');return;}
   if(!confirm('Очистить всю историю сверок? Это действие нельзя отменить.'))return;
   const btn=document.getElementById('hist-clear-btn');
