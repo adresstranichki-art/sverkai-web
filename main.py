@@ -2040,6 +2040,69 @@ def _make_parse_candidate(df: pd.DataFrame, parse_type: str, label: str, parser_
     }
 
 
+def _estimate_raw_transaction_rows(raw: Optional[pd.DataFrame]) -> int:
+    if raw is None or raw.empty:
+        return 0
+    date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$')
+    skip_terms = (
+        'сальдо', 'обороты', 'итого', 'дебет', 'кредит', 'дата операции',
+        'документ', 'по данным', 'акт сверки', 'нижеподписав',
+    )
+    rows = 0
+    for _, row in raw.iterrows():
+        cells = [
+            str(value).strip()
+            for value in row.tolist()
+            if pd.notna(value) and str(value).strip() and str(value).strip().lower() != 'nan'
+        ]
+        if not cells:
+            continue
+        row_text = ' '.join(cells).lower()
+        if any(term in row_text for term in skip_terms):
+            continue
+        has_date = any(date_re.match(cell) for cell in cells)
+        if not has_date:
+            continue
+        amount_count = sum(1 for cell in cells if _to_float(cell) is not None)
+        if amount_count == 0:
+            continue
+        text_count = 0
+        for cell in cells:
+            if date_re.match(cell) or _to_float(cell) is not None:
+                continue
+            if re.search(r'[A-Za-zА-Яа-я]', cell):
+                text_count += 1
+        if text_count:
+            rows += 1
+    return rows
+
+
+def _ai_profile_trigger_reason(candidates: list, raw: Optional[pd.DataFrame], is_sheet: bool, is_act_like: bool) -> Optional[str]:
+    if not is_sheet:
+        return None
+    estimated_rows = _estimate_raw_transaction_rows(raw)
+    if not candidates:
+        return 'структурные парсеры не нашли операций' if estimated_rows else 'структурные парсеры не нашли кандидатов'
+    if not is_act_like:
+        return None
+
+    best = max(candidates, key=lambda c: (c['score'], c['quality']['rows']))
+    quality = best.get('quality', {})
+    parsed_rows = int(quality.get('rows', 0) or 0)
+    date_ratio = float(quality.get('date_ratio', 0.0) or 0.0)
+    amount_ratio = float(quality.get('amount_ratio', 0.0) or 0.0)
+
+    if estimated_rows >= 8 and parsed_rows < max(3, int(estimated_rows * 0.65)):
+        return f"лучший парсер разобрал {parsed_rows} из примерно {estimated_rows} строк операций"
+    if parsed_rows >= 5 and date_ratio < 0.6 and estimated_rows >= 5:
+        return f"у лучшего парсера низкая доля дат ({date_ratio:.0%})"
+    if parsed_rows >= 5 and amount_ratio < 0.6 and estimated_rows >= 5:
+        return f"у лучшего парсера низкая доля сумм ({amount_ratio:.0%})"
+    if parsed_rows < 3 and (quality.get('has_start_balance') or quality.get('has_end_balance')) and estimated_rows >= 3:
+        return 'найдены сальдо, но почти нет операций'
+    return None
+
+
 def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original_filename: str = ""):
     eff_key = _effective_key(api_key)
     display_df = parse_generic(path)
@@ -2048,9 +2111,10 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
     ftype = detect_file_type(path)
 
     header_text = ''
+    raw_preview = None
     try:
-        raw = pd.read_excel(path, header=None, dtype=str, nrows=20)
-        header_text = ' '.join(str(v) for v in raw.values.flatten() if pd.notna(v))
+        raw_preview = pd.read_excel(path, header=None, dtype=str, nrows=120)
+        header_text = ' '.join(str(v) for v in raw_preview.iloc[:20].values.flatten() if pd.notna(v))
     except Exception:
         pass
     header_lower = header_text.lower()
@@ -2105,9 +2169,10 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
     cache_key = f"col_profile_{cache_name}"
     profile = cache.get(cache_key)
     profile_source = 'cache' if profile else ''
-    if profile is None and eff_key and is_sheet:
+    ai_reason = _ai_profile_trigger_reason(candidates, raw_preview, is_sheet, is_act_like)
+    if profile is None and ai_reason and eff_key and is_sheet:
         try:
-            logs.append(f"Пробую AI-структуру для {cache_name}...")
+            logs.append(f"Пробую AI-структуру для {cache_name}: {ai_reason}.")
             profile = claude_detect_columns(path, eff_key)
             profile_source = 'ai'
             if profile and profile.get('confidence') != 'low':
@@ -2115,6 +2180,8 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
                 _save_profile_cache(cache)
         except Exception:
             profile = None
+    elif profile is None and ai_reason and is_sheet:
+        logs.append(f"AI-структура могла бы помочь для {cache_name}: {ai_reason}, но API ключ не указан.")
     if profile and profile.get('confidence') != 'low':
         try:
             df = parse_with_profile(path, profile)

@@ -163,6 +163,104 @@ class RegressionReconcileTests(unittest.TestCase):
             self.assertAlmostEqual(df.iloc[1]['credit'], 20.0, places=2)
             self.assertAlmostEqual(df['signed_amount'].sum(), 30.0, places=2)
 
+    def test_ai_profile_skipped_for_confident_structured_parse(self):
+        pd = self.main.pd
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'confident_sequence_act.xlsx'
+            rows = [['' for _ in range(8)] for _ in range(15)]
+            rows[0][1] = 'Акт сверки взаиморасчетов'
+            rows[8][1] = 'По данным ООО "М Партс", руб.'
+            rows[8][7] = 'По данным ООО "ПРООПТ", руб.'
+            rows[9][1] = '№ п/п'
+            rows[9][2] = 'Дата операции'
+            rows[9][3] = 'Наименование операции, документы'
+            rows[9][5] = 'Дебет'
+            rows[9][6] = 'Кредит'
+            rows[11][1] = 1
+            rows[11][2] = '01.03.2026'
+            rows[11][3] = 'Реализация товаров МПр-1 от 01.03.2026'
+            rows[11][5] = 50
+            rows[12][1] = 2
+            rows[12][2] = '02.03.2026'
+            rows[12][3] = 'Строка выписки приход МП-1 от 02.03.2026'
+            rows[12][6] = 20
+            pd.DataFrame(rows).to_excel(path, header=False, index=False)
+
+            calls = []
+            orig_key = self.main.ANTHROPIC_API_KEY
+            orig_detect = self.main.claude_detect_columns
+            orig_load_cache = self.main._load_profile_cache
+            orig_save_cache = self.main._save_profile_cache
+            self.main.ANTHROPIC_API_KEY = 'sk-ant-test'
+            self.main.claude_detect_columns = lambda *_: calls.append(True) or None
+            self.main._load_profile_cache = lambda: {}
+            self.main._save_profile_cache = lambda *_: None
+            try:
+                logs = []
+                _, candidates = self.main._collect_parse_candidates(str(path), logs, '', path.name)
+            finally:
+                self.main.ANTHROPIC_API_KEY = orig_key
+                self.main.claude_detect_columns = orig_detect
+                self.main._load_profile_cache = orig_load_cache
+                self.main._save_profile_cache = orig_save_cache
+
+            self.assertFalse(calls)
+            self.assertEqual(candidates[0]['parser_id'], 'proopt')
+
+    def test_ai_profile_runs_when_structured_parsers_find_no_operations(self):
+        pd = self.main.pd
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'ai_needed_act.xlsx'
+            rows = [['' for _ in range(6)] for _ in range(10)]
+            rows[0][0] = 'Акт сверки взаиморасчетов'
+            rows[1][0] = 'Дата'
+            rows[1][2] = 'Документ'
+            rows[1][4] = 'Дебет'
+            rows[2][0] = '01.03.2026'
+            rows[2][2] = 'Реализация товаров МПр-1 от 01.03.2026'
+            rows[2][4] = 50
+            rows[3][0] = '02.03.2026'
+            rows[3][2] = 'Реализация товаров МПр-2 от 02.03.2026'
+            rows[3][4] = 70
+            pd.DataFrame(rows).to_excel(path, header=False, index=False)
+
+            calls = []
+            profile = {
+                'data_start_row': 2,
+                'date_col': 0,
+                'doc_col': 2,
+                'doc_num_col': None,
+                'doc_type_col': None,
+                'debit_col': 4,
+                'credit_col': None,
+                'amount_col': None,
+                'amount_sign': 'unknown',
+                'footer_keywords': ['Обороты за период', 'Сальдо конечное'],
+                'confidence': 'high',
+            }
+
+            orig_key = self.main.ANTHROPIC_API_KEY
+            orig_detect = self.main.claude_detect_columns
+            orig_load_cache = self.main._load_profile_cache
+            orig_save_cache = self.main._save_profile_cache
+            self.main.ANTHROPIC_API_KEY = 'sk-ant-test'
+            self.main.claude_detect_columns = lambda *_: calls.append(True) or profile
+            self.main._load_profile_cache = lambda: {}
+            self.main._save_profile_cache = lambda *_: None
+            try:
+                logs = []
+                _, candidates = self.main._collect_parse_candidates(str(path), logs, '', path.name)
+            finally:
+                self.main.ANTHROPIC_API_KEY = orig_key
+                self.main.claude_detect_columns = orig_detect
+                self.main._load_profile_cache = orig_load_cache
+                self.main._save_profile_cache = orig_save_cache
+
+            ai_candidates = [c for c in candidates if c['parser_id'] == 'ai_profile_high']
+            self.assertTrue(calls)
+            self.assertEqual(len(ai_candidates), 1)
+            self.assertEqual(len(ai_candidates[0]['df']), 2)
+
     def test_balance_state_vs_two_sided(self):
         cand1, cand2, result = self._run_case(
             'tmp_analysis1/balance_248098_10.xls',
