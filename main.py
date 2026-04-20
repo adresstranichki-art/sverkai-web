@@ -437,6 +437,7 @@ _DOC_NUM_PATTERNS = (
     re.compile(r'\bРГО\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'(?:сч[её]т[-\s]?фактура|упд)\s*[№#]?\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от', re.IGNORECASE),
+    re.compile(r'\b([A-Za-zА-Яа-я]+-?\d[\w/-]*)\s+от\b', re.IGNORECASE),
     re.compile(r'(?:№|#|No)\s*(М-\d+|\d[\w/-]*)', re.IGNORECASE),
     re.compile(r'\b(\d{4,})\b'),
 )
@@ -636,26 +637,69 @@ def _balance_state_doc_num(doc: str) -> Optional[str]:
 # ════════════════════════════════════════════════════════════════════
 
 def parse_proopt(path: str) -> pd.DataFrame:
-    raw = pd.read_excel(path, header=None, dtype=str)
+    ext = Path(path).suffix.lower()
+    engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
+    raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
     rows = []
     meta = _extract_balance_meta(raw)
-    for idx in range(9, len(raw)):
+    date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
+
+    layout_candidates = []
+    max_date_col = min(len(raw.columns) - 1, 6)
+    for candidate_date_col in range(max_date_col):
+        candidate_doc_col = candidate_date_col + 1
+        scan_rows = []
+        for idx in range(6, min(60, len(raw))):
+            date_val = str(raw.iloc[idx, candidate_date_col]).strip() if pd.notna(raw.iloc[idx, candidate_date_col]) else ''
+            doc_val = str(raw.iloc[idx, candidate_doc_col]).strip() if pd.notna(raw.iloc[idx, candidate_doc_col]) else ''
+            if date_re.match(date_val) and doc_val and doc_val.lower() != 'nan':
+                scan_rows.append(idx)
+        if scan_rows:
+            layout_candidates.append((len(scan_rows), candidate_date_col, candidate_doc_col, scan_rows))
+
+    if layout_candidates:
+        _, date_col, doc_col, scan_rows = max(layout_candidates, key=lambda item: item[0])
+    else:
+        date_col, doc_col, scan_rows = 1, 2, []
+
+    from collections import Counter
+    col_hits: Counter = Counter()
+    amount_scan_end = min(len(raw.columns), max(doc_col + 5, 8))
+    for idx in scan_rows[:30]:
+        for col in range(doc_col + 1, amount_scan_end):
+            if _to_float(raw.iloc[idx, col]) is not None:
+                col_hits[col] += 1
+
+    if col_hits:
+        amount_cols = sorted(col_hits.keys())
+        if len(amount_cols) >= 2:
+            debit_col, credit_col = amount_cols[0], amount_cols[1]
+        else:
+            debit_col = amount_cols[0]
+            credit_col = doc_col + 4
+    elif date_col == 2:
+        debit_col, credit_col = 5, 6
+    else:
+        debit_col, credit_col = 4, 6
+
+    for idx in range(6, len(raw)):
         row = raw.iloc[idx]
-        date_val = str(row[1]).strip() if pd.notna(row[1]) else ''
-        doc_val  = str(row[2]).strip() if pd.notna(row[2]) else ''
-        if not date_val or date_val == 'nan':
+        date_val = str(row[date_col]).strip() if date_col < len(row) and pd.notna(row[date_col]) else ''
+        doc_val  = str(row[doc_col]).strip() if doc_col < len(row) and pd.notna(row[doc_col]) else ''
+        if not date_val or date_val == 'nan' or not date_re.match(date_val):
             continue
-        if any(kw in date_val.lower() for kw in ['обороты', 'сальдо конечное', 'сальдо начальное']):
-            continue
-        debit  = str(row[4]).strip() if pd.notna(row[4]) else ''
-        credit = str(row[6]).strip() if pd.notna(row[6]) else ''
         if not doc_val or doc_val == 'nan':
             continue
-        m = re.search(r'\((\d+)\s+от\s', doc_val)
-        doc_num = m.group(1) if m else None
-        date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
+        if any(kw in doc_val.lower() for kw in ['обороты', 'сальдо конечное', 'сальдо начальное']):
+            continue
+        debit  = str(row[debit_col]).strip() if debit_col < len(row) and pd.notna(row[debit_col]) else ''
+        credit = str(row[credit_col]).strip() if credit_col < len(row) and pd.notna(row[credit_col]) else ''
         debit_val = _to_float(debit)
         credit_val = _to_float(credit)
+        if debit_val is None and credit_val is None:
+            continue
+        doc_num = _extract_doc_num(doc_val)
+        date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
         rows.append({'date': date_parsed, 'date_str': date_val, 'document': doc_val,
                      'doc_num': doc_num, 'debit': debit_val, 'credit': credit_val,
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
@@ -1450,7 +1494,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     log("Шаг 2/3: Нечёткое сопоставление...")
 
     PENALTY_KW = {'штраф','санкции','пени','неустойка','контрафакт','fine','penalty','interest charge','forfeit'}
-    _CAT_PAYMENT    = {'оплата','платеж','платёж','п/п','пп ','выплата','payment','pay ','transfer','wire','receipt','расходный кассов','приходный кассов'}
+    _CAT_PAYMENT    = {'оплата','платеж','платёж','п/п','пп ','выплата','строка выписки','банковская выписка','payment','pay ','transfer','wire','receipt','расходный кассов','приходный кассов'}
     _CAT_DELIVERY   = {'продажа','реализация','поставка','приход','поступление','отгрузка','накладная','упд','торг-12','торг12','счет-фактура','счёт-фактура','invoice','delivery','shipment','purchase','sale','supply','waybill'}
     _CAT_ADJUSTMENT = {'корректировка','ксф','возврат','сторно','кредит-нота','исправление','аннулирование','зачет','зачёт','adjustment','correction','credit note','reversal','refund','write-off','reverse'}
 
@@ -1465,6 +1509,18 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         if any(kw in d for kw in _CAT_ADJUSTMENT): return 'корректировка'
         if any(kw in d for kw in _CAT_DELIVERY): return 'поставка'
         return 'прочее'
+
+    has_proopt_statement = _meta(df1, 'parser_id') == 'proopt' or _meta(df2, 'parser_id') == 'proopt'
+
+    def _match_window(cat: str) -> int:
+        if cat == 'оплата':
+            return dw_payment
+        if cat == 'корректировка' and has_proopt_statement:
+            return max(dw_delivery, dw_payment)
+        return dw_delivery
+
+    def _date_report_window(cat: str) -> int:
+        return dw_payment if cat == 'оплата' else dw_delivery
 
     unmatched1 = df1[~df1['raw_row'].isin(matched1)].copy()
     unmatched2 = df2[~df2['raw_row'].isin(matched2)].copy()
@@ -1491,7 +1547,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                 if v2 is None: continue
                 if cat1 == 'корректировка' and cat2 == 'корректировка' and s1 != s2 and v1 * v2 < 0: continue
                 d2 = _md(r2)
-                dw = dw_payment if cat1 == 'оплата' else dw_delivery
+                dw = _match_window(cat1)
                 if pd.notna(d1) and pd.notna(d2):
                     if abs((d1 - d2).days) <= dw:
                         matched1.add(r1['raw_row']); matched2.add(r2['raw_row'])
@@ -1569,7 +1625,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                     if db is None or pd.isna(db):
                         continue
                     dd = abs((da - db).days)
-                    base_dw = dw_payment if cat_a == 'оплата' else dw_delivery
+                    base_dw = _match_window(cat_a)
                     scan_dw = max_pay_scan if cat_a == 'оплата' else max_del_scan
                     if dd <= base_dw or dd > scan_dw:
                         continue
@@ -1692,7 +1748,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             if pd.notna(d1) and pd.notna(d2) and abs((d1 - d2).days) > 0:
                 dd = abs((d1 - d2).days)
                 cat = _cat(r1)
-                dw = dw_payment if cat == 'оплата' else dw_delivery
+                dw = _date_report_window(cat)
                 if dd <= dw:
                     continue
                 pfx = 'Нечёткое совпадение: ' if (r1['raw_row'], r2['raw_row']) in fuzzy_rr_pairs else ''
@@ -2037,6 +2093,7 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
         add_candidate('counterparty', 'Акт сверки (контрагент)', 'generic_detected', parse_counterparty, bonus=18)
 
     if is_sheet and is_act_like:
+        add_candidate('proopt', 'ПРООПТ', 'proopt', parse_proopt, bonus=5 if ftype != 'proopt' else 0)
         add_candidate('two_sided_left', 'Акт сверки (двусторонний)', 'generic_detected', lambda p: parse_two_sided_act(p, side='left'), bonus=6 if ftype != 'two_sided_act' else 0)
         add_candidate('two_sided_right', 'Акт сверки (двусторонний, правая сторона)', 'generic_detected', lambda p: parse_two_sided_act(p, side='right'), bonus=4 if ftype != 'two_sided_act' else 0)
         add_candidate('standard_act', 'Акт сверки (односторонний)', 'generic_detected', parse_standard_act, bonus=5 if ftype != 'standard_act' else 0)

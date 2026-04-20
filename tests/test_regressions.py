@@ -121,6 +121,48 @@ class RegressionReconcileTests(unittest.TestCase):
         best = self.main._select_best_candidate_pair(candidates1, candidates2, self.cfg, logs)
         return best['cand1'], best['cand2'], best['result']
 
+    def test_proopt_parser_handles_sequence_column_before_date(self):
+        pd = self.main.pd
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'sequence_act.xlsx'
+            rows = [['' for _ in range(8)] for _ in range(15)]
+            rows[0][1] = 'Акт сверки взаиморасчетов'
+            rows[2][1] = 'взаимных расчетов за период с 01.03.2026 по 31.03.2026'
+            rows[8][1] = 'По данным ООО "М Партс", руб.'
+            rows[8][7] = 'По данным ООО "ПРООПТ", руб.'
+            rows[9][1] = '№ п/п'
+            rows[9][2] = 'Дата операции'
+            rows[9][3] = 'Наименование операции, документы'
+            rows[9][5] = 'Дебет'
+            rows[9][6] = 'Кредит'
+            rows[10][3] = 'Сальдо начальное'
+            rows[10][5] = 100
+            rows[11][1] = 1
+            rows[11][2] = '01.03.2026'
+            rows[11][3] = 'Реализация товаров МПр-1 от 01.03.2026'
+            rows[11][5] = 50
+            rows[12][1] = 2
+            rows[12][2] = '02.03.2026'
+            rows[12][3] = 'Строка выписки приход МП-1 от 02.03.2026'
+            rows[12][6] = 20
+            rows[13][3] = 'Обороты за период'
+            rows[13][5] = 50
+            rows[13][6] = 20
+            rows[14][3] = 'Сальдо конечное'
+            rows[14][5] = 130
+            pd.DataFrame(rows).to_excel(path, header=False, index=False)
+
+            logs = []
+            _, candidates = self.main._collect_parse_candidates(str(path), logs, '', path.name)
+            self.assertEqual(candidates[0]['parser_id'], 'proopt')
+            df = candidates[0]['df']
+            self.assertEqual(len(df), 2)
+            self.assertEqual(df.iloc[0]['date_str'], '01.03.2026')
+            self.assertEqual(df.iloc[0]['document'], 'Реализация товаров МПр-1 от 01.03.2026')
+            self.assertAlmostEqual(df.iloc[0]['debit'], 50.0, places=2)
+            self.assertAlmostEqual(df.iloc[1]['credit'], 20.0, places=2)
+            self.assertAlmostEqual(df['signed_amount'].sum(), 30.0, places=2)
+
     def test_balance_state_vs_two_sided(self):
         cand1, cand2, result = self._run_case(
             'tmp_analysis1/balance_248098_10.xls',
