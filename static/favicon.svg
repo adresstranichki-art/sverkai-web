@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect x="4" y="4" width="56" height="56" rx="12" fill="#1f7a43"/>
-  <rect x="5.5" y="5.5" width="53" height="53" rx="10.5" stroke="#14592f" stroke-width="3"/>
-  <text x="32" y="45" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="38" font-weight="800" fill="#fffaf3">S</text>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#1f7a43"/>
+  <rect x="5.5" y="5.5" width="53" height="53" rx="12.5" stroke="#14592f" stroke-width="3"/>
+  <path d="M32 15v34" stroke="#fffaf3" stroke-width="4" stroke-linecap="round"/>
+  <path d="M23 50h18" stroke="#fffaf3" stroke-width="4" stroke-linecap="round"/>
+  <path d="M18 24h28" stroke="#fffaf3" stroke-width="4" stroke-linecap="round"/>
+  <path d="M32 18l-14 6m14-6 14 6" stroke="#fffaf3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M18 24l-7 15m7-15 7 15M46 24l-7 15m7-15 7 15" stroke="#fffaf3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10 39h16c-.8 5.5-4 8.5-8 8.5S10.8 44.5 10 39Zm28 0h16c-.8 5.5-4 8.5-8 8.5s-7.2-3-8-8.5Z" fill="#fffaf3"/>
+  <circle cx="32" cy="15" r="3.5" fill="#fffaf3"/>
 </svg>
