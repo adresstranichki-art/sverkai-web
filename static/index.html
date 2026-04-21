@@ -764,7 +764,7 @@
   <!-- Гостевое уведомление -->
   <div class="guest-notice" id="guest-notice">
     Гостевой режим: можно загрузить два Excel-акта, выполнить бесплатную сверку и посмотреть результат на сайте.
-    PDF, история и Excel-экспорт доступны с выданным тестовым доступом.
+    Загрузка PDF-файлов, история и Excel-экспорт доступны с выданным тестовым доступом.
   </div>
   <div class="env-badge" id="env-badge"></div>
 
@@ -807,7 +807,7 @@
   </div>
 
   <div class="pdf-format-note" id="pdf-format-note">
-    <strong>PDF поддерживается, но Excel надежнее.</strong>
+    <strong>Загрузка PDF-файлов поддерживается, но Excel надежнее.</strong>
     Если есть исходный .xlsx или .xls, лучше загрузить его: в PDF структура таблицы восстанавливается из текста и разметки, поэтому качество может зависеть от выгрузки.
   </div>
 
@@ -1037,11 +1037,11 @@
       <div class="login-modes">
         <div class="mode-card selected" id="mode-key" onclick="selectMode('key')">
         <div class="mc-title">Тестовый доступ SverkAI</div>
-          <div class="mc-desc">PDF, история и Excel-отчет доступны после сверки.</div>
+          <div class="mc-desc">Загрузка PDF-файлов, история и Excel-отчет доступны после сверки.</div>
         </div>
         <div class="mode-card" id="mode-guest" onclick="selectMode('guest')">
         <div class="mc-title">Гостевой режим</div>
-          <div class="mc-desc">Без установки и оплаты. PDF, история и Excel-экспорт недоступны.</div>
+          <div class="mc-desc">Без установки и оплаты. Загрузка PDF-файлов, история и Excel-экспорт недоступны.</div>
         </div>
       </div>
 
@@ -1251,8 +1251,8 @@ function resetFileSlot(num, statusText) {
 function clearPdfFilesForGuest() {
   if (isLoggedIn()) return false;
   let cleared = false;
-  if (isPdfFile(file1)) { resetFileSlot(1, 'PDF доступен после входа'); cleared = true; }
-  if (isPdfFile(file2)) { resetFileSlot(2, 'PDF доступен после входа'); cleared = true; }
+  if (isPdfFile(file1)) { resetFileSlot(1, 'Загрузка PDF-файлов после входа'); cleared = true; }
+  if (isPdfFile(file2)) { resetFileSlot(2, 'Загрузка PDF-файлов после входа'); cleared = true; }
   if (cleared) {
     updatePdfFormatNote();
     updateRunBtn();
@@ -1293,7 +1293,7 @@ function renderAuthArea() {
       <button class="btn-login" onclick="openLoginModal()">Войти</button>`;
     guestNotice.innerHTML = `
       <strong>Гостевой режим:</strong> ${usage}. Можно загрузить два Excel-акта и посмотреть результат на сайте.
-      ${fileLimitText}PDF, история и Excel-экспорт доступны с выданным тестовым доступом.
+      ${fileLimitText}Загрузка PDF-файлов, история и Excel-экспорт доступны с выданным тестовым доступом.
       Результат требует проверки специалистом; для первого теста лучше использовать обезличенные документы.
       <a onclick="openLoginModal()">Войти с тестовым доступом</a>.`;
     guestNotice.style.display = 'block';
@@ -1334,7 +1334,7 @@ async function doLogin() {
     clearPdfFilesForGuest();
     loadHistory();
     closeLoginModal();
-    showToast('Гостевой режим: PDF, история и Excel-экспорт недоступны', 'warn');
+    showToast('Гостевой режим: загрузка PDF-файлов, история и Excel-экспорт недоступны', 'warn');
     return;
   }
 
@@ -1365,7 +1365,7 @@ async function doLogin() {
       renderAuthArea();
       loadHistory();
       closeLoginModal();
-      showToast('Вход выполнен. PDF, история и Excel-экспорт доступны', 'success');
+      showToast('Вход выполнен. Загрузка PDF-файлов, история и Excel-экспорт доступны', 'success');
     } else {
       inp.classList.add('error');
       errEl.textContent = data.error || 'Доступ не прошёл проверку';
@@ -1573,8 +1573,8 @@ async function handleFile(f,num){
   if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){showToast(`Поддерживаются: ${allowedUploadLabel()}`,'error');return;}
   if(isPdfFile(f)&&!isLoggedIn()){
     const se=document.getElementById(`file${num}-status`);
-    if(se){se.className='file-status warn';se.textContent='PDF доступен после входа';}
-    showToast('PDF-файлы доступны только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls','warn');
+    if(se){se.className='file-status warn';se.textContent='Загрузка PDF-файлов после входа';}
+    showToast('Загрузка PDF-файлов доступна только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls','warn');
     return;
   }
   const maxMb=currentMaxFileMb();

@@ -389,7 +389,7 @@ async def _save_upload_to_path(upload: UploadFile, path: str, user_key: str, lab
         if ext == ".pdf" and not user_key:
             raise HTTPException(
                 status_code=400,
-                detail="PDF-файлы доступны только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls.",
+                detail="Загрузка PDF-файлов доступна только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls.",
             )
         allowed_label = SUPPORTED_UPLOAD_EXTS_LABEL if user_key else GUEST_UPLOAD_EXTS_LABEL
         raise HTTPException(status_code=400, detail=f"Поддерживаются только файлы {allowed_label}")
