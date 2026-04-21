@@ -439,7 +439,7 @@ _DOC_NUM_PATTERNS = (
     re.compile(r'\bРГО\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'(?:сч[её]т[-\s]?фактура|упд)\s*[№#]?\s*([A-Za-zА-Яа-я]*-?\s*\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/-]*)\s+от', re.IGNORECASE),
-    re.compile(r'\b([A-Za-zА-Яа-я]+-?\d[\w/-]*)\s+от\b', re.IGNORECASE),
+    re.compile(r'\b([A-Za-zА-Яа-я]+-?\s*\d[\w/-]*)\s+от\b', re.IGNORECASE),
     re.compile(r'(?:№|#|No)\s*(М-\s*\d+|\d[\w/-]*)', re.IGNORECASE),
     re.compile(r'\b(\d{4,})\b'),
 )
