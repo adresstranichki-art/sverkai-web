@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SverkAI — автоматическая сверка актов взаиморасчетов</title>
+<meta name="description" content="SverkAI помогает быстрее находить расхождения в актах взаиморасчетов: отсутствующие документы, суммы, даты, направление операций и сальдо.">
+<link rel="icon" href="/static/favicon.svg?v=5" type="image/svg+xml">
+<link rel="alternate icon" href="/static/favicon.ico?v=5" type="image/x-icon">
+<link rel="shortcut icon" href="/favicon.ico?v=5" type="image/x-icon">
+<style>
+  :root {
+    --green: #1f7a43;
+    --green-dk: #14592f;
+    --green-soft: #eaf4eb;
+    --ink: #162019;
+    --text: #1f262d;
+    --muted: #68737d;
+    --line: #d6ddd6;
+    --panel: #fffdf9;
+    --paper: #f6f7f3;
+    --amber: #b26a12;
+    --blue: #3f6c8d;
+    --shadow: 0 18px 44px rgba(18, 28, 22, .14);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: "Aptos", "Segoe UI", system-ui, sans-serif;
+    color: var(--text);
+    background: var(--paper);
+    font-size: 16px;
+    line-height: 1.55;
+    letter-spacing: 0;
+  }
+  a { color: inherit; }
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: 68px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    background: rgba(22, 32, 25, .96);
+    border-bottom: 1px solid rgba(255,255,255,.08);
+    box-shadow: 0 10px 26px rgba(10, 14, 18, .22);
+    backdrop-filter: blur(10px);
+  }
+  .logo { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; }
+  .logo-icon { width: 32px; height: 32px; flex: 0 0 auto; }
+  .logo-text { font-size: 22px; font-weight: 800; color: #fffaf3; }
+  .logo-text em { color: var(--green); font-style: normal; }
+  .nav { display: flex; align-items: center; gap: 18px; color: rgba(255,255,255,.78); font-size: 14px; font-weight: 700; }
+  .nav a { text-decoration: none; white-space: nowrap; }
+  .nav a:hover { color: #fffaf3; }
+  .nav-cta {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #2e8a50, var(--green));
+    color: white;
+    box-shadow: 0 8px 16px rgba(31,122,67,.24);
+  }
+
+  .hero {
+    position: relative;
+    min-height: min(680px, calc(100svh - 96px));
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    background: var(--ink);
+  }
+  .hero-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center top;
+    opacity: .72;
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(22,32,25,.94) 0%, rgba(22,32,25,.82) 36%, rgba(22,32,25,.25) 72%, rgba(22,32,25,.10) 100%),
+      linear-gradient(180deg, rgba(22,32,25,.18) 0%, rgba(22,32,25,.44) 100%);
+  }
+  .hero-inner {
+    position: relative;
+    z-index: 2;
+    width: min(1180px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 42px 0 50px;
+    color: #fffaf3;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #d8ffd8;
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    margin-bottom: 18px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #51c17d;
+    box-shadow: 0 0 14px rgba(81,193,125,.65);
+  }
+  h1 {
+    max-width: 760px;
+    font-size: 52px;
+    line-height: 1.04;
+    letter-spacing: 0;
+    color: #fffaf3;
+    margin-bottom: 18px;
+  }
+  .lead {
+    max-width: 650px;
+    color: rgba(255,250,243,.86);
+    font-size: 20px;
+    line-height: 1.48;
+    margin-bottom: 28px;
+  }
+  .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46px;
+    padding: 12px 18px;
+    border-radius: 8px;
+    text-decoration: none;
+    border: 1px solid transparent;
+    font-weight: 800;
+    transition: transform .16s, box-shadow .16s, background .16s, border-color .16s;
+    white-space: nowrap;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary {
+    background: linear-gradient(180deg, #2d8b50, var(--green));
+    color: white;
+    box-shadow: 0 12px 24px rgba(18, 124, 66, .34);
+  }
+  .btn-secondary {
+    color: #fffaf3;
+    background: rgba(255,255,255,.09);
+    border-color: rgba(255,255,255,.22);
+  }
+  .hero-points {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    max-width: 760px;
+  }
+  .hero-point {
+    padding: 8px 11px;
+    border: 1px solid rgba(255,255,255,.16);
+    border-radius: 8px;
+    background: rgba(255,255,255,.08);
+    color: rgba(255,250,243,.86);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .section {
+    width: min(1180px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 58px 0;
+  }
+  .section.compact { padding-top: 36px; }
+  .section-head {
+    max-width: 760px;
+    margin-bottom: 24px;
+  }
+  .kicker {
+    color: var(--green-dk);
+    font-size: 12px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    margin-bottom: 8px;
+  }
+  h2 {
+    color: var(--ink);
+    font-size: 32px;
+    line-height: 1.16;
+    letter-spacing: 0;
+    margin-bottom: 10px;
+  }
+  .muted { color: var(--muted); }
+
+  .proof-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--line);
+    box-shadow: 0 10px 26px rgba(20, 28, 35, .07);
+  }
+  .proof-item {
+    background: var(--panel);
+    padding: 18px;
+  }
+  .proof-item strong {
+    display: block;
+    color: var(--ink);
+    font-size: 18px;
+    margin-bottom: 5px;
+  }
+
+  .check-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .check-card,
+  .format-card,
+  .access-card,
+  .note-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 10px 26px rgba(20, 28, 35, .06);
+  }
+  .check-card { padding: 18px; }
+  .check-mark {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--green-soft);
+    color: var(--green-dk);
+    font-weight: 900;
+    margin-bottom: 12px;
+  }
+  .check-card h3,
+  .format-card h3,
+  .access-card h3,
+  .note-card h3 {
+    color: var(--ink);
+    font-size: 18px;
+    line-height: 1.25;
+    margin-bottom: 7px;
+  }
+
+  .work-band {
+    background: #ffffff;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .step {
+    min-height: 150px;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fffdf9, #f8faf8);
+  }
+  .step-num {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--ink);
+    color: #fffaf3;
+    font-weight: 900;
+    margin-bottom: 12px;
+  }
+  .step strong { display: block; color: var(--ink); margin-bottom: 6px; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .format-card,
+  .access-card,
+  .note-card {
+    padding: 22px;
+  }
+  .format-card.primary {
+    border-color: rgba(31,122,67,.32);
+    background: linear-gradient(180deg, #f7fff8, #fffdf9);
+  }
+  .tag {
+    display: inline-flex;
+    min-height: 28px;
+    align-items: center;
+    padding: 5px 9px;
+    border-radius: 8px;
+    background: #eef3f6;
+    color: var(--blue);
+    font-size: 12px;
+    font-weight: 900;
+    margin-bottom: 14px;
+  }
+  .tag.green { background: var(--green-soft); color: var(--green-dk); }
+  .tag.amber { background: #fff4da; color: #80500f; }
+  .format-list,
+  .access-list {
+    list-style: none;
+    display: grid;
+    gap: 9px;
+    color: var(--muted);
+  }
+  .format-list li,
+  .access-list li {
+    position: relative;
+    padding-left: 18px;
+  }
+  .format-list li::before,
+  .access-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: .68em;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+  .format-card.caution .format-list li::before { background: var(--amber); }
+
+  .access-band {
+    background:
+      linear-gradient(180deg, rgba(31,122,67,.06), rgba(63,108,141,.07)),
+      #f8faf8;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .note-card {
+    display: grid;
+    grid-template-columns: 1.1fr .9fr;
+    gap: 24px;
+    align-items: center;
+    background: var(--ink);
+    color: rgba(255,250,243,.82);
+    border-color: rgba(22,32,25,.35);
+  }
+  .note-card h2,
+  .note-card h3 { color: #fffaf3; }
+  .note-card .muted { color: rgba(255,250,243,.74); }
+  .note-list {
+    list-style: none;
+    display: grid;
+    gap: 11px;
+  }
+  .note-list li {
+    border-left: 3px solid #51c17d;
+    padding-left: 12px;
+  }
+
+  .final-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 28px;
+    border-radius: 8px;
+    background: #fffdf9;
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
+  .final-cta h2 { margin-bottom: 6px; }
+  .site-footer {
+    padding: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+
+  @media (max-width: 980px) {
+    .nav a:not(.nav-cta) { display: none; }
+    .hero::after {
+      background:
+        linear-gradient(90deg, rgba(22,32,25,.94), rgba(22,32,25,.70)),
+        linear-gradient(180deg, rgba(22,32,25,.18), rgba(22,32,25,.54));
+    }
+    h1 { font-size: 40px; max-width: 650px; }
+    .lead { font-size: 18px; }
+    .proof-strip,
+    .check-grid,
+    .steps,
+    .two-col,
+    .note-card {
+      grid-template-columns: 1fr;
+    }
+    .steps { gap: 10px; }
+    .step { min-height: auto; }
+    .final-cta { align-items: flex-start; flex-direction: column; }
+  }
+
+  @media (max-width: 640px) {
+    .site-header { height: 62px; padding: 0 16px; }
+    .logo-icon { width: 28px; height: 28px; }
+    .logo-text { font-size: 20px; }
+    .nav-cta { min-height: 34px; padding: 7px 10px; font-size: 13px; }
+    .hero { min-height: min(620px, calc(100svh - 86px)); }
+    .hero-inner,
+    .section { width: min(100% - 28px, 1180px); }
+    .hero-inner { padding: 32px 0 38px; }
+    .eyebrow { font-size: 11px; }
+    h1 { font-size: 34px; line-height: 1.08; }
+    h2 { font-size: 26px; }
+    .lead { font-size: 16px; }
+    .btn { width: 100%; white-space: normal; text-align: center; }
+    .hero-point { width: 100%; }
+    .section { padding: 42px 0; }
+    .section.compact { padding-top: 28px; }
+    .final-cta { padding: 22px; }
+  }
+</style>
+</head>
+<body>
+<header class="site-header">
+  <a class="logo" href="/" aria-label="SverkAI">
+    <svg class="logo-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="47" y="8" width="6" height="16" rx="3" fill="white"/>
+      <rect x="10" y="22" width="80" height="7" rx="3.5" fill="white"/>
+      <rect x="48" y="86" width="4" height="6" rx="2" fill="white"/>
+      <rect x="36" y="88" width="28" height="5" rx="2.5" fill="white"/>
+      <path d="M20 29 L5 58 Q5 68 20 68 Q35 68 35 58 Z" fill="white" opacity=".9"/>
+      <path d="M80 29 L65 58 Q65 68 80 68 Q95 68 95 58 Z" fill="white" opacity=".9"/>
+      <line x1="20" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      <line x1="80" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      <line x1="50" y1="25" x2="50" y2="86" stroke="white" stroke-width="4" stroke-linecap="round"/>
+    </svg>
+    <span class="logo-text">Sverk<em>AI</em></span>
+  </a>
+  <nav class="nav" aria-label="Навигация">
+    <a href="#checks">Что проверяет</a>
+    <a href="#formats">Форматы</a>
+    <a href="#access">Доступ</a>
+    <a class="nav-cta" href="/app">Попробовать</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <img class="hero-bg" src="/static/landing-preview.png" alt="Главный экран SverkAI с загрузкой двух актов сверки">
+    <div class="hero-inner">
+      <div class="eyebrow">MVP для сверки актов взаиморасчетов</div>
+      <h1>SverkAI помогает найти расхождения в актах за несколько минут</h1>
+      <p class="lead">
+        Загрузите два акта сверки, получите список документов, сумм, дат и сальдо, которые нужно проверить специалисту.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/app">Попробовать сверку</a>
+        <a class="btn btn-secondary" href="#access">Получить тестовый доступ</a>
+      </div>
+      <div class="hero-points" aria-label="Ключевые возможности">
+        <span class="hero-point">Excel .xlsx и .xls — основной формат</span>
+        <span class="hero-point">PDF доступен после входа</span>
+        <span class="hero-point">История и Excel-экспорт с тестовым доступом</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section compact" aria-label="Кратко о сервисе">
+    <div class="proof-strip">
+      <div class="proof-item">
+        <strong>2 файла</strong>
+        <span class="muted">акт организации и акт контрагента</span>
+      </div>
+      <div class="proof-item">
+        <strong>1 список</strong>
+        <span class="muted">проверяемые расхождения вместо ручной сверки строк</span>
+      </div>
+      <div class="proof-item">
+        <strong>Честный MVP</strong>
+        <span class="muted">Excel надежнее PDF, результат требует проверки</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="checks">
+    <div class="section-head">
+      <div class="kicker">Что проверяет SverkAI</div>
+      <h2>Сервис подсвечивает типовые причины, почему акт не сходится</h2>
+      <p class="muted">Он не заменяет бухгалтера, а помогает быстрее найти места, где стоит сосредоточить внимание.</p>
+    </div>
+    <div class="check-grid">
+      <article class="check-card">
+        <div class="check-mark">1</div>
+        <h3>Отсутствующие документы</h3>
+        <p class="muted">Документ есть у одной стороны, но не найден у другой.</p>
+      </article>
+      <article class="check-card">
+        <div class="check-mark">2</div>
+        <h3>Отличия в суммах</h3>
+        <p class="muted">Похожий документ найден, но дебет, кредит или итоговая сумма отличаются.</p>
+      </article>
+      <article class="check-card">
+        <div class="check-mark">3</div>
+        <h3>Отличия в датах</h3>
+        <p class="muted">Операция похожа по смыслу, но проведена другой датой.</p>
+      </article>
+      <article class="check-card">
+        <div class="check-mark">4</div>
+        <h3>Сальдо и обороты</h3>
+        <p class="muted">Сверка показывает расхождение итогов и помогает понять его источник.</p>
+      </article>
+      <article class="check-card">
+        <div class="check-mark">5</div>
+        <h3>Направление операций</h3>
+        <p class="muted">Зеркальные и неправильно направленные операции выносятся отдельно.</p>
+      </article>
+      <article class="check-card">
+        <div class="check-mark">6</div>
+        <h3>Приоритет проверки</h3>
+        <p class="muted">Расхождения группируются, чтобы сначала смотреть критичные позиции.</p>
+      </article>
+    </div>
+  </section>
+
+  <div class="work-band">
+    <section class="section" id="how">
+      <div class="section-head">
+        <div class="kicker">Как это работает</div>
+        <h2>От двух Excel-файлов до списка проверяемых расхождений</h2>
+        <p class="muted">Алгоритм читает структуру актов, приводит данные к единому виду и сопоставляет операции.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><span class="step-num">1</span><strong>Загрузка</strong><span class="muted">Пользователь добавляет два акта сверки.</span></div>
+        <div class="step"><span class="step-num">2</span><strong>Разбор</strong><span class="muted">SverkAI ищет даты, номера, документы и суммы.</span></div>
+        <div class="step"><span class="step-num">3</span><strong>Нормализация</strong><span class="muted">Даты, суммы и номера приводятся к сопоставимому виду.</span></div>
+        <div class="step"><span class="step-num">4</span><strong>Сопоставление</strong><span class="muted">Операции сравниваются с учетом допусков по датам.</span></div>
+        <div class="step"><span class="step-num">5</span><strong>Отчет</strong><span class="muted">На экране появляется список расхождений и сводка.</span></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="section" id="formats">
+    <div class="section-head">
+      <div class="kicker">Форматы</div>
+      <h2>Лучший результат сейчас дает Excel</h2>
+      <p class="muted">PDF поддерживается, но его качество сильно зависит от того, как файл был выгружен.</p>
+    </div>
+    <div class="two-col">
+      <article class="format-card primary">
+        <span class="tag green">Основной формат</span>
+        <h3>Excel .xlsx и .xls</h3>
+        <ul class="format-list">
+          <li>доступен в гостевом режиме без входа;</li>
+          <li>обычно сохраняет структуру таблицы лучше PDF;</li>
+          <li>подходит для первого теста продукта.</li>
+        </ul>
+      </article>
+      <article class="format-card caution">
+        <span class="tag amber">После входа</span>
+        <h3>PDF-файлы</h3>
+        <ul class="format-list">
+          <li>доступны пользователям с выданным тестовым доступом;</li>
+          <li>зависят от качества выгрузки и текстового слоя;</li>
+          <li>если есть исходный Excel, лучше загрузить Excel.</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <div class="access-band">
+    <section class="section" id="access">
+      <div class="section-head">
+        <div class="kicker">Гостевой режим и тестовый доступ</div>
+        <h2>Можно начать без входа, а расширенные функции открыть по тестовому доступу</h2>
+      </div>
+      <div class="two-col">
+        <article class="access-card">
+          <span class="tag green">Гостевой режим</span>
+          <h3>Попробовать Excel-сверку</h3>
+          <ul class="access-list">
+            <li>можно загрузить два Excel-файла;</li>
+            <li>результат виден на сайте;</li>
+            <li>PDF, история и Excel-экспорт недоступны.</li>
+          </ul>
+        </article>
+        <article class="access-card">
+          <span class="tag">Тестовый доступ</span>
+          <h3>Войти с выданным ключом</h3>
+          <ul class="access-list">
+            <li>доступна загрузка PDF-файлов;</li>
+            <li>сохраняется история сверок;</li>
+            <li>можно скачать результат в Excel.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <section class="section" id="safety">
+    <article class="note-card">
+      <div>
+        <div class="kicker">Безопасность и проверка</div>
+        <h2>Для первого теста лучше использовать обезличенные документы</h2>
+        <p class="muted">SverkAI помогает быстрее найти вероятные расхождения, но итоговый вывод по акту должен проверять ответственный специалист.</p>
+      </div>
+      <ul class="note-list">
+        <li>Не загружайте лишние персональные или коммерчески чувствительные данные для первого знакомства.</li>
+        <li>Проверяйте итоговый отчет перед отправкой контрагенту или внутренним согласованием.</li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="section">
+    <div class="final-cta">
+      <div>
+        <h2>Готовы проверить два акта?</h2>
+        <p class="muted">Начните с Excel-файлов в гостевом режиме или войдите с тестовым доступом для PDF, истории и экспорта.</p>
+      </div>
+      <a class="btn btn-primary" href="/app">Открыть SverkAI</a>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  SverkAI — сервис для ускорения сверки актов взаиморасчетов. Результаты требуют профессиональной проверки.
+</footer>
+</body>
+</html>

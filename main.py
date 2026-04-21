@@ -3231,9 +3231,19 @@ async def favicon():
         return FileResponse(str(ico_path), media_type="image/x-icon")
     return FileResponse(str(_static / "favicon.svg"), media_type="image/svg+xml")
 
+@app.get("/app")
+@app.get("/app/")
+@app.head("/app")
+@app.head("/app/")
+async def app_page():
+    return FileResponse(str(_static / "index.html"))
+
 @app.get("/")
 @app.head("/")
 async def root():
+    landing_path = _static / "landing.html"
+    if landing_path.exists():
+        return FileResponse(str(landing_path))
     return FileResponse(str(_static / "index.html"))
 
 @app.head("/api/health")
