@@ -1117,7 +1117,10 @@ def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.Data
             if 'сальдо' in operation_lower:
                 amount = _pdf_balance_amount(debit, credit)
                 if amount is not None:
-                    if start_balance is None:
+                    if 'конеч' in operation_lower:
+                        end_balance = amount
+                        end_row_text = document or date_cell
+                    elif 'началь' in operation_lower or start_balance is None:
                         start_balance = amount
                         start_row_text = document or date_cell
                     else:

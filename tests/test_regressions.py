@@ -404,6 +404,23 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertEqual(df.attrs.get('start_balance'), 3753.71)
         self.assertEqual(df.attrs.get('end_balance'), 1778.23)
 
+    def test_pdf_table_parser_keeps_closing_balance_when_opening_is_empty(self):
+        table = [
+            ['По данным ООО "Первая", руб.', None, None, None, 'По данным ООО "Вторая", руб.', None, None, None],
+            ['Дата', 'Документ', 'Дебет', 'Кредит', 'Дата', 'Документ', 'Дебет', 'Кредит'],
+            ['Сальдо начальное', None, '', '', 'Сальдо начальное', None, '', ''],
+            ['22.04.25', 'Приход (123 от 22.04.2025)', '', '56 398,80', '22.04.25', 'Продажа (123 от 22.04.2025)', '56 398,80', ''],
+            ['22.04.25', 'Оплата (4569/99 от 22.04.2025)', '41 500,00', '', '22.04.25', 'Оплата (4569/99 от 22.04.2025)', '', '41 500,00'],
+            ['Обороты за период', None, '41 500,00', '56 398,80', 'Обороты за период', None, '56 398,80', '41 500,00'],
+            ['Сальдо конечное', None, '', '14 898,80', 'Сальдо конечное', None, '14 898,80', ''],
+        ]
+
+        df = self.main._parse_pdf_tables_to_structured([table], side='left')
+
+        self.assertEqual(len(df), 2)
+        self.assertIsNone(df.attrs.get('start_balance'))
+        self.assertEqual(df.attrs.get('end_balance'), 14898.8)
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod
