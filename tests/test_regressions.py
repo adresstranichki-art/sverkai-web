@@ -522,6 +522,21 @@ class AuthKeyTests(unittest.TestCase):
         req.client = types.SimpleNamespace(host=ip)
         return req
 
+    class _Upload:
+        def __init__(self, filename, data):
+            self.filename = filename
+            self._data = data
+            self._pos = 0
+
+        async def read(self, size=-1):
+            if self._pos >= len(self._data):
+                return b''
+            if size is None or size < 0:
+                size = len(self._data) - self._pos
+            chunk = self._data[self._pos:self._pos + size]
+            self._pos += len(chunk)
+            return chunk
+
     def test_empty_allowlist_rejects_user_login_by_default(self):
         ok, reason = self.main._key_access_status('sk-ant-api03-arbitrary')
         self.assertFalse(ok)
@@ -569,6 +584,33 @@ class AuthKeyTests(unittest.TestCase):
         ok, reason = self.main._key_access_status(guest_key)
         self.assertFalse(ok)
         self.assertEqual(reason, 'guest_key')
+
+    def test_guest_upload_rejects_pdf(self):
+        import asyncio
+
+        async def run():
+            with tempfile.TemporaryDirectory() as tmp:
+                upload = self._Upload('act.pdf', b'%PDF-1.4\n')
+                with self.assertRaises(self.main.HTTPException) as cm:
+                    await self.main._save_upload_to_path(upload, str(Path(tmp) / 'act.pdf'), '', 'File')
+                self.assertEqual(cm.exception.status_code, 400)
+                self.assertIn('PDF', cm.exception.detail)
+
+        asyncio.run(run())
+
+    def test_authorized_upload_allows_pdf(self):
+        import asyncio
+
+        async def run():
+            data = b'%PDF-1.4\n'
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / 'act.pdf'
+                upload = self._Upload('act.pdf', data)
+                size = await self.main._save_upload_to_path(upload, str(path), 'sk-ant-api03-user', 'File')
+                self.assertEqual(size, len(data))
+                self.assertEqual(path.read_bytes(), data)
+
+        asyncio.run(run())
 
 
 if __name__ == '__main__':

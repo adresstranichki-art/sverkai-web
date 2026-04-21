@@ -763,8 +763,8 @@
 <main>
   <!-- Гостевое уведомление -->
   <div class="guest-notice" id="guest-notice">
-    Гостевой режим: можно загрузить два акта, выполнить бесплатную сверку и посмотреть результат на сайте.
-    История и Excel-экспорт доступны с выданным тестовым доступом.
+    Гостевой режим: можно загрузить два Excel-акта, выполнить бесплатную сверку и посмотреть результат на сайте.
+    PDF, история и Excel-экспорт доступны с выданным тестовым доступом.
   </div>
   <div class="env-badge" id="env-badge"></div>
 
@@ -778,9 +778,9 @@
             <path d="M3.5 7.5V6.8a2.3 2.3 0 0 1 2.3-2.3h3.6l1.7 2h7.1a2.3 2.3 0 0 1 2.3 2.3v.7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
             <path d="M12 17V11m0 0-2.5 2.5M12 11l2.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-        </div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls, .pdf</p>
+        </div><p>Перетащите файл или нажмите</p><p class="hint upload-format-hint">.xlsx, .xls</p>
       </div>
-      <input type="file" id="input1" accept=".xlsx,.xls,.pdf" style="display:none">
+      <input type="file" id="input1" accept=".xlsx,.xls" style="display:none">
       <div class="file-status" id="file1-status"></div>
       <div class="card-btns"><button class="btn btn-outline" onclick="openWizard(1)">Настроить вручную</button></div>
     </div>
@@ -793,9 +793,9 @@
             <path d="M3.5 7.5V6.8a2.3 2.3 0 0 1 2.3-2.3h3.6l1.7 2h7.1a2.3 2.3 0 0 1 2.3 2.3v.7" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
             <path d="M12 17V11m0 0-2.5 2.5M12 11l2.5 2.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-        </div><p>Перетащите файл или нажмите</p><p class="hint">.xlsx, .xls, .pdf</p>
+        </div><p>Перетащите файл или нажмите</p><p class="hint upload-format-hint">.xlsx, .xls</p>
       </div>
-      <input type="file" id="input2" accept=".xlsx,.xls,.pdf" style="display:none">
+      <input type="file" id="input2" accept=".xlsx,.xls" style="display:none">
       <div class="file-status" id="file2-status"></div>
       <div class="card-btns"><button class="btn btn-outline" onclick="openWizard(2)">Настроить вручную</button></div>
     </div>
@@ -1030,18 +1030,18 @@
     <div class="login-body">
       <div class="login-info">
         <strong>Зачем тестовый доступ SverkAI?</strong><br>
-        С выданным доступом сохраняется история сверок и доступен Excel-экспорт.<br>
-        Без входа работает гостевой режим: можно проверить документы и посмотреть результат на сайте.
+        С выданным доступом можно загружать PDF, сохраняется история сверок и доступен Excel-экспорт.<br>
+        Без входа работает гостевой режим: можно проверить Excel-файлы и посмотреть результат на сайте.
       </div>
 
       <div class="login-modes">
         <div class="mode-card selected" id="mode-key" onclick="selectMode('key')">
         <div class="mc-title">Тестовый доступ SverkAI</div>
-          <div class="mc-desc">История сохраняется, Excel-отчет доступен после сверки.</div>
+          <div class="mc-desc">PDF, история и Excel-отчет доступны после сверки.</div>
         </div>
         <div class="mode-card" id="mode-guest" onclick="selectMode('guest')">
         <div class="mc-title">Гостевой режим</div>
-          <div class="mc-desc">Без установки и оплаты. История и Excel-экспорт недоступны.</div>
+          <div class="mc-desc">Без установки и оплаты. PDF, история и Excel-экспорт недоступны.</div>
         </div>
       </div>
 
@@ -1220,9 +1220,50 @@ function updateAccessActions() {
     : 'Excel-экспорт доступен с выданным тестовым доступом';
 }
 
+function allowedUploadLabel() {
+  return isLoggedIn() ? '.xlsx, .xls, .pdf' : '.xlsx, .xls';
+}
+
+function updateUploadFormatHints() {
+  const label = allowedUploadLabel();
+  const accept = isLoggedIn() ? '.xlsx,.xls,.pdf' : '.xlsx,.xls';
+  document.querySelectorAll('.upload-format-hint').forEach(el => { el.textContent = label; });
+  ['input1', 'input2'].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.accept = accept;
+  });
+}
+
+function resetFileSlot(num, statusText) {
+  if (num === 1) {
+    file1 = null; preview1 = null; profile1 = null;
+  } else {
+    file2 = null; preview2 = null; profile2 = null;
+  }
+  const status = document.getElementById(`file${num}-status`);
+  const title = document.getElementById(`t${num}-title`);
+  const wrap = document.getElementById(`table${num}-wrap`);
+  if (status) { status.className = 'file-status warn'; status.textContent = statusText; }
+  if (title) title.textContent = `Файл ${num}`;
+  if (wrap) wrap.innerHTML = '<div class="empty-state">Загрузите файл для предпросмотра</div>';
+}
+
+function clearPdfFilesForGuest() {
+  if (isLoggedIn()) return false;
+  let cleared = false;
+  if (isPdfFile(file1)) { resetFileSlot(1, 'PDF доступен после входа'); cleared = true; }
+  if (isPdfFile(file2)) { resetFileSlot(2, 'PDF доступен после входа'); cleared = true; }
+  if (cleared) {
+    updatePdfFormatNote();
+    updateRunBtn();
+  }
+  return cleared;
+}
+
 function resetAccessKey(message) {
   localStorage.removeItem(LS_KEY);
   renderAuthArea();
+  clearPdfFilesForGuest();
   loadHistory();
   if (message) showToast(message, 'error');
 }
@@ -1251,12 +1292,14 @@ function renderAuthArea() {
       <span class="auth-badge guest">Гостевой режим</span>
       <button class="btn-login" onclick="openLoginModal()">Войти</button>`;
     guestNotice.innerHTML = `
-      <strong>Гостевой режим:</strong> ${usage}. Можно загрузить два акта и посмотреть результат на сайте.
-      ${fileLimitText}История и Excel-экспорт доступны с выданным тестовым доступом.
+      <strong>Гостевой режим:</strong> ${usage}. Можно загрузить два Excel-акта и посмотреть результат на сайте.
+      ${fileLimitText}PDF, история и Excel-экспорт доступны с выданным тестовым доступом.
       Результат требует проверки специалистом; для первого теста лучше использовать обезличенные документы.
       <a onclick="openLoginModal()">Войти с тестовым доступом</a>.`;
     guestNotice.style.display = 'block';
   }
+  updateUploadFormatHints();
+  updatePdfFormatNote();
   updateAccessActions();
 }
 
@@ -1288,9 +1331,10 @@ async function doLogin() {
   if (loginMode === 'guest') {
     localStorage.removeItem(LS_KEY);
     renderAuthArea();
+    clearPdfFilesForGuest();
     loadHistory();
     closeLoginModal();
-    showToast('Гостевой режим: история и Excel-экспорт недоступны', 'warn');
+    showToast('Гостевой режим: PDF, история и Excel-экспорт недоступны', 'warn');
     return;
   }
 
@@ -1321,7 +1365,7 @@ async function doLogin() {
       renderAuthArea();
       loadHistory();
       closeLoginModal();
-      showToast('Вход выполнен. История и Excel-экспорт доступны', 'success');
+      showToast('Вход выполнен. PDF, история и Excel-экспорт доступны', 'success');
     } else {
       inp.classList.add('error');
       errEl.textContent = data.error || 'Доступ не прошёл проверку';
@@ -1337,6 +1381,7 @@ async function doLogin() {
 function logout() {
   localStorage.removeItem(LS_KEY);
   renderAuthArea();
+  clearPdfFilesForGuest();
   // Очищаем историю в UI
   document.getElementById('hist-body').innerHTML =
     '<tr><td colspan="6" class="empty-hist">Войдите с тестовым доступом для просмотра истории</td></tr>';
@@ -1520,12 +1565,18 @@ function isPdfFile(f){return !!(f&&/\.pdf$/i.test(f.name||''));}
 function updatePdfFormatNote(){
   const el=document.getElementById('pdf-format-note');
   if(!el)return;
-  el.classList.toggle('visible',isPdfFile(file1)||isPdfFile(file2));
+  el.classList.toggle('visible',isLoggedIn()&&(isPdfFile(file1)||isPdfFile(file2)));
 }
 
 async function handleFile(f,num){
   if(!f)return;
-  if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){showToast('Поддерживаются: .xlsx, .xls, .pdf','error');return;}
+  if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){showToast(`Поддерживаются: ${allowedUploadLabel()}`,'error');return;}
+  if(isPdfFile(f)&&!isLoggedIn()){
+    const se=document.getElementById(`file${num}-status`);
+    if(se){se.className='file-status warn';se.textContent='PDF доступен после входа';}
+    showToast('PDF-файлы доступны только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls','warn');
+    return;
+  }
   const maxMb=currentMaxFileMb();
   if(maxMb>0&&f.size>maxMb*1024*1024){
     const se=document.getElementById(`file${num}-status`);

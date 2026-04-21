@@ -64,7 +64,9 @@ GUEST_USAGE_WINDOW_DAYS = _env_int("SVERKAI_GUEST_USAGE_WINDOW_DAYS", 30, 1, 365
 GUEST_MAX_FILE_BYTES = _env_mb("SVERKAI_GUEST_MAX_FILE_MB", 2)
 USER_MAX_FILE_BYTES = _env_mb("SVERKAI_USER_MAX_FILE_MB", 10)
 SUPPORTED_UPLOAD_EXTS = {".xlsx", ".xls", ".pdf"}
+GUEST_UPLOAD_EXTS = {".xlsx", ".xls"}
 SUPPORTED_UPLOAD_EXTS_LABEL = ".xlsx, .xls и .pdf"
+GUEST_UPLOAD_EXTS_LABEL = ".xlsx и .xls"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -382,8 +384,15 @@ def _record_guest_reconcile(request: Request) -> dict:
 async def _save_upload_to_path(upload: UploadFile, path: str, user_key: str, label: str) -> int:
     filename = upload.filename or label
     ext = Path(filename).suffix.lower()
-    if ext not in SUPPORTED_UPLOAD_EXTS:
-        raise HTTPException(status_code=400, detail=f"Поддерживаются только файлы {SUPPORTED_UPLOAD_EXTS_LABEL}")
+    allowed_exts = SUPPORTED_UPLOAD_EXTS if user_key else GUEST_UPLOAD_EXTS
+    if ext not in allowed_exts:
+        if ext == ".pdf" and not user_key:
+            raise HTTPException(
+                status_code=400,
+                detail="PDF-файлы доступны только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls.",
+            )
+        allowed_label = SUPPORTED_UPLOAD_EXTS_LABEL if user_key else GUEST_UPLOAD_EXTS_LABEL
+        raise HTTPException(status_code=400, detail=f"Поддерживаются только файлы {allowed_label}")
     max_bytes = USER_MAX_FILE_BYTES if user_key else GUEST_MAX_FILE_BYTES
     total = 0
     with open(path, "wb") as f:
