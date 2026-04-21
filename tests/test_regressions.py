@@ -361,6 +361,49 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertIn(21, result['matched2'])
         self.assertIn(20, result['missing_rows2'])
 
+    def test_pdf_table_parser_handles_numbered_rows_with_dates_in_document(self):
+        table = [
+            ['По данным ООО «МСН Телеком» руб.', None, None, None, 'По данным ООО "КОКОС" руб.', None, None, None],
+            ['№ п/п', 'Наименование операции,\nдокументы', 'Дебет', 'Кредит', '№ п/п', 'Наименование операции,\nдокументы', 'Дебет', 'Кредит'],
+            ['1', 'Сальдо на 01.01.2025', '0,00', '998,34', '', '', '', ''],
+            ['2', 'Оплата (23.01.2025, №54)', '', '2 338,66', '', '', '', ''],
+            ['3', 'Акт (31.01.2025, №1250101-0775)', '2 337,00', '', '', '', '', ''],
+            ['34', 'Обороты за период', '103 030,40', '102 442,06', '', '', '', ''],
+            ['35', 'Сальдо на 31.03.2026', '0,00', '410,00', '', '', '', ''],
+        ]
+
+        df = self.main._parse_pdf_tables_to_structured([table], side='left')
+
+        self.assertEqual(len(df), 2)
+        self.assertEqual(df.iloc[0]['date_str'], '23.01.2025')
+        self.assertEqual(df.iloc[0]['doc_num'], '54')
+        self.assertAlmostEqual(df.iloc[0]['credit'], 2338.66, places=2)
+        self.assertEqual(df.iloc[1]['doc_num'], '1250101-0775')
+        self.assertAlmostEqual(df.iloc[1]['debit'], 2337.0, places=2)
+        self.assertEqual(df.attrs.get('start_balance'), 998.34)
+        self.assertEqual(df.attrs.get('end_balance'), 410.0)
+
+    def test_pdf_table_parser_handles_date_column_layout(self):
+        table = [
+            ['По данным ООО "КОКОС ГРУПП", руб.', None, None, None, 'По данным ООО "МСН ТЕЛЕКОМ", руб.', None, None, None],
+            ['Дата', 'Документ', 'Дебет', 'Кредит', 'Дата', 'Документ', 'Дебет', 'Кредит'],
+            ['Сальдо начальное', '', '', '3 753,71', 'Сальдо начальное', '', '', '3 753,71'],
+            ['01.01.25', 'Приход (124001-0816 от 30.04.2024)', '', '1 297,00', '', '', '', ''],
+            ['23.01.25', 'Оплата (54 от 23.01.2025)', '2 338,66', '', '', '', '', ''],
+            ['31.03.26', 'Сальдо конечное', '1 778,23', '', '', '', '', ''],
+        ]
+
+        df = self.main._parse_pdf_tables_to_structured([table], side='left')
+
+        self.assertEqual(len(df), 2)
+        self.assertEqual(df.iloc[0]['date_str'], '01.01.2025')
+        self.assertEqual(df.iloc[0]['doc_num'], '124001-0816')
+        self.assertAlmostEqual(df.iloc[0]['credit'], 1297.0, places=2)
+        self.assertEqual(df.iloc[1]['date_str'], '23.01.2025')
+        self.assertAlmostEqual(df.iloc[1]['debit'], 2338.66, places=2)
+        self.assertEqual(df.attrs.get('start_balance'), 3753.71)
+        self.assertEqual(df.attrs.get('end_balance'), 1778.23)
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod

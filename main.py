@@ -1,5 +1,5 @@
 """sverkAI v2.1 — веб-версия (FastAPI) с поддержкой личных API-ключей"""
-import os, re, json, tempfile, shutil, uuid, hashlib
+import os, re, json, tempfile, shutil, uuid, hashlib, base64, io
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -63,7 +63,8 @@ GUEST_RECONCILE_LIMIT = _env_int("SVERKAI_GUEST_RECONCILE_LIMIT", 2, 0, 50)
 GUEST_USAGE_WINDOW_DAYS = _env_int("SVERKAI_GUEST_USAGE_WINDOW_DAYS", 30, 1, 365)
 GUEST_MAX_FILE_BYTES = _env_mb("SVERKAI_GUEST_MAX_FILE_MB", 2)
 USER_MAX_FILE_BYTES = _env_mb("SVERKAI_USER_MAX_FILE_MB", 10)
-SUPPORTED_UPLOAD_EXTS = {".xlsx", ".xls"}
+SUPPORTED_UPLOAD_EXTS = {".xlsx", ".xls", ".pdf"}
+SUPPORTED_UPLOAD_EXTS_LABEL = ".xlsx, .xls и .pdf"
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -382,7 +383,7 @@ async def _save_upload_to_path(upload: UploadFile, path: str, user_key: str, lab
     filename = upload.filename or label
     ext = Path(filename).suffix.lower()
     if ext not in SUPPORTED_UPLOAD_EXTS:
-        raise HTTPException(status_code=400, detail="Поддерживаются только файлы .xlsx и .xls")
+        raise HTTPException(status_code=400, detail=f"Поддерживаются только файлы {SUPPORTED_UPLOAD_EXTS_LABEL}")
     max_bytes = USER_MAX_FILE_BYTES if user_key else GUEST_MAX_FILE_BYTES
     total = 0
     with open(path, "wb") as f:
@@ -436,7 +437,7 @@ def _normalize_doc_num(num: str) -> str:
 _DOC_NUM_PATTERNS = (
     re.compile(r'\bРГО\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'(?:сч[её]т[-\s]?фактура|упд)\s*[№#]?\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
-    re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от', re.IGNORECASE),
+    re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/-]*)\s+от', re.IGNORECASE),
     re.compile(r'\b([A-Za-zА-Яа-я]+-?\d[\w/-]*)\s+от\b', re.IGNORECASE),
     re.compile(r'(?:№|#|No)\s*(М-\d+|\d[\w/-]*)', re.IGNORECASE),
     re.compile(r'\b(\d{4,})\b'),
@@ -465,6 +466,7 @@ def _extract_doc_date(doc: str) -> Optional[pd.Timestamp]:
     text = str(doc)
     for pattern in (
         r'\bот\s*(\d{2}\.\d{2}\.\d{2,4})\b',
+        r'\((\d{2}\.\d{2}\.\d{2,4})(?:\s*,|\))',
         r'\((\d{2}\.\d{2}\.\d{2,4})\)',
     ):
         match = re.search(pattern, text, re.IGNORECASE)
@@ -989,85 +991,343 @@ def parse_two_sided_act(path: str, side: str = 'left') -> pd.DataFrame:
     return _attach_meta(pd.DataFrame(rows), **meta)
 
 
-def _parse_pdf_generic(path: str) -> pd.DataFrame:
+class PDFTextLayerMissing(Exception):
+    pass
+
+
+_PDF_DATE_RE = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
+
+
+def _pdf_cell(value) -> str:
+    if value is None:
+        return ''
+    return re.sub(r'\s+', ' ', str(value).replace('\n', ' ')).strip()
+
+
+def _pdf_extract_text(path: str, max_pages: int = 2) -> str:
+    parts = []
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages[:max_pages]:
+            parts.append(page.extract_text() or '')
+    return '\n'.join(p for p in parts if p)
+
+
+def _pdf_table_side_specs(header: list[str]) -> dict:
+    cells = [_pdf_cell(c).lower() for c in header]
+    width = len(cells)
+    specs = {}
+
+    def spec_for(start: int):
+        if start + 3 >= width:
+            return None
+        first = cells[start]
+        second = cells[start + 1] if start + 1 < width else ''
+        third = cells[start + 2] if start + 2 < width else ''
+        fourth = cells[start + 3] if start + 3 < width else ''
+        if 'дебет' not in third or 'кредит' not in fourth:
+            return None
+        date_col = start if 'дата' in first else None
+        doc_col = start + 1 if date_col is not None else start + 1
+        if date_col is None and not any(k in second for k in ('операц', 'документ', 'наименование')):
+            return None
+        return {'date': date_col, 'doc': doc_col, 'debit': start + 2, 'credit': start + 3}
+
+    if width >= 8:
+        left = spec_for(0)
+        right = spec_for(4)
+        if left:
+            specs['left'] = left
+        if right:
+            specs['right'] = right
+    if not specs:
+        for start in range(max(1, width - 3)):
+            spec = spec_for(start)
+            if spec:
+                specs['left'] = spec
+                break
+    return specs
+
+
+def _pdf_parse_date(value: str) -> tuple[str, Optional[pd.Timestamp]]:
+    text = _pdf_cell(value)
+    if not _PDF_DATE_RE.match(text):
+        return '', pd.NaT
+    parsed = pd.to_datetime(text, dayfirst=True, errors='coerce')
+    return (parsed.strftime('%d.%m.%Y') if pd.notna(parsed) else text, parsed)
+
+
+def _pdf_balance_amount(debit, credit) -> Optional[float]:
+    debit_v = _to_float(debit)
+    credit_v = _to_float(credit)
+    if debit_v is None and credit_v is None:
+        return None
+    if debit_v is None:
+        return abs(float(credit_v))
+    if credit_v is None:
+        return abs(float(debit_v))
+    return abs(float(debit_v)) if abs(float(debit_v)) >= abs(float(credit_v)) else abs(float(credit_v))
+
+
+def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.DataFrame:
     rows = []
-    date_pattern = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
+    meta = {}
+    raw_idx = 0
+    side = side if side in {'left', 'right'} else 'left'
+
+    for table in tables or []:
+        clean_table = [[_pdf_cell(c) for c in (row or [])] for row in table if row]
+        if not clean_table:
+            continue
+        header_idx = None
+        specs = {}
+        for idx, row in enumerate(clean_table[:12]):
+            row_text = ' '.join(row).lower()
+            if 'дебет' in row_text and 'кредит' in row_text:
+                found = _pdf_table_side_specs(row)
+                if found:
+                    header_idx = idx
+                    specs = found
+                    break
+        if header_idx is None or side not in specs:
+            continue
+
+        spec = specs[side]
+        start_balance = None
+        end_balance = None
+        start_row_text = ''
+        end_row_text = ''
+
+        for row_idx, row in enumerate(clean_table[header_idx + 1:], header_idx + 1):
+            max_col = max(spec['doc'], spec['debit'], spec['credit'], spec['date'] or 0)
+            if len(row) <= max_col:
+                row = row + [''] * (max_col + 1 - len(row))
+            document = _pdf_cell(row[spec['doc']])
+            date_cell = _pdf_cell(row[spec['date']]) if spec['date'] is not None else ''
+            debit = _to_float(row[spec['debit']])
+            credit = _to_float(row[spec['credit']])
+            row_text = ' '.join(row).lower()
+            doc_lower = document.lower()
+            operation_lower = f"{date_cell} {document}".lower()
+
+            if not document and debit is None and credit is None:
+                continue
+            if any(kw in row_text for kw in ('генеральный директор', 'нижеподписавшиеся', 'м.п.')):
+                continue
+
+            if 'сальдо' in operation_lower:
+                amount = _pdf_balance_amount(debit, credit)
+                if amount is not None:
+                    if start_balance is None:
+                        start_balance = amount
+                        start_row_text = document or date_cell
+                    else:
+                        end_balance = amount
+                        end_row_text = document or date_cell
+                continue
+            if 'оборот' in operation_lower:
+                continue
+            if debit is None and credit is None:
+                continue
+
+            date_str, date_parsed = _pdf_parse_date(date_cell)
+            if not date_str:
+                date_parsed = _extract_doc_date(document) or _extract_any_date(document)
+                date_str = date_parsed.strftime('%d.%m.%Y') if date_parsed is not None and pd.notna(date_parsed) else ''
+            if not date_str:
+                continue
+
+            rows.append({
+                'date': date_parsed,
+                'date_str': date_str,
+                'document': document,
+                'doc_num': _extract_doc_num(document),
+                'debit': debit,
+                'credit': credit,
+                'match_date': _extract_doc_date(document) or date_parsed,
+                'signed_amount': float(debit or 0) - float(credit or 0),
+                'raw_row': raw_idx,
+                'pdf_side': side,
+            })
+            raw_idx += 1
+
+        if start_balance is not None:
+            meta['start_balance'] = start_balance
+        if end_balance is not None:
+            meta['end_balance'] = end_balance
+        header_text = ' '.join(' '.join(r) for r in clean_table[:header_idx + 1])
+        period_from, period_to = _extract_period_bounds(header_text)
+        if period_from is None:
+            period_from = _extract_any_date(start_row_text)
+        if period_to is None:
+            period_to = _extract_any_date(end_row_text)
+        if period_from is not None and pd.notna(period_from):
+            meta['period_from'] = period_from
+        if period_to is not None and pd.notna(period_to):
+            meta['period_to'] = period_to
+
+    return _attach_meta(pd.DataFrame(rows), **meta)
+
+
+def _extract_pdf_tables(path: str) -> list:
+    tables = []
+    text_chars = 0
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
-            tables = page.extract_tables()
-            if tables:
-                for table in tables:
-                    for row in table:
-                        if not row: continue
-                        first = str(row[0] or '').strip()
-                        if any(kw in first.lower() for kw in ['сальдо', 'обороты', 'генеральный', 'м.п.']):
-                            continue
-                        if not date_pattern.match(first): continue
-                        cells = [str(c).strip() for c in row if c and str(c).strip()]
-                        if len(cells) >= 2:
-                            rows.append(cells)
-                if rows: break
+            text_chars += len(page.extract_text() or '')
+            tables.extend(page.extract_tables() or [])
+    if text_chars == 0:
+        raise PDFTextLayerMissing("PDF не содержит извлекаемого текстового слоя")
+    return tables
+
+
+def _parse_pdf_generic(path: str) -> pd.DataFrame:
+    try:
+        tables = _extract_pdf_tables(path)
+    except PDFTextLayerMissing:
+        return pd.DataFrame()
+    for side in ('left', 'right'):
+        df = _parse_pdf_tables_to_structured(tables, side=side)
+        if not df.empty:
+            return df
+    rows = []
+    text = _pdf_extract_text(path, max_pages=3)
+    for line in text.split('\n'):
+        parts = line.strip().split()
+        if len(parts) >= 2 and _PDF_DATE_RE.match(parts[0]):
+            rows.append(parts)
     if not rows:
-        with pdfplumber.open(path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    for line in text.split('\n'):
-                        parts = line.strip().split()
-                        if len(parts) >= 2 and date_pattern.match(parts[0]):
-                            rows.append(parts)
-    if not rows:
-        raise Exception("PDF пустой или не содержит текста")
+        return pd.DataFrame()
     max_cols = max(len(r) for r in rows)
     padded = [r + [''] * (max_cols - len(r)) for r in rows]
     return pd.DataFrame(padded, columns=[f"Col{i}" for i in range(max_cols)])
 
 
-def parse_pdf_act_to_structured(path: str) -> pd.DataFrame:
-    date_pattern = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}$')
+def _extract_json_payload(text: str):
+    text = (text or '').strip()
+    if "```json" in text:
+        text = text.split("```json", 1)[1].split("```", 1)[0]
+    elif "```" in text:
+        text = text.split("```", 1)[1].split("```", 1)[0]
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    starts = [i for i in (text.find('{'), text.find('[')) if i >= 0]
+    if not starts:
+        raise ValueError("JSON не найден в ответе AI")
+    start = min(starts)
+    end = max(text.rfind('}'), text.rfind(']'))
+    if end <= start:
+        raise ValueError("JSON не найден в ответе AI")
+    return json.loads(text[start:end + 1])
+
+
+def _render_pdf_pages_for_ai(path: str, max_pages: int = 2) -> list:
+    try:
+        import pypdfium2 as pdfium
+    except Exception as exc:
+        raise RuntimeError("Для OCR/AI-разбора PDF нужен пакет pypdfium2") from exc
+    doc = pdfium.PdfDocument(path)
+    blocks = []
+    for idx in range(min(len(doc), max_pages)):
+        page = doc[idx]
+        image = page.render(scale=2).to_pil().convert('RGB')
+        if image.width > 1600:
+            ratio = 1600 / image.width
+            image = image.resize((1600, int(image.height * ratio)))
+        buf = io.BytesIO()
+        image.save(buf, format='PNG', optimize=True)
+        blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": base64.b64encode(buf.getvalue()).decode('ascii'),
+            },
+        })
+    return blocks
+
+
+def parse_pdf_act_with_vision(path: str, api_key: str) -> pd.DataFrame:
+    if not api_key:
+        raise Exception("PDF не содержит текстового слоя; для такого файла нужен OCR/AI-разбор")
+    image_blocks = _render_pdf_pages_for_ai(path, max_pages=2)
+    if not image_blocks:
+        raise Exception("PDF не удалось отрендерить для OCR/AI-разбора")
+    client = Anthropic(api_key=api_key)
+    prompt = """Извлеки операции из изображения акта сверки.
+Читай заполненную сторону таблицы с операциями. Если вторая половина таблицы пустая, игнорируй ее.
+Не включай строки сальдо, оборотов, подписей и печатей в rows, но верни start_balance/end_balance, если они видны.
+Даты нормализуй в ДД.ММ.ГГГГ. Суммы верни числами с точкой, пустые значения — null.
+
+Верни только JSON:
+{
+  "period_from": "ДД.ММ.ГГГГ или null",
+  "period_to": "ДД.ММ.ГГГГ или null",
+  "start_balance": 123.45,
+  "end_balance": 123.45,
+  "rows": [
+    {"date_str": "ДД.ММ.ГГГГ", "document": "текст операции", "doc_num": "номер или null", "debit": 123.45, "credit": null}
+  ]
+}"""
+    msg = client.messages.create(
+        model=MODEL_MAIN,
+        max_tokens=4096,
+        temperature=0,
+        messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, *image_blocks]}],
+    )
+    response_text = '\n'.join(getattr(block, 'text', '') for block in msg.content if getattr(block, 'text', ''))
+    payload = _extract_json_payload(response_text)
+    if isinstance(payload, list):
+        rows_payload = payload
+        meta_payload = {}
+    else:
+        rows_payload = payload.get('rows', []) if isinstance(payload, dict) else []
+        meta_payload = payload if isinstance(payload, dict) else {}
     rows = []
-    raw_idx = 0
-    with pdfplumber.open(path) as pdf:
-        for page in pdf.pages:
-            width = page.width
-            right = page.crop((width * 0.5, 0, width, page.height))
-            words = right.extract_words(x_tolerance=5, y_tolerance=5)
-            if not words: continue
-            lines: dict = {}
-            for w in words:
-                y = round(w['top'] / 6) * 6
-                lines.setdefault(y, []).append(w)
-            for y in sorted(lines):
-                parts = [w['text'] for w in sorted(lines[y], key=lambda w: w['x0'])]
-                if not parts or not date_pattern.match(parts[0]): continue
-                if any(kw in ' '.join(parts).lower() for kw in ['сальдо', 'обороты', 'нижеподписавшиеся']): continue
-                date_str = parts[0]
-                date_parsed = pd.to_datetime(date_str, dayfirst=True, errors='coerce')
-                amounts, doc_parts = [], []
-                for p in parts[1:]:
-                    clean = p.replace('\xa0', '').replace(' ', '').replace(',', '.')
-                    try:
-                        amounts.append(float(clean))
-                    except ValueError:
-                        doc_parts.append(p)
-                document = ' '.join(doc_parts).strip()
-                if not document: continue
-                m = re.search(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/]*)\s+от\s', document)
-                if not m:
-                    m = re.search(r'\((\d+[\w/]*)\)', document)
-                doc_num = _normalize_doc_num(m.group(1)) if m else None
-                debit, credit = None, None
-                if amounts:
-                    v = amounts[-1]
-                    if v < 0: debit = v
-                    elif 'оплата' in document.lower(): debit = v
-                    else: credit = v
-                rows.append({'date': date_parsed, 'date_str': date_str, 'document': document,
-                             'doc_num': doc_num, 'debit': debit, 'credit': credit, 'raw_row': raw_idx})
-                raw_idx += 1
-    if not rows:
-        return _parse_pdf_generic(path)
-    return pd.DataFrame(rows)
+    for idx, item in enumerate(rows_payload):
+        if not isinstance(item, dict):
+            continue
+        document = str(item.get('document') or '').strip()
+        if not document:
+            continue
+        debit = _to_float(item.get('debit'))
+        credit = _to_float(item.get('credit'))
+        if debit is None and credit is None:
+            continue
+        date_str = str(item.get('date_str') or item.get('date') or '').strip()
+        date_parsed = pd.to_datetime(date_str, dayfirst=True, errors='coerce') if date_str else pd.NaT
+        if pd.isna(date_parsed):
+            date_parsed = _extract_doc_date(document) or _extract_any_date(document)
+        date_str = date_parsed.strftime('%d.%m.%Y') if date_parsed is not None and pd.notna(date_parsed) else date_str
+        rows.append({
+            'date': date_parsed,
+            'date_str': date_str,
+            'document': document,
+            'doc_num': _normalize_doc_num(str(item.get('doc_num')).strip()) if item.get('doc_num') else _extract_doc_num(document),
+            'debit': debit,
+            'credit': credit,
+            'match_date': _extract_doc_date(document) or date_parsed,
+            'signed_amount': float(debit or 0) - float(credit or 0),
+            'raw_row': idx,
+            'pdf_side': 'vision',
+        })
+    meta = {}
+    for key in ('start_balance', 'end_balance'):
+        value = _to_float(meta_payload.get(key)) if isinstance(meta_payload, dict) else None
+        if value is not None:
+            meta[key] = abs(float(value))
+    for key in ('period_from', 'period_to'):
+        value = meta_payload.get(key) if isinstance(meta_payload, dict) else None
+        parsed = pd.to_datetime(value, dayfirst=True, errors='coerce') if value else pd.NaT
+        if pd.notna(parsed):
+            meta[key] = parsed
+    return _attach_meta(pd.DataFrame(rows), **meta)
+
+
+def parse_pdf_act_to_structured(path: str, side: str = 'left') -> pd.DataFrame:
+    tables = _extract_pdf_tables(path)
+    return _parse_pdf_tables_to_structured(tables, side=side)
 
 
 def parse_generic(path: str) -> pd.DataFrame:
@@ -1158,13 +1418,14 @@ def detect_file_type(path: str) -> str:
     ext = Path(path).suffix.lower()
     if ext == '.pdf':
         try:
-            with pdfplumber.open(path) as pdf:
-                if pdf.pages:
-                    text = pdf.pages[0].extract_text() or ''
-                    if 'акт сверки' in text.lower() or 'взаимных расчетов' in text.lower():
-                        return 'pdf_act'
+            text = _pdf_extract_text(path, max_pages=2)
+            text_lower = text.lower()
+            if 'акт сверки' in text_lower or 'взаимных расчетов' in text_lower or 'взаимных счетов' in text_lower:
+                return 'pdf_act'
+            if not text.strip():
+                return 'pdf_no_text'
         except Exception:
-            pass
+            return 'pdf_no_text'
         return 'generic'
     try:
         raw = pd.read_excel(path, header=None, dtype=str, nrows=15)
@@ -2112,16 +2373,23 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
 
     header_text = ''
     raw_preview = None
-    try:
-        raw_preview = pd.read_excel(path, header=None, dtype=str, nrows=120)
-        header_text = ' '.join(str(v) for v in raw_preview.iloc[:20].values.flatten() if pd.notna(v))
-    except Exception:
-        pass
+    if ext == '.pdf':
+        try:
+            header_text = _pdf_extract_text(path, max_pages=2)
+        except Exception:
+            header_text = ''
+    else:
+        try:
+            raw_preview = pd.read_excel(path, header=None, dtype=str, nrows=120)
+            header_text = ' '.join(str(v) for v in raw_preview.iloc[:20].values.flatten() if pd.notna(v))
+        except Exception:
+            pass
     header_lower = header_text.lower()
     is_sheet = ext in ('.xls', '.xlsx')
+    is_pdf = ext == '.pdf'
     is_act_like = any(marker in header_lower for marker in (
         'акт сверки', 'взаимных расчетов', 'взаиморасчетов', 'сальдо', 'по данным'
-    ))
+    )) or ftype in ('pdf_act', 'pdf_no_text')
 
     candidates = []
     seen_ids = set()
@@ -2155,6 +2423,11 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
         add_candidate('two_sided_right', 'Акт сверки (двусторонний, правая сторона)', 'generic_detected', lambda p: parse_two_sided_act(p, side='right'), bonus=18)
     if ftype == 'counterparty':
         add_candidate('counterparty', 'Акт сверки (контрагент)', 'generic_detected', parse_counterparty, bonus=18)
+    if is_pdf and ftype in ('pdf_act', 'generic'):
+        add_candidate('pdf_text_left', 'PDF акт сверки (левая сторона)', 'generic_detected',
+                      lambda p: parse_pdf_act_to_structured(p, side='left'), bonus=22 if ftype == 'pdf_act' else 10)
+        add_candidate('pdf_text_right', 'PDF акт сверки (правая сторона)', 'generic_detected',
+                      lambda p: parse_pdf_act_to_structured(p, side='right'), bonus=18 if ftype == 'pdf_act' else 8)
 
     if is_sheet and is_act_like:
         add_candidate('proopt', 'ПРООПТ', 'proopt', parse_proopt, bonus=5 if ftype != 'proopt' else 0)
@@ -2164,6 +2437,16 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
         add_candidate('counterparty', 'Акт сверки (контрагент)', 'generic_detected', parse_counterparty, bonus=5 if ftype != 'counterparty' else 0)
         add_candidate('balance_state_act', 'Акт сверки (сальдо по операциям)', 'generic_detected', parse_balance_state_act, bonus=5 if ftype != 'balance_state_act' else 0)
         add_candidate('partner_ledger_act', 'Акт сверки (реестр проводок)', 'generic_detected', parse_partner_ledger_act, bonus=5 if ftype != 'partner_ledger_act' else 0)
+
+    if is_pdf and not candidates:
+        if ftype == 'pdf_no_text':
+            logs.append(f"{cache_name}: PDF не содержит текстового слоя.")
+        if eff_key:
+            logs.append(f"{cache_name}: пробую OCR/AI-разбор изображения.")
+            add_candidate('pdf_vision', 'PDF акт сверки (AI-разбор изображения)', 'generic_detected',
+                          lambda p: parse_pdf_act_with_vision(p, eff_key), bonus=8)
+        elif ftype == 'pdf_no_text':
+            logs.append(f"{cache_name}: для PDF без текстового слоя нужен API-ключ или исходный Excel/текстовый PDF.")
 
     cache = _load_profile_cache()
     cache_key = f"col_profile_{cache_name}"
@@ -2517,6 +2800,16 @@ async def reconcile(
         except HTTPException: raise
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Ошибка чтения файла 2 ({file2.filename}): {e}")
+        if not candidates1 or not candidates2:
+            failed = []
+            if not candidates1:
+                failed.append(file1.filename or "файл 1")
+            if not candidates2:
+                failed.append(file2.filename or "файл 2")
+            detail = f"Не удалось распознать структуру: {', '.join(failed)}."
+            if any("PDF не содержит текстового слоя" in msg for msg in logs):
+                detail += " Один из PDF не содержит текстового слоя: загрузите текстовый PDF/Excel или войдите с API-ключом для AI-разбора изображения."
+            raise HTTPException(status_code=422, detail=detail)
 
         client = Anthropic(api_key=eff_key) if eff_key else None
 
@@ -2629,8 +2922,8 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
             profile = display_candidate.get('profile')
         else:
             df = parse_generic(path)
-            label = "Требуется настройка"
             ftype = detect_file_type(path)
+            label = "PDF без текстового слоя" if ftype == "pdf_no_text" else "Требуется настройка"
             profile = None
             needs_manual = True
 
