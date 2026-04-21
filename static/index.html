@@ -172,6 +172,21 @@
   .file-status.ok   { color: var(--green); }
   .file-status.warn { color: var(--yellow); }
   .file-status.loading { color: var(--muted); }
+  .pdf-format-note {
+    display: none;
+    margin: -4px 0 14px;
+    border: 1px solid #f1cf84;
+    border-left: 4px solid #d39a2d;
+    border-radius: 8px;
+    background: #fff8e7;
+    color: #735200;
+    padding: 11px 14px;
+    font-size: 13px;
+    line-height: 1.45;
+    box-shadow: 0 8px 16px rgba(178,106,18,.06);
+  }
+  .pdf-format-note.visible { display: block; }
+  .pdf-format-note strong { color: #5c4200; }
   .card-btns { display: flex; gap: 8px; margin-top: 12px; }
   .btn {
     display: inline-flex;
@@ -789,6 +804,11 @@
       <button class="btn btn-ghost" id="btn-cancel" onclick="cancelReconcile()" style="display:none;color:var(--red);border-color:var(--red)" title="Остановить анализ">Остановить</button>
       <button class="btn btn-ghost" id="btn-export" onclick="openExportModal()" disabled>Экспорт в Excel</button>
     </div>
+  </div>
+
+  <div class="pdf-format-note" id="pdf-format-note">
+    <strong>PDF поддерживается, но Excel надежнее.</strong>
+    Если есть исходный .xlsx или .xls, лучше загрузить его: в PDF структура таблицы восстанавливается из текста и разметки, поэтому качество может зависеть от выгрузки.
   </div>
 
   <div class="settings-bar">
@@ -1496,6 +1516,13 @@ function setupDrop(dId,iId,num){
 }
 setupDrop('drop1','input1',1);setupDrop('drop2','input2',2);
 
+function isPdfFile(f){return !!(f&&/\.pdf$/i.test(f.name||''));}
+function updatePdfFormatNote(){
+  const el=document.getElementById('pdf-format-note');
+  if(!el)return;
+  el.classList.toggle('visible',isPdfFile(file1)||isPdfFile(file2));
+}
+
 async function handleFile(f,num){
   if(!f)return;
   if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){showToast('Поддерживаются: .xlsx, .xls, .pdf','error');return;}
@@ -1509,6 +1536,7 @@ async function handleFile(f,num){
     return;
   }
   if(num===1){file1=f;profile1=null;preview1=null;}else{file2=f;profile2=null;preview2=null;}
+  updatePdfFormatNote();
   const se=document.getElementById(`file${num}-status`),te=document.getElementById(`t${num}-title`),we=document.getElementById(`table${num}-wrap`);
   se.className='file-status loading';se.textContent='⏳ Анализ...';
   we.innerHTML='<div class="empty-state">⏳ Анализ структуры...</div>';
