@@ -421,6 +421,67 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertIsNone(df.attrs.get('start_balance'))
         self.assertEqual(df.attrs.get('end_balance'), 14898.8)
 
+    def test_pdf_table_parser_reuses_header_for_continuation_tables(self):
+        first_page = [
+            ['По данным ООО "Первая", руб.', None, None, None, 'По данным ООО "Вторая", руб.', None, None, None],
+            ['Дата', 'Документ', 'Дебет', 'Кредит', 'Дата', 'Документ', 'Дебет', 'Кредит'],
+            ['Сальдо начальное', '', '', '1 000,00', '', '', '', ''],
+            ['01.01.26', 'Приход (1 от 01.01.2026)', '', '100,00', '', '', '', ''],
+        ]
+        continuation = [
+            ['02.01.26', 'Оплата (2 от 02.01.2026)', '50,00', '', '', '', '', ''],
+            ['Сальдо конечное', '', '', '1 050,00', '', '', '', ''],
+        ]
+
+        df = self.main._parse_pdf_tables_to_structured([first_page, continuation], side='left')
+
+        self.assertEqual(len(df), 2)
+        self.assertEqual(df.iloc[1]['doc_num'], '2')
+        self.assertAlmostEqual(df.iloc[0]['signed_amount'], 100.0, places=2)
+        self.assertEqual(df.attrs.get('start_balance'), 1000.0)
+        self.assertEqual(df.attrs.get('end_balance'), 1050.0)
+
+    def test_pdf_table_parser_handles_multirow_standard_header(self):
+        table = [
+            ['Дата', 'Документ', 'Валюта\nдокумента', 'по данным', '', '', '', '', ''],
+            ['', '', '', 'ООО "МА"', '', '', 'ООО "АРВ"', '', ''],
+            ['', '', '', 'Сумма\nдокумента', 'Дебет', 'Кредит', 'Сумма\nдокумента', 'Дебет', 'Кредит'],
+            ['Сальдо начальное', '', '', '', '12 143 583,16', '-', '', '', ''],
+            ['12.01.2026', 'Платежное поручение №10 от 12.01.2026', 'руб.', '1 189 004,16', '-', '1 189 004,16', '', '', ''],
+        ]
+
+        df = self.main._parse_pdf_tables_to_structured([table], side='left')
+
+        self.assertEqual(len(df), 1)
+        self.assertEqual(df.iloc[0]['document'], 'Платежное поручение №10 от 12.01.2026')
+        self.assertEqual(df.iloc[0]['doc_num'], '10')
+        self.assertAlmostEqual(df.iloc[0]['credit'], 1189004.16, places=2)
+        self.assertAlmostEqual(df.iloc[0]['signed_amount'], -1189004.16, places=2)
+        self.assertEqual(df.attrs.get('start_balance'), 12143583.16)
+
+    def test_pdf_table_parser_handles_shifted_ledger_continuation(self):
+        first_page = [
+            ['По данным АО "РОЛЬФ", руб', '', '', '', '', '', '', '', ''],
+            ['Наименование договора', '', '', 'Номер С/Ф', 'Дата С/Ф', 'Дебет', 'Кредит', 'Дебет', 'Кредит'],
+            ['САЛЬДО НАЧАЛЬНОЕ на 01.01.2026', '', '', '', '', '', '161 570,38', '', ''],
+            ['', 'Продажа № РГО 2069 от\n12.01.26', '', 'РГО 2069', '12.01.26', '14 002,73', '', '', ''],
+        ]
+        continuation = [
+            ['Оплата № 971 от 16.02.26', '', '', '', '124 107,77', '', ''],
+            ['Продажа № РГО 13595 от\n17.02.26', 'РГО 13595', '17.02.26', '115 797,28', '', '', ''],
+            ['САЛЬДО КОНЕЧНОЕ на 31.03.2026', '', '', '', '', '121 308,64', '', ''],
+        ]
+
+        df = self.main._parse_pdf_tables_to_structured([first_page, continuation], side='left')
+
+        self.assertEqual(len(df), 3)
+        self.assertAlmostEqual(df.iloc[0]['debit'], 14002.73, places=2)
+        self.assertAlmostEqual(df.iloc[1]['credit'], 124107.77, places=2)
+        self.assertAlmostEqual(df.iloc[2]['debit'], 115797.28, places=2)
+        self.assertAlmostEqual(df['signed_amount'].sum(), 5692.24, places=2)
+        self.assertEqual(df.attrs.get('start_balance'), 161570.38)
+        self.assertEqual(df.attrs.get('end_balance'), 121308.64)
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod

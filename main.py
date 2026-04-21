@@ -429,17 +429,18 @@ def _to_float(s: str) -> Optional[float]:
 def _normalize_doc_num(num: str) -> str:
     if not num:
         return num
-    cleaned = re.sub(r'^[А-ЯA-Zа-яa-z]+-', '', str(num).strip())
+    raw = re.sub(r'\s+', '', str(num).strip())
+    cleaned = re.sub(r'^[А-ЯA-Zа-яa-z]+-', '', raw)
     cleaned = cleaned.lstrip('0') or cleaned
     return cleaned.lower()
 
 
 _DOC_NUM_PATTERNS = (
     re.compile(r'\bРГО\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
-    re.compile(r'(?:сч[её]т[-\s]?фактура|упд)\s*[№#]?\s*([A-Za-zА-Яа-я]*-?\d+[\w/]*)', re.IGNORECASE),
+    re.compile(r'(?:сч[её]т[-\s]?фактура|упд)\s*[№#]?\s*([A-Za-zА-Яа-я]*-?\s*\d+[\w/]*)', re.IGNORECASE),
     re.compile(r'\(([A-Za-zА-Яа-я]*-?\d+[\w/-]*)\s+от', re.IGNORECASE),
     re.compile(r'\b([A-Za-zА-Яа-я]+-?\d[\w/-]*)\s+от\b', re.IGNORECASE),
-    re.compile(r'(?:№|#|No)\s*(М-\d+|\d[\w/-]*)', re.IGNORECASE),
+    re.compile(r'(?:№|#|No)\s*(М-\s*\d+|\d[\w/-]*)', re.IGNORECASE),
     re.compile(r'\b(\d{4,})\b'),
 )
 
@@ -628,9 +629,9 @@ def _balance_state_doc_num(doc: str) -> Optional[str]:
             return _normalize_doc_num(match.group(1))
         return _extract_doc_num(text)
     if doc_type == 'корректировка':
-        match = re.search(r',\s*([A-Za-zА-Яа-я]+-\d+)\)', text, re.IGNORECASE)
+        match = re.search(r',\s*([A-Za-zА-Яа-я]+-\s*\d+)\)', text, re.IGNORECASE)
         if match:
-            return match.group(1).strip().lower().replace('-', '_')
+            return match.group(1).strip().lower().replace(' ', '').replace('-', '_')
     return None
 
 
@@ -1012,40 +1013,109 @@ def _pdf_extract_text(path: str, max_pages: int = 2) -> str:
     return '\n'.join(p for p in parts if p)
 
 
-def _pdf_table_side_specs(header: list[str]) -> dict:
-    cells = [_pdf_cell(c).lower() for c in header]
-    width = len(cells)
+def _pdf_table_side_specs(header: list[str], header_rows: Optional[list[list[str]]] = None) -> dict:
+    rows = header_rows or [header]
+    width = max((len(row) for row in rows), default=0)
+    normalized_rows = []
+    for row in rows:
+        normalized_rows.append([_pdf_cell(row[idx]).lower() if idx < len(row) else '' for idx in range(width)])
+
+    col_texts = [
+        ' '.join(row[idx] for row in normalized_rows if row[idx]).strip()
+        for idx in range(width)
+    ]
     specs = {}
+    debit_cols = [
+        idx for idx in range(max(0, width - 1))
+        if 'дебет' in col_texts[idx] and 'кредит' in col_texts[idx + 1]
+    ]
 
-    def spec_for(start: int):
-        if start + 3 >= width:
-            return None
-        first = cells[start]
-        second = cells[start + 1] if start + 1 < width else ''
-        third = cells[start + 2] if start + 2 < width else ''
-        fourth = cells[start + 3] if start + 3 < width else ''
-        if 'дебет' not in third or 'кредит' not in fourth:
-            return None
-        date_col = start if 'дата' in first else None
-        doc_col = start + 1 if date_col is not None else start + 1
-        if date_col is None and not any(k in second for k in ('операц', 'документ', 'наименование')):
-            return None
-        return {'date': date_col, 'doc': doc_col, 'debit': start + 2, 'credit': start + 3}
+    def nearest_col(end: int, keywords: tuple[str, ...], *, exclude: set[int] | None = None) -> Optional[int]:
+        exclude = exclude or set()
+        for idx in range(end - 1, -1, -1):
+            if idx in exclude:
+                continue
+            text = col_texts[idx]
+            if 'документ' in keywords and any(skip in text for skip in ('сумма', 'валюта')):
+                continue
+            if any(keyword in text for keyword in keywords):
+                return idx
+        return None
 
-    if width >= 8:
-        left = spec_for(0)
-        right = spec_for(4)
-        if left:
-            specs['left'] = left
-        if right:
-            specs['right'] = right
-    if not specs:
-        for start in range(max(1, width - 3)):
-            spec = spec_for(start)
-            if spec:
-                specs['left'] = spec
-                break
+    for pair_idx, debit_col in enumerate(debit_cols[:2]):
+        credit_col = debit_col + 1
+        date_col = nearest_col(debit_col, ('дата',))
+
+        is_partner_ledger = (
+            date_col is not None
+            and any('наименование договора' in text for text in col_texts[:debit_col])
+            and any(('номер' in text or 'с/ф' in text) for text in col_texts[:debit_col])
+        )
+        if is_partner_ledger:
+            doc_col = 1 if debit_col > 2 else max(0, debit_col - 1)
+        else:
+            doc_col = nearest_col(
+                debit_col,
+                ('документ', 'операц', 'наименование', 'номер'),
+                exclude={date_col} if date_col is not None else None,
+            )
+            if doc_col is None:
+                doc_col = max(0, debit_col - 1)
+
+        if is_partner_ledger or any('сумма документа' in text for text in col_texts):
+            effect = 'debit_credit'
+        elif date_col is not None and (
+            'дата операции' in col_texts[date_col]
+            or 'наименование операции' in col_texts[doc_col]
+        ):
+            effect = 'debit_credit'
+        else:
+            effect = 'credit_debit'
+
+        specs['left' if pair_idx == 0 else 'right'] = {
+            'date': date_col,
+            'doc': doc_col,
+            'debit': debit_col,
+            'credit': credit_col,
+            'effect': effect,
+        }
+
     return specs
+
+
+def _pdf_row_spec(row: list[str], spec: dict) -> dict:
+    if spec.get('date') is None:
+        return spec
+
+    max_col = max(spec['doc'], spec['debit'], spec['credit'], spec['date'])
+    if (
+        len(row) > max_col
+        and _PDF_DATE_RE.match(_pdf_cell(row[spec['date']]))
+        and (_to_float(row[spec['debit']]) is not None or _to_float(row[spec['credit']]) is not None)
+    ):
+        return spec
+
+    # Continuation pages of some ledger PDFs lose merged blank columns.
+    if int(spec.get('date') or 0) >= 4:
+        for doc_col, date_col, debit_col, credit_col in ((0, 2, 3, 4), (1, 3, 4, 5)):
+            if len(row) <= credit_col:
+                continue
+            doc_text = _pdf_cell(row[doc_col])
+            has_date = bool(_PDF_DATE_RE.match(_pdf_cell(row[date_col])))
+            if not has_date and doc_text:
+                has_date = pd.notna(_extract_any_date(doc_text))
+            if has_date and (_to_float(row[debit_col]) is not None or _to_float(row[credit_col]) is not None):
+                return {
+                    'date': date_col,
+                    'doc': doc_col,
+                    'debit': debit_col,
+                    'credit': credit_col,
+                    'effect': spec.get('effect', 'debit_credit'),
+                }
+
+    if len(row) > max_col:
+        return spec
+    return spec
 
 
 def _pdf_parse_date(value: str) -> tuple[str, Optional[pd.Timestamp]]:
@@ -1073,6 +1143,8 @@ def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.Data
     meta = {}
     raw_idx = 0
     side = side if side in {'left', 'right'} else 'left'
+    active_specs = {}
+    active_header_text = ''
 
     for table in tables or []:
         clean_table = [[_pdf_cell(c) for c in (row or [])] for row in table if row]
@@ -1083,28 +1155,34 @@ def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.Data
         for idx, row in enumerate(clean_table[:12]):
             row_text = ' '.join(row).lower()
             if 'дебет' in row_text and 'кредит' in row_text:
-                found = _pdf_table_side_specs(row)
+                found = _pdf_table_side_specs(row, clean_table[:idx + 1])
                 if found:
                     header_idx = idx
                     specs = found
+                    active_specs = found
+                    active_header_text = ' '.join(' '.join(r) for r in clean_table[:header_idx + 1])
                     break
+        if header_idx is None and side in active_specs:
+            header_idx = -1
+            specs = active_specs
         if header_idx is None or side not in specs:
             continue
 
         spec = specs[side]
-        start_balance = None
-        end_balance = None
+        start_balance = meta.get('start_balance')
+        end_balance = meta.get('end_balance')
         start_row_text = ''
         end_row_text = ''
 
         for row_idx, row in enumerate(clean_table[header_idx + 1:], header_idx + 1):
-            max_col = max(spec['doc'], spec['debit'], spec['credit'], spec['date'] or 0)
+            row_spec = _pdf_row_spec(row, spec)
+            max_col = max(row_spec['doc'], row_spec['debit'], row_spec['credit'], row_spec['date'] or 0)
             if len(row) <= max_col:
                 row = row + [''] * (max_col + 1 - len(row))
-            document = _pdf_cell(row[spec['doc']])
-            date_cell = _pdf_cell(row[spec['date']]) if spec['date'] is not None else ''
-            debit = _to_float(row[spec['debit']])
-            credit = _to_float(row[spec['credit']])
+            document = _pdf_cell(row[row_spec['doc']])
+            date_cell = _pdf_cell(row[row_spec['date']]) if row_spec['date'] is not None else ''
+            debit = _to_float(row[row_spec['debit']])
+            credit = _to_float(row[row_spec['credit']])
             row_text = ' '.join(row).lower()
             doc_lower = document.lower()
             operation_lower = f"{date_cell} {document}".lower()
@@ -1114,13 +1192,14 @@ def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.Data
             if any(kw in row_text for kw in ('генеральный директор', 'нижеподписавшиеся', 'м.п.')):
                 continue
 
-            if 'сальдо' in operation_lower:
+            balance_lower = operation_lower if 'сальдо' in operation_lower else row_text
+            if 'сальдо' in balance_lower:
                 amount = _pdf_balance_amount(debit, credit)
                 if amount is not None:
-                    if 'конеч' in operation_lower:
+                    if 'конеч' in balance_lower:
                         end_balance = amount
                         end_row_text = document or date_cell
-                    elif 'началь' in operation_lower or start_balance is None:
+                    elif 'началь' in balance_lower or start_balance is None:
                         start_balance = amount
                         start_row_text = document or date_cell
                     else:
@@ -1143,11 +1222,16 @@ def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.Data
                 'date': date_parsed,
                 'date_str': date_str,
                 'document': document,
-                'doc_num': _extract_doc_num(document),
+                'doc_num': _balance_state_doc_num(document) or _extract_doc_num(document),
+                'doc_type': _balance_state_doc_type(document),
                 'debit': debit,
                 'credit': credit,
                 'match_date': _extract_doc_date(document) or date_parsed,
-                'signed_amount': float(debit or 0) - float(credit or 0),
+                'signed_amount': (
+                    float(debit or 0) - float(credit or 0)
+                    if row_spec.get('effect') == 'debit_credit'
+                    else float(credit or 0) - float(debit or 0)
+                ),
                 'raw_row': raw_idx,
                 'pdf_side': side,
             })
@@ -1157,7 +1241,7 @@ def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.Data
             meta['start_balance'] = start_balance
         if end_balance is not None:
             meta['end_balance'] = end_balance
-        header_text = ' '.join(' '.join(r) for r in clean_table[:header_idx + 1])
+        header_text = ' '.join(' '.join(r) for r in clean_table[:header_idx + 1]) if header_idx >= 0 else active_header_text
         period_from, period_to = _extract_period_bounds(header_text)
         if period_from is None:
             period_from = _extract_any_date(start_row_text)
@@ -1325,6 +1409,69 @@ def parse_pdf_act_with_vision(path: str, api_key: str) -> pd.DataFrame:
         parsed = pd.to_datetime(value, dayfirst=True, errors='coerce') if value else pd.NaT
         if pd.notna(parsed):
             meta[key] = parsed
+    return _attach_meta(pd.DataFrame(rows), **meta)
+
+
+def parse_pdf_emex_text(path: str) -> pd.DataFrame:
+    amount_re = r'-?\d[\d\s]*,\d{2}'
+    row_re = re.compile(
+        rf'^(\d{{2}}\.\d{{2}}\.\d{{4}})\s+(.+?)\s+'
+        rf'(\d{{2}}\.\d{{2}}\.\d{{4}})\s+(.+?)\s+'
+        rf'({amount_re})\s+({amount_re})\s+({amount_re})$'
+    )
+    balance_re = re.compile(rf'сальдо\s+на\s+(\d{{2}}\.\d{{2}}\.\d{{4}})\s+({amount_re})', re.IGNORECASE)
+    rows = []
+    meta = {}
+    period_from, period_to = _extract_period_bounds(_pdf_extract_text(path, max_pages=2))
+    if period_from is not None and pd.notna(period_from):
+        meta['period_from'] = period_from
+    if period_to is not None and pd.notna(period_to):
+        meta['period_to'] = period_to
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            for raw_line in (page.extract_text() or '').split('\n'):
+                line = ' '.join(raw_line.split())
+                if not line:
+                    continue
+                balance_match = balance_re.search(line)
+                if balance_match:
+                    amount = _to_float(balance_match.group(2))
+                    if amount is not None:
+                        if 'start_balance' not in meta:
+                            meta['start_balance'] = float(amount)
+                        else:
+                            meta['end_balance'] = float(amount)
+                    continue
+
+                match = row_re.match(line)
+                if not match:
+                    continue
+                date_val, doc_val, doc_date, doc_type, debit_raw, credit_raw, _balance_raw = match.groups()
+                debit = _to_float(debit_raw)
+                credit = _to_float(credit_raw)
+                if debit is None and credit is None:
+                    continue
+                date_parsed = pd.to_datetime(date_val, dayfirst=True, errors='coerce')
+                if period_from is not None and pd.notna(period_from) and pd.notna(date_parsed) and date_parsed < period_from:
+                    continue
+                if period_to is not None and pd.notna(period_to) and pd.notna(date_parsed) and date_parsed > period_to:
+                    continue
+                match_date = pd.to_datetime(doc_date, dayfirst=True, errors='coerce')
+                doc_num_match = re.match(r'^(\S+)', doc_val)
+                plain_doc_num_match = re.match(r'^(\d+)', doc_val)
+                rows.append({
+                    'date': date_parsed,
+                    'date_str': date_val,
+                    'document': doc_val,
+                    'doc_num': plain_doc_num_match.group(1) if plain_doc_num_match else (_normalize_doc_num(doc_num_match.group(1)) if doc_num_match else _extract_doc_num(doc_val)),
+                    'doc_type': doc_type,
+                    'debit': debit,
+                    'credit': credit,
+                    'match_date': match_date if pd.notna(match_date) else date_parsed,
+                    'signed_amount': float(debit or 0) - float(credit or 0),
+                    'raw_row': len(rows),
+                    'pdf_side': 'emex_text',
+                })
     return _attach_meta(pd.DataFrame(rows), **meta)
 
 
@@ -1774,7 +1921,16 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         if any(kw in d for kw in _CAT_DELIVERY): return 'поставка'
         return 'прочее'
 
-    has_proopt_statement = _meta(df1, 'parser_id') == 'proopt' or _meta(df2, 'parser_id') == 'proopt'
+    def _looks_like_proopt_statement(df: pd.DataFrame) -> bool:
+        if _meta(df, 'parser_id') == 'proopt':
+            return True
+        try:
+            sample = ' '.join(df.get('document', pd.Series(dtype=str)).head(80).astype(str)).lower()
+        except Exception:
+            sample = ''
+        return bool(re.search(r'мпр[-\s]|мпв[-\s]|строка\s+выписки.*мп-', sample, re.IGNORECASE))
+
+    has_proopt_statement = _looks_like_proopt_statement(df1) or _looks_like_proopt_statement(df2)
 
     def _match_window(cat: str) -> int:
         if cat == 'оплата':
@@ -2431,6 +2587,8 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
                       lambda p: parse_pdf_act_to_structured(p, side='left'), bonus=22 if ftype == 'pdf_act' else 10)
         add_candidate('pdf_text_right', 'PDF акт сверки (правая сторона)', 'generic_detected',
                       lambda p: parse_pdf_act_to_structured(p, side='right'), bonus=18 if ftype == 'pdf_act' else 8)
+        if 'emex' in header_lower or 'emex' in cache_name.lower():
+            add_candidate('pdf_emex_text', 'PDF ЭМЕКС (текстовый слой)', 'emex', parse_pdf_emex_text, bonus=24)
 
     if is_sheet and is_act_like:
         add_candidate('proopt', 'ПРООПТ', 'proopt', parse_proopt, bonus=5 if ftype != 'proopt' else 0)
