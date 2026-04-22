@@ -10,10 +10,12 @@
 <link rel="shortcut icon" href="/favicon.ico?v=5" type="image/x-icon">
 <style>
   :root {
-    --green: #1f7a43;
+    --green: #20864b;
     --green-dk: #14592f;
-    --green-soft: #eaf4eb;
-    --ink: #162019;
+    --green-soft: #eaf7ef;
+    --mint: #77d9a2;
+    --mint-pale: #f0fbf4;
+    --ink: #122016;
     --text: #1f262d;
     --muted: #68737d;
     --line: #d6ddd6;
@@ -27,7 +29,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
   body {
-    font-family: "Aptos", "Segoe UI", system-ui, sans-serif;
+    font-family: "Manrope", "Inter", "Aptos", "Segoe UI", system-ui, sans-serif;
     color: var(--text);
     background: var(--paper);
     font-size: 16px;
@@ -122,11 +124,12 @@
   }
   h1 {
     max-width: 760px;
-    font-size: 52px;
-    line-height: 1.04;
+    font-size: 56px;
+    line-height: 1.02;
     letter-spacing: 0;
     color: #fffaf3;
     margin-bottom: 18px;
+    font-weight: 900;
   }
   .lead {
     max-width: 650px;
@@ -202,31 +205,39 @@
   }
   h2 {
     color: var(--ink);
-    font-size: 32px;
-    line-height: 1.16;
+    font-size: 36px;
+    line-height: 1.1;
     letter-spacing: 0;
     margin-bottom: 10px;
+    font-weight: 900;
   }
   .muted { color: var(--muted); }
 
   .proof-strip {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1px;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--line);
-    box-shadow: 0 10px 26px rgba(20, 28, 35, .07);
+    gap: 14px;
   }
   .proof-item {
-    background: var(--panel);
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 58px 1fr;
+    gap: 14px;
+    align-items: center;
+    background:
+      linear-gradient(180deg, rgba(240,251,244,.94), rgba(255,253,249,.98));
+    border: 1px solid rgba(32,134,75,.18);
+    border-radius: 8px;
     padding: 18px;
+    box-shadow: 0 12px 24px rgba(18, 32, 22, .07);
   }
   .proof-item strong {
     display: block;
     color: var(--ink);
-    font-size: 18px;
+    font-size: 20px;
+    line-height: 1.1;
+    font-weight: 900;
     margin-bottom: 5px;
   }
 
@@ -239,32 +250,74 @@
   .format-card,
   .access-card,
   .note-card {
-    background: var(--panel);
-    border: 1px solid var(--line);
+    background:
+      linear-gradient(180deg, rgba(255,253,249,.98), rgba(247,253,249,.96));
+    border: 1px solid rgba(32,134,75,.16);
     border-radius: 8px;
-    box-shadow: 0 10px 26px rgba(20, 28, 35, .06);
+    box-shadow: 0 14px 30px rgba(18, 32, 22, .07);
+    transition: transform .18s, box-shadow .18s, border-color .18s;
   }
-  .check-card { padding: 18px; }
-  .check-mark {
-    width: 30px;
-    height: 30px;
+  .check-card:hover,
+  .format-card:hover,
+  .access-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(32,134,75,.34);
+    box-shadow: 0 18px 38px rgba(18, 32, 22, .10);
+  }
+  .check-card { padding: 20px; }
+  .sverk-icon {
+    width: 76px;
+    height: 68px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     border-radius: 8px;
-    background: var(--green-soft);
+    margin-bottom: 14px;
+    background:
+      linear-gradient(180deg, #f8fffa, var(--green-soft));
     color: var(--green-dk);
-    font-weight: 900;
-    margin-bottom: 12px;
+    box-shadow: inset 0 0 0 1px rgba(32,134,75,.16);
+  }
+  .sverk-icon svg {
+    width: 58px;
+    height: 58px;
+    display: block;
+  }
+  .sverk-icon.small {
+    width: 58px;
+    height: 54px;
+    margin-bottom: 0;
+  }
+  .sverk-icon.small svg {
+    width: 46px;
+    height: 46px;
+  }
+  .sverk-icon .fill-mint { fill: #90e7b2; }
+  .sverk-icon .fill-pale { fill: #dff7e8; }
+  .sverk-icon .fill-cream { fill: #fff7e8; }
+  .sverk-icon .fill-blue { fill: #dcecf5; }
+  .sverk-icon .fill-amber { fill: #ffe6b8; }
+  .sverk-icon .stroke-main {
+    stroke: currentColor;
+    stroke-width: 2.3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .sverk-icon .stroke-soft {
+    stroke: rgba(20,89,47,.52);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
   .check-card h3,
   .format-card h3,
   .access-card h3,
   .note-card h3 {
     color: var(--ink);
-    font-size: 18px;
+    font-size: 20px;
     line-height: 1.25;
     margin-bottom: 7px;
+    font-weight: 900;
   }
 
   .work-band {
@@ -280,9 +333,10 @@
   .step {
     min-height: 150px;
     padding: 18px;
-    border: 1px solid var(--line);
+    border: 1px solid rgba(32,134,75,.16);
     border-radius: 8px;
-    background: linear-gradient(180deg, #fffdf9, #f8faf8);
+    background: linear-gradient(180deg, #fffdf9, #f0fbf4);
+    box-shadow: 0 12px 24px rgba(18, 32, 22, .05);
   }
   .step-num {
     display: inline-flex;
@@ -326,6 +380,11 @@
   }
   .tag.green { background: var(--green-soft); color: var(--green-dk); }
   .tag.amber { background: #fff4da; color: #80500f; }
+  .format-card .sverk-icon,
+  .access-card .sverk-icon,
+  .request-copy .sverk-icon {
+    margin-bottom: 16px;
+  }
   .format-list,
   .access-list {
     list-style: none;
@@ -388,13 +447,14 @@
   }
   .request-copy,
   .lead-form {
-    background: var(--panel);
-    border: 1px solid var(--line);
+    background:
+      linear-gradient(180deg, rgba(255,253,249,.98), rgba(247,253,249,.96));
+    border: 1px solid rgba(32,134,75,.16);
     border-radius: 8px;
-    box-shadow: 0 10px 26px rgba(20, 28, 35, .06);
+    box-shadow: 0 14px 30px rgba(18, 32, 22, .07);
     padding: 24px;
   }
-  .request-copy h3 { color: var(--ink); font-size: 22px; line-height: 1.22; margin-bottom: 10px; }
+  .request-copy h3 { color: var(--ink); font-size: 24px; line-height: 1.14; margin-bottom: 10px; font-weight: 900; }
   .request-steps {
     list-style: none;
     display: grid;
@@ -449,7 +509,7 @@
     display: grid;
     gap: 13px;
   }
-  .lead-form h3 { color: var(--ink); font-size: 22px; line-height: 1.22; }
+  .lead-form h3 { color: var(--ink); font-size: 24px; line-height: 1.14; font-weight: 900; }
   .form-row {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -497,8 +557,9 @@
     gap: 18px;
     padding: 28px;
     border-radius: 8px;
-    background: #fffdf9;
-    border: 1px solid var(--line);
+    background:
+      linear-gradient(135deg, rgba(234,247,239,.96), rgba(255,253,249,.98) 58%, rgba(220,236,245,.58));
+    border: 1px solid rgba(32,134,75,.18);
     box-shadow: var(--shadow);
   }
   .final-cta h2 { margin-bottom: 6px; }
@@ -548,6 +609,7 @@
     .lead { font-size: 16px; }
     .btn { width: 100%; white-space: normal; text-align: center; }
     .hero-point { width: 100%; }
+    .proof-item { grid-template-columns: 54px 1fr; }
     .form-row,
     .contact-actions { grid-template-columns: 1fr; }
     .section { padding: 42px 0; }
@@ -604,16 +666,47 @@
   <section class="section compact" aria-label="Кратко о сервисе">
     <div class="proof-strip">
       <div class="proof-item">
-        <strong>2 файла</strong>
-        <span class="muted">акт организации и акт контрагента</span>
+        <div class="sverk-icon small" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M18 17h25l7 7v31H18V17Z"/>
+            <path class="fill-mint" d="M28 25h24l6 6v28H28V25Z"/>
+            <path class="stroke-main" d="M18 17h25l7 7v31H18V17ZM28 25h24l6 6v28H28V25Z"/>
+            <path class="stroke-soft" d="M43 17v8h7M52 25v7h6M26 35h15M26 42h12"/>
+          </svg>
+        </div>
+        <div>
+          <strong>2 файла</strong>
+          <span class="muted">акт организации и акт контрагента</span>
+        </div>
       </div>
       <div class="proof-item">
-        <strong>1 список</strong>
-        <span class="muted">проверяемые расхождения вместо ручной сверки строк</span>
+        <div class="sverk-icon small" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <rect class="fill-pale" x="18" y="14" width="36" height="44" rx="7"/>
+            <path class="fill-mint" d="M25 22h22v7H25z"/>
+            <rect class="stroke-main" x="18" y="14" width="36" height="44" rx="7"/>
+            <path class="stroke-main" d="M26 37l4 4 8-9"/>
+            <path class="stroke-soft" d="M28 49h17M25 26h22"/>
+          </svg>
+        </div>
+        <div>
+          <strong>1 список</strong>
+          <span class="muted">проверяемые расхождения вместо ручной сверки строк</span>
+        </div>
       </div>
       <div class="proof-item">
-        <strong>Честный MVP</strong>
-        <span class="muted">Excel надежнее PDF, результат требует проверки</span>
+        <div class="sverk-icon small" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M36 13l23 9v15c0 13-9 22-23 26-14-4-23-13-23-26V22l23-9Z"/>
+            <path class="fill-mint" d="M36 21l14 6v10c0 8-5 14-14 17-9-3-14-9-14-17V27l14-6Z"/>
+            <path class="stroke-main" d="M36 13l23 9v15c0 13-9 22-23 26-14-4-23-13-23-26V22l23-9Z"/>
+            <path class="stroke-main" d="M27 37l6 6 13-15"/>
+          </svg>
+        </div>
+        <div>
+          <strong>Честный MVP</strong>
+          <span class="muted">Excel надежнее PDF, результат требует проверки</span>
+        </div>
       </div>
     </div>
   </section>
@@ -626,32 +719,79 @@
     </div>
     <div class="check-grid">
       <article class="check-card">
-        <div class="check-mark">1</div>
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M18 18h27l8 8v27H18V18Z"/>
+            <path class="fill-mint" d="M27 27h29v27H27V27Z"/>
+            <path class="stroke-main" d="M18 18h27l8 8v27H18V18Z"/>
+            <path class="stroke-soft" d="M45 18v9h8M25 36h17M25 43h12"/>
+            <path class="stroke-main" d="M44 48l5 5 10-12"/>
+          </svg>
+        </div>
         <h3>Отсутствующие документы</h3>
         <p class="muted">Документ есть у одной стороны, но не найден у другой.</p>
       </article>
       <article class="check-card">
-        <div class="check-mark">2</div>
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <ellipse class="fill-amber" cx="36" cy="22" rx="19" ry="8"/>
+            <path class="fill-pale" d="M17 22v21c0 4.5 8.5 8 19 8s19-3.5 19-8V22"/>
+            <ellipse class="stroke-main" cx="36" cy="22" rx="19" ry="8"/>
+            <path class="stroke-main" d="M17 22v21c0 4.5 8.5 8 19 8s19-3.5 19-8V22"/>
+            <path class="stroke-soft" d="M17 33c0 4.5 8.5 8 19 8s19-3.5 19-8M30 20h12M33 29h6"/>
+          </svg>
+        </div>
         <h3>Отличия в суммах</h3>
         <p class="muted">Похожий документ найден, но дебет, кредит или итоговая сумма отличаются.</p>
       </article>
       <article class="check-card">
-        <div class="check-mark">3</div>
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <rect class="fill-blue" x="15" y="19" width="42" height="37" rx="7"/>
+            <path class="fill-mint" d="M15 29h42v8H15z"/>
+            <rect class="stroke-main" x="15" y="19" width="42" height="37" rx="7"/>
+            <path class="stroke-main" d="M15 30h42M26 15v8M46 15v8"/>
+            <path class="stroke-soft" d="M25 42h6M38 42h6M25 49h6M38 49h6"/>
+          </svg>
+        </div>
         <h3>Отличия в датах</h3>
         <p class="muted">Операция похожа по смыслу, но проведена другой датой.</p>
       </article>
       <article class="check-card">
-        <div class="check-mark">4</div>
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M36 15v42M24 57h24"/>
+            <path class="stroke-main" d="M36 15v42M24 57h24M18 25h36"/>
+            <path class="stroke-main" d="M22 25l-9 18h18l-9-18ZM50 25l-9 18h18l-9-18Z"/>
+            <path class="fill-mint" d="M13 43h18c-1 5-4 8-9 8s-8-3-9-8ZM41 43h18c-1 5-4 8-9 8s-8-3-9-8Z"/>
+            <path class="stroke-soft" d="M22 25l14-4 14 4"/>
+          </svg>
+        </div>
         <h3>Сальдо и обороты</h3>
         <p class="muted">Сверка показывает расхождение итогов и помогает понять его источник.</p>
       </article>
       <article class="check-card">
-        <div class="check-mark">5</div>
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M17 25h31l7 7-7 7H17V25Z"/>
+            <path class="fill-mint" d="M55 47H24l-7-7 7-7h31v14Z"/>
+            <path class="stroke-main" d="M17 25h31l7 7-7 7H17M55 47H24l-7-7 7-7h31"/>
+            <path class="stroke-soft" d="M27 32h14M31 40h14"/>
+          </svg>
+        </div>
         <h3>Направление операций</h3>
         <p class="muted">Зеркальные и неправильно направленные операции выносятся отдельно.</p>
       </article>
       <article class="check-card">
-        <div class="check-mark">6</div>
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M20 17h32v39H20z"/>
+            <path class="fill-mint" d="M27 13h18v9H27z"/>
+            <path class="stroke-main" d="M20 17h32v39H20zM27 13h18v9H27z"/>
+            <path class="stroke-main" d="M28 33l4 4 8-9"/>
+            <path class="stroke-soft" d="M28 45h17M28 50h12"/>
+          </svg>
+        </div>
         <h3>Приоритет проверки</h3>
         <p class="muted">Расхождения группируются, чтобы сначала смотреть критичные позиции.</p>
       </article>
@@ -683,6 +823,15 @@
     </div>
     <div class="two-col">
       <article class="format-card primary">
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M18 14h29l8 8v36H18V14Z"/>
+            <path class="fill-mint" d="M24 30h25v20H24V30Z"/>
+            <path class="stroke-main" d="M18 14h29l8 8v36H18V14Z"/>
+            <path class="stroke-soft" d="M47 14v9h8M24 36h25M24 43h25M32 30v20M41 30v20"/>
+            <path class="stroke-main" d="M24 30h25v20H24V30Z"/>
+          </svg>
+        </div>
         <span class="tag green">Основной формат</span>
         <h3>Excel .xlsx и .xls</h3>
         <ul class="format-list">
@@ -692,6 +841,15 @@
         </ul>
       </article>
       <article class="format-card caution">
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-cream" d="M18 14h29l8 8v36H18V14Z"/>
+            <path class="fill-amber" d="M24 38h29v12H24z"/>
+            <path class="stroke-main" d="M18 14h29l8 8v36H18V14Z"/>
+            <path class="stroke-soft" d="M47 14v9h8M25 28h17"/>
+            <path class="stroke-main" d="M28 46h3M36 46h4M45 46h3"/>
+          </svg>
+        </div>
         <span class="tag amber">После входа</span>
         <h3>PDF-файлы</h3>
         <ul class="format-list">
@@ -711,6 +869,15 @@
       </div>
       <div class="two-col">
         <article class="access-card">
+          <div class="sverk-icon" aria-hidden="true">
+            <svg viewBox="0 0 72 72" fill="none">
+              <path class="fill-pale" d="M17 42h38v15H17V42Z"/>
+              <path class="fill-mint" d="M26 16h20v24H26V16Z"/>
+              <path class="stroke-main" d="M17 42h38v15H17V42ZM26 16h20v24H26V16Z"/>
+              <path class="stroke-main" d="M36 25v18M28 35l8 8 8-8"/>
+              <path class="stroke-soft" d="M25 50h22"/>
+            </svg>
+          </div>
           <span class="tag green">Гостевой режим</span>
           <h3>Попробовать Excel-сверку</h3>
           <ul class="access-list">
@@ -720,6 +887,15 @@
           </ul>
         </article>
         <article class="access-card">
+          <div class="sverk-icon" aria-hidden="true">
+            <svg viewBox="0 0 72 72" fill="none">
+              <rect class="fill-pale" x="18" y="31" width="36" height="26" rx="7"/>
+              <path class="fill-mint" d="M26 31v-7c0-7 4-12 10-12s10 5 10 12v7"/>
+              <rect class="stroke-main" x="18" y="31" width="36" height="26" rx="7"/>
+              <path class="stroke-main" d="M26 31v-7c0-7 4-12 10-12s10 5 10 12v7M36 42v6"/>
+              <path class="stroke-soft" d="M30 50h12"/>
+            </svg>
+          </div>
           <span class="tag">Тестовый доступ</span>
           <h3>Войти с выданным ключом</h3>
           <ul class="access-list">
@@ -740,6 +916,16 @@
     </div>
     <div class="request-grid">
       <article class="request-copy">
+        <div class="sverk-icon" aria-hidden="true">
+          <svg viewBox="0 0 72 72" fill="none">
+            <path class="fill-pale" d="M20 16h32v42H20V16Z"/>
+            <path class="fill-mint" d="M27 12h18v10H27V12Z"/>
+            <circle class="fill-amber" cx="50" cy="48" r="9"/>
+            <path class="stroke-main" d="M20 16h32v42H20V16ZM27 12h18v10H27V12Z"/>
+            <path class="stroke-main" d="M29 34h14M29 41h10M45 48l3 3 7-8"/>
+            <path class="stroke-soft" d="M29 29h14"/>
+          </svg>
+        </div>
         <span class="tag green">Как протестировать</span>
         <h3>Нужны два акта сверки и 10 минут обратной связи</h3>
         <p class="muted">Лучше начать с Excel: так проще понять, где SverkAI уже экономит время, а где нужен ручной разбор.</p>
