@@ -1802,6 +1802,37 @@ def _money_formula_term(value) -> str:
     return f"{sign} {_money_plain(abs(amount))}"
 
 
+def _json_money(value) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            if pd.notna(value):
+                return round(float(value), 2)
+        except Exception:
+            return None
+    text = str(value).strip()
+    if not text or text.lower() in {'null', 'none', 'nan', '-'}:
+        return None
+    try:
+        cleaned = (
+            text.replace('\u2212', '-')
+            .replace('\xa0', ' ')
+            .replace(' ', '')
+            .replace(',', '.')
+        )
+        return round(float(cleaned), 2)
+    except Exception:
+        return None
+
+
+def _json_date(value):
+    if not value:
+        return None
+    parsed = pd.to_datetime(value, dayfirst=True, errors='coerce')
+    return parsed if pd.notna(parsed) else None
+
+
 def _row_balance_effect(row) -> float:
     signed = _safe_float(row.get('signed_amount'))
     if signed is not None:
@@ -1874,6 +1905,40 @@ def _make_balance_reason(title: str, items: list[dict], check: str, *, kind: str
         'sides': sides,
         'rows': [{'side': item['side'], 'raw_row': item['raw_row']} for item in items],
         'order': order,
+    }
+
+
+def _balance_unmatched_items(df1: pd.DataFrame, df2: pd.DataFrame, result: dict) -> tuple[list[dict], list[dict], list[dict]]:
+    unmatched1 = _collect_balance_unmatched_rows(df1, result.get('missing_rows1', []), 'doc1')
+    unmatched2 = _collect_balance_unmatched_rows(df2, result.get('missing_rows2', []), 'doc2')
+    return unmatched1, unmatched2, unmatched1 + unmatched2
+
+
+def _balance_complex_evidence(df1: pd.DataFrame, df2: pd.DataFrame, result: dict) -> dict:
+    summary = result.get('summary', {})
+    total_disc = int(summary.get('total_discrepancies', 0) or 0)
+    _, _, unmatched = _balance_unmatched_items(df1, df2, result)
+    repeated_doc_groups = {}
+    for item in unmatched:
+        if item.get('doc_num'):
+            repeated_doc_groups.setdefault(item['doc_num'], []).append(item)
+    has_zero_detail_group = any(
+        len(items) >= 8 and abs(round(sum(float(i.get('effect') or 0.0) for i in items), 2)) <= 0.01
+        for items in repeated_doc_groups.values()
+    )
+    row_ratio = min(len(df1), len(df2)) / max(len(df1), len(df2), 1)
+    complex_case = (
+        total_disc >= 30
+        and len(unmatched) >= 30
+        and (has_zero_detail_group or row_ratio <= 0.8)
+    )
+    return {
+        'total_discrepancies': total_disc,
+        'unmatched_rows': len(unmatched),
+        'has_zero_detail_group': has_zero_detail_group,
+        'row_count_ratio': round(row_ratio, 4),
+        'complex_case': complex_case,
+        'repeated_doc_groups': repeated_doc_groups,
     }
 
 
@@ -2003,6 +2068,262 @@ def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[st
         return fallback, 'deterministic'
 
 
+def _rows_preview_for_balance_recovery(df: pd.DataFrame, limit: int = 35) -> str:
+    if df is None or df.empty:
+        return ''
+    cols = [c for c in ('date_str', 'document', 'doc_num', 'debit', 'credit', 'signed_amount') if c in df.columns]
+    if not cols:
+        return ''
+    sample = df[cols].head(limit).copy()
+    return sample.to_string(index=False, max_colwidth=90)
+
+
+def _excel_text_for_balance_recovery(path: str, max_chars: int = 12000) -> str:
+    try:
+        sheets = pd.read_excel(path, header=None, dtype=str, sheet_name=None)
+    except Exception:
+        return ''
+    parts = []
+    for sheet_name, raw in list(sheets.items())[:3]:
+        if raw is None or raw.empty:
+            continue
+        rows = []
+        indexes = list(range(min(len(raw), 70)))
+        if len(raw) > 90:
+            indexes += list(range(max(70, len(raw) - 35), len(raw)))
+        seen = set()
+        for idx in indexes:
+            if idx in seen or idx >= len(raw):
+                continue
+            seen.add(idx)
+            values = [
+                str(v).strip()
+                for v in raw.iloc[idx].tolist()
+                if pd.notna(v) and str(v).strip() and str(v).strip().lower() != 'nan'
+            ]
+            if values:
+                rows.append(f"{idx + 1}: " + " | ".join(values))
+        if rows:
+            parts.append(f"Лист: {sheet_name}\n" + "\n".join(rows))
+    return "\n\n".join(parts)[:max_chars]
+
+
+def _pdf_text_for_balance_recovery(path: str, max_chars: int = 12000) -> str:
+    try:
+        with pdfplumber.open(path) as pdf:
+            page_count = len(pdf.pages)
+            page_indexes = list(range(min(page_count, 3)))
+            if page_count > 3:
+                page_indexes += list(range(max(3, page_count - 2), page_count))
+            parts = []
+            seen = set()
+            for idx in page_indexes:
+                if idx in seen:
+                    continue
+                seen.add(idx)
+                text = pdf.pages[idx].extract_text() or ''
+                if text.strip():
+                    parts.append(f"Страница {idx + 1}:\n{text.strip()}")
+            return "\n\n".join(parts)[:max_chars]
+    except Exception:
+        return ''
+
+
+def _source_text_for_balance_recovery(df: pd.DataFrame, max_chars: int = 12000) -> str:
+    attrs = getattr(df, 'attrs', {}) or {}
+    direct = attrs.get('balance_recovery_text') or attrs.get('source_text')
+    if direct:
+        return str(direct)[:max_chars]
+    path = attrs.get('source_path')
+    if not path:
+        return _rows_preview_for_balance_recovery(df)[:max_chars]
+    ext = Path(str(path)).suffix.lower()
+    if ext == '.pdf':
+        text = _pdf_text_for_balance_recovery(str(path), max_chars=max_chars)
+    elif ext in ('.xlsx', '.xls'):
+        text = _excel_text_for_balance_recovery(str(path), max_chars=max_chars)
+    else:
+        text = ''
+    if not text:
+        text = _rows_preview_for_balance_recovery(df)
+    return text[:max_chars]
+
+
+def _ai_recover_balance_basis(df1: pd.DataFrame, df2: pd.DataFrame, summary: dict, client) -> Optional[dict]:
+    context = {
+        'current_summary': {
+            'opening_balance_doc1': summary.get('opening_balance_doc1'),
+            'opening_balance_doc2': summary.get('opening_balance_doc2'),
+            'closing_balance_doc1': summary.get('closing_balance_doc1'),
+            'closing_balance_doc2': summary.get('closing_balance_doc2'),
+            'opening_balance_difference': summary.get('opening_balance_difference'),
+            'closing_balance_difference': summary.get('closing_balance_difference'),
+        },
+        'doc1': {
+            'parser': getattr(df1, 'attrs', {}).get('parser_label') or getattr(df1, 'attrs', {}).get('parser_id'),
+            'filename': getattr(df1, 'attrs', {}).get('source_name'),
+            'text': _source_text_for_balance_recovery(df1),
+            'rows_preview': _rows_preview_for_balance_recovery(df1),
+        },
+        'doc2': {
+            'parser': getattr(df2, 'attrs', {}).get('parser_label') or getattr(df2, 'attrs', {}).get('parser_id'),
+            'filename': getattr(df2, 'attrs', {}).get('source_name'),
+            'text': _source_text_for_balance_recovery(df2),
+            'rows_preview': _rows_preview_for_balance_recovery(df2),
+        },
+    }
+    prompt = (
+        "Нужно восстановить только числовую базу сальдо из двух актов сверки. "
+        "Не анализируй причины расхождений и не придумывай суммы. "
+        "Найди строки сальдо начальное и сальдо конечное для каждого документа. "
+        "Если знак явно указан, верни сумму со знаком; если знак не указан, верни сумму как положительное число. "
+        "Если значение не найдено надежно, верни null. "
+        "Верни только JSON без markdown в формате:\n"
+        "{\n"
+        '  "doc1": {"opening_balance": 123.45, "closing_balance": 234.56, '
+        '"period_from": "ДД.ММ.ГГГГ или null", "period_to": "ДД.ММ.ГГГГ или null", '
+        '"evidence": {"opening": "короткая цитата строки", "closing": "короткая цитата строки"}},\n'
+        '  "doc2": {"opening_balance": 123.45, "closing_balance": 234.56, '
+        '"period_from": "ДД.ММ.ГГГГ или null", "period_to": "ДД.ММ.ГГГГ или null", '
+        '"evidence": {"opening": "короткая цитата строки", "closing": "короткая цитата строки"}}\n'
+        "}\n\n"
+        f"Данные:\n{json.dumps(context, ensure_ascii=False)[:28000]}"
+    )
+    msg = client.messages.create(
+        model=MODEL_MAIN,
+        max_tokens=1600,
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    response_text = '\n'.join(getattr(block, 'text', '') for block in msg.content if getattr(block, 'text', ''))
+    payload = _extract_json_payload(response_text)
+    return payload if isinstance(payload, dict) else None
+
+
+def _maybe_recover_balance_basis_with_ai(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, client, cfg: dict, log) -> bool:
+    summary = result.get('summary', {})
+    missing_basis = any(summary.get(key) is None for key in (
+        'opening_balance_difference',
+        'closing_balance_difference',
+        'transaction_net_difference',
+    ))
+    if not missing_basis:
+        return False
+
+    evidence = _balance_complex_evidence(df1, df2, result)
+    forced = bool(cfg.get('force_balance_reason_analysis'))
+    should_try = forced or (evidence['total_discrepancies'] >= 30 and evidence['unmatched_rows'] >= 30)
+    if not should_try:
+        return False
+
+    summary['balance_basis_recovery'] = {
+        'attempted': False,
+        'available': False,
+        'method': 'ai',
+        'reason': 'api_key_required' if not client else 'not_started',
+        'trigger_evidence': {k: v for k, v in evidence.items() if k != 'repeated_doc_groups'},
+    }
+    if not client:
+        log("AI-восстановление сальдо недоступно: нет API-ключа.")
+        return False
+
+    try:
+        log("Пробую AI-восстановление начального и конечного сальдо...")
+        payload = _ai_recover_balance_basis(df1, df2, summary, client)
+    except Exception as exc:
+        summary['balance_basis_recovery'].update({'attempted': True, 'reason': f'ai_error: {exc}'})
+        log(f"AI-восстановление сальдо не удалось: {exc}")
+        return False
+
+    doc1 = payload.get('doc1') if isinstance(payload, dict) else None
+    doc2 = payload.get('doc2') if isinstance(payload, dict) else None
+    if not isinstance(doc1, dict) or not isinstance(doc2, dict):
+        summary['balance_basis_recovery'].update({'attempted': True, 'reason': 'invalid_json_shape'})
+        return False
+
+    start1 = summary.get('opening_balance_doc1')
+    start2 = summary.get('opening_balance_doc2')
+    end1 = summary.get('closing_balance_doc1')
+    end2 = summary.get('closing_balance_doc2')
+    recovered = {
+        'opening_balance_doc1': _json_money(doc1.get('opening_balance')),
+        'opening_balance_doc2': _json_money(doc2.get('opening_balance')),
+        'closing_balance_doc1': _json_money(doc1.get('closing_balance')),
+        'closing_balance_doc2': _json_money(doc2.get('closing_balance')),
+    }
+    start1 = start1 if start1 is not None else recovered['opening_balance_doc1']
+    start2 = start2 if start2 is not None else recovered['opening_balance_doc2']
+    end1 = end1 if end1 is not None else recovered['closing_balance_doc1']
+    end2 = end2 if end2 is not None else recovered['closing_balance_doc2']
+    if any(v is None for v in (start1, start2, end1, end2)):
+        summary['balance_basis_recovery'].update({
+            'attempted': True,
+            'reason': 'incomplete_balance_values',
+            'raw_values': recovered,
+        })
+        return False
+
+    opening_diff = round(float(start1) - float(start2), 2)
+    closing_diff = round(float(end1) - float(end2), 2)
+    movement_diff = round(closing_diff - opening_diff, 2)
+    if abs(round(opening_diff + movement_diff - closing_diff, 2)) > 0.01:
+        summary['balance_basis_recovery'].update({'attempted': True, 'reason': 'formula_check_failed'})
+        return False
+
+    summary.update({
+        'opening_balance_doc1': round(float(start1), 2),
+        'opening_balance_doc2': round(float(start2), 2),
+        'closing_balance_doc1': round(float(end1), 2),
+        'closing_balance_doc2': round(float(end2), 2),
+        'opening_balance_difference': opening_diff,
+        'closing_balance_difference': closing_diff,
+        'transaction_net_difference': movement_diff,
+        'balance_basis_recovered': True,
+    })
+    p1_from = _json_date(doc1.get('period_from'))
+    p1_to = _json_date(doc1.get('period_to'))
+    p2_from = _json_date(doc2.get('period_from'))
+    p2_to = _json_date(doc2.get('period_to'))
+    if not summary.get('period_doc1') and (p1_from is not None or p1_to is not None):
+        summary['period_doc1'] = (
+            f"{p1_from.strftime('%d.%m.%Y')} - {p1_to.strftime('%d.%m.%Y')}"
+            if p1_from is not None and p1_to is not None else
+            (p1_to or p1_from).strftime('%d.%m.%Y')
+        )
+    if not summary.get('period_doc2') and (p2_from is not None or p2_to is not None):
+        summary['period_doc2'] = (
+            f"{p2_from.strftime('%d.%m.%Y')} - {p2_to.strftime('%d.%m.%Y')}"
+            if p2_from is not None and p2_to is not None else
+            (p2_to or p2_from).strftime('%d.%m.%Y')
+        )
+    if not summary.get('period') and summary.get('period_doc1') and summary.get('period_doc1') == summary.get('period_doc2'):
+        summary['period'] = summary['period_doc1']
+    summary['period_mismatch'] = bool(
+        summary.get('period_doc1') and summary.get('period_doc2') and summary.get('period_doc1') != summary.get('period_doc2')
+    )
+    period_text = summary.get('period') or ''
+    net_period = 0.0 if abs(closing_diff) < 0.01 else closing_diff
+    summary['net_period'] = net_period
+    if abs(net_period) < 0.01:
+        summary['debt_label'] = f'Взаиморасчёты совпадают (за период {period_text})' if period_text else 'Взаиморасчёты совпадают'
+    elif net_period > 0:
+        summary['debt_label'] = f'Расхождение конечного сальдо в пользу организации: {net_period:,.2f} руб. (за период {period_text})'
+    else:
+        summary['debt_label'] = f'Расхождение конечного сальдо в пользу контрагента: {abs(net_period):,.2f} руб. (за период {period_text})'
+    summary['balance_basis_recovery'].update({
+        'attempted': True,
+        'available': True,
+        'reason': 'ok',
+        'formula': f"{_money_signed_plain(opening_diff)} {_money_formula_term(movement_diff)} = {_money_signed_plain(closing_diff)}",
+        'evidence': {
+            'doc1': doc1.get('evidence') or {},
+            'doc2': doc2.get('evidence') or {},
+        },
+    })
+    log("AI-восстановление сальдо выполнено и прошло арифметическую проверку.")
+    return True
+
+
 def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, client=None, cfg=None) -> Optional[dict]:
     cfg = cfg or DEFAULT_RECON_SETTINGS
     summary = result.get('summary', {})
@@ -2013,9 +2334,7 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
         return None
 
     total_disc = int(summary.get('total_discrepancies', 0) or 0)
-    unmatched1 = _collect_balance_unmatched_rows(df1, result.get('missing_rows1', []), 'doc1')
-    unmatched2 = _collect_balance_unmatched_rows(df2, result.get('missing_rows2', []), 'doc2')
-    unmatched = unmatched1 + unmatched2
+    unmatched1, unmatched2, unmatched = _balance_unmatched_items(df1, df2, result)
     if not unmatched:
         return None
 
@@ -2024,20 +2343,11 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
         for df in (df1, df2)
     ]
     forced = bool(cfg.get('force_balance_reason_analysis'))
-    repeated_doc_groups = {}
-    for item in unmatched:
-        if item.get('doc_num'):
-            repeated_doc_groups.setdefault(item['doc_num'], []).append(item)
-    has_zero_detail_group = any(
-        len(items) >= 8 and abs(round(sum(float(i.get('effect') or 0.0) for i in items), 2)) <= 0.01
-        for items in repeated_doc_groups.values()
-    )
-    row_ratio = min(len(df1), len(df2)) / max(len(df1), len(df2), 1)
-    complex_case = (
-        total_disc >= 30
-        and len(unmatched) >= 30
-        and (has_zero_detail_group or row_ratio <= 0.8)
-    )
+    evidence = _balance_complex_evidence(df1, df2, result)
+    repeated_doc_groups = evidence['repeated_doc_groups']
+    has_zero_detail_group = evidence['has_zero_detail_group']
+    row_ratio = evidence['row_count_ratio']
+    complex_case = evidence['complex_case']
     if not (complex_case or forced):
         return None
 
@@ -2091,7 +2401,7 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
             'total_discrepancies': total_disc,
             'unmatched_rows': len(unmatched),
             'has_zero_detail_group': has_zero_detail_group,
-            'row_count_ratio': round(row_ratio, 4),
+            'row_count_ratio': row_ratio,
         },
         'technical_discrepancies_count': total_disc,
         'opening_balance_difference': round(float(opening), 2),
@@ -2106,6 +2416,7 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
         'explained_movement': explained_total,
         'unexplained_difference': unexplained,
         'parser_ids': parser_ids,
+        'basis_recovery': summary.get('balance_basis_recovery'),
     }
     explanation, source = _maybe_ai_balance_explanation(analysis, client, cfg)
     analysis['explanation'] = explanation
@@ -2694,6 +3005,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         'date_diff_rows2': list({r2['raw_row'] for r1,r2 in exact_pairs+fuzzy_matches
             if pd.notna(r1.get('date')) and pd.notna(r2.get('date')) and abs((r1['date']-r2['date']).days) > 0}),
     }
+    _maybe_recover_balance_basis_with_ai(df1, df2, result, client, cfg, log)
     balance_analysis = _build_balance_reason_analysis(df1, df2, result, client, cfg)
     if balance_analysis:
         summary['balance_reason_analysis'] = balance_analysis
@@ -2971,6 +3283,8 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
             df = parser_fn(path)
         except Exception:
             return
+        df.attrs['source_path'] = path
+        df.attrs['source_name'] = cache_name
         candidate = _make_parse_candidate(df, parse_type, label, parser_id, bonus)
         if candidate:
             candidates.append(candidate)
@@ -3039,6 +3353,8 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
     if profile and profile.get('confidence') != 'low':
         try:
             df = parse_with_profile(path, profile)
+            df.attrs['source_path'] = path
+            df.attrs['source_name'] = cache_name
             confidence = profile.get('confidence', 'medium')
             label = 'Кеш профиля' if profile_source == 'cache' else f'Автодетект AI ({confidence})'
             ai_bonus = 18 if profile_source == 'cache' else 10

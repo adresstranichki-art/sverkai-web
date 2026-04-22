@@ -2206,7 +2206,8 @@ function renderBalanceAnalysis(s){
   const card=document.getElementById('balance-analysis-card');
   if(!analysis||!analysis.enabled){card.style.display='none';return;}
   card.style.display='block';
-  document.getElementById('balance-analysis-mode').textContent=`${analysis.technical_discrepancies_count||0} технических строк`;
+  const recovered=analysis.basis_recovery?.available;
+  document.getElementById('balance-analysis-mode').textContent=`${analysis.technical_discrepancies_count||0} технических строк${recovered?' · сальдо восстановлено AI':''}`;
   document.getElementById('balance-formula').innerHTML=`
     <div class="balance-formula-item"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
     <div class="balance-formula-item"><div class="k">Влияние движений периода</div><div class="v ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
@@ -2281,8 +2282,7 @@ function renderWindowSuggestion(s){
 function canOfferExpertAnalysis(s){
   if(!s||isExpertSummary(s)||!file1||!file2)return false;
   if((s.total_discrepancies||0)<=0)return false;
-  return ['opening_balance_difference','transaction_net_difference','closing_balance_difference']
-    .every(key=>Number.isFinite(Number(s[key])));
+  return true;
 }
 
 function renderExpertSuggestion(s){
@@ -2296,8 +2296,12 @@ function renderExpertSuggestion(s){
     btn.onclick=null;
     return;
   }
+  const hasBasis=['opening_balance_difference','transaction_net_difference','closing_balance_difference']
+    .every(key=>Number.isFinite(Number(s[key])));
   text.textContent='Не согласны с результатами обычной сверки? Можно переключить текущие файлы в экспертный режим и посмотреть причины через влияние на конечное сальдо.';
-  meta.textContent='Суммы и формула будут пересчитаны программно; при доступном AI-ключе объяснение сформируется расширенно.';
+  meta.textContent=hasBasis
+    ? 'Суммы и формула будут пересчитаны программно; при доступном AI-ключе объяснение сформируется расширенно.'
+    : 'Если сальдо не найдено обычным парсером, программа сначала попробует восстановить его через AI и проверит формулу.';
   btn.textContent='Воспользоваться экспертным режимом';
   btn.onclick=forceExpertAnalysis;
   card.style.display='block';

@@ -1,4 +1,5 @@
 import importlib
+import json
 import sys
 import tempfile
 import types
@@ -629,6 +630,72 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertTrue(analysis['forced'])
         self.assertEqual(analysis['primary_tab'], 'summary')
         self.assertAlmostEqual(analysis['period_movement_difference'], -100.0, places=2)
+
+    def test_forced_balance_reason_analysis_recovers_missing_balances_with_ai(self):
+        pd = self.main.pd
+
+        def make_row(raw_row, document, doc_num, effect):
+            amount = abs(effect)
+            return {
+                'date': pd.to_datetime('31.03.2026', dayfirst=True),
+                'date_str': '31.03.2026',
+                'document': document,
+                'doc_num': doc_num,
+                'debit': amount if effect < 0 else None,
+                'credit': amount if effect > 0 else None,
+                'signed_amount': effect,
+                'raw_row': raw_row,
+            }
+
+        df1 = pd.DataFrame([make_row(0, 'Принято (1 от 31.03.2026)', '1', -100.0)])
+        df2 = pd.DataFrame([make_row(0, 'Оплата (2 от 31.03.2026)', '2', 50.0)])
+        df1.attrs['parser_id'] = 'standard_act'
+        df2.attrs['parser_id'] = 'standard_act'
+
+        class FakeMessages:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, *args, **kwargs):
+                self.calls += 1
+                payload = {
+                    'doc1': {
+                        'opening_balance': 1000,
+                        'closing_balance': 1200,
+                        'period_from': '01.03.2026',
+                        'period_to': '31.03.2026',
+                        'evidence': {'opening': 'Сальдо начальное 1 000,00', 'closing': 'Сальдо конечное 1 200,00'},
+                    },
+                    'doc2': {
+                        'opening_balance': 900,
+                        'closing_balance': 1050,
+                        'period_from': '01.03.2026',
+                        'period_to': '31.03.2026',
+                        'evidence': {'opening': 'Сальдо начальное 900,00', 'closing': 'Сальдо конечное 1 050,00'},
+                    },
+                }
+                return types.SimpleNamespace(content=[types.SimpleNamespace(text=json.dumps(payload, ensure_ascii=False))])
+
+        class FakeClient:
+            def __init__(self):
+                self.messages = FakeMessages()
+
+        client = FakeClient()
+        cfg = {**self.cfg, 'force_balance_reason_analysis': True, 'ai_comment': False}
+        logs = []
+        result = self.main._reconcile_structured(df1, df2, 'generic_detected', 'generic_detected', client, logs.append, cfg)
+        summary = result['summary']
+        analysis = summary['balance_reason_analysis']
+
+        self.assertEqual(summary['result_mode'], 'balance_reason_analysis')
+        self.assertTrue(summary['balance_basis_recovered'])
+        self.assertTrue(summary['balance_basis_recovery']['available'])
+        self.assertEqual(analysis['trigger'], 'manual_balance_reason_analysis')
+        self.assertTrue(analysis['basis_recovery']['available'])
+        self.assertAlmostEqual(analysis['opening_balance_difference'], 100.0, places=2)
+        self.assertAlmostEqual(analysis['closing_balance_difference'], 150.0, places=2)
+        self.assertAlmostEqual(analysis['period_movement_difference'], 50.0, places=2)
+        self.assertEqual(client.messages.calls, 1)
 
 
 class AuthKeyTests(unittest.TestCase):
