@@ -414,11 +414,13 @@
   tr.row-amount td  { background: #fff0c9 !important; }
   tr.row-sign td    { background: #e3effa !important; }
   tr.row-date td    { background: #ececec !important; }
+  tr.row-expert td  { background: #edf7ef !important; box-shadow: inset 3px 0 0 rgba(31,122,67,.55); }
   tr.row-focus td   { background: #dff3e6 !important; box-shadow: inset 0 0 0 2px var(--green); }
   tr.row-missing:hover td { background: #f8d4d4 !important; }
   tr.row-amount:hover td  { background: #ffe7ad !important; }
   tr.row-sign:hover td    { background: #d7e8f7 !important; }
   tr.row-date:hover td    { background: #dfdfdf !important; }
+  tr.row-expert:hover td  { background: #dff1e5 !important; }
   .empty-state { padding: 40px; text-align: center; color: var(--muted); font-size: 14px; background: white; }
 
   .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding: 10px 14px 0; }
@@ -525,8 +527,13 @@
   .balance-explain p { margin-bottom: 8px; }
   .balance-explain ul,.balance-explain ol { padding-left: 20px; margin: 8px 0; }
   .balance-explain li { margin-bottom: 4px; }
-  .balance-explain h1,.balance-explain h2,.balance-explain h3 { font-size: 15px; margin: 10px 0 6px; color: var(--green-dk); }
+  .balance-explain h1,.balance-explain h2,.balance-explain h3,.balance-explain h4,.balance-explain h5,.balance-explain h6 { font-size: 15px; margin: 12px 0 6px; color: var(--green-dk); }
   .balance-explain strong { font-weight: 800; color: var(--green-dk); }
+  .balance-explain hr { border: 0; border-top: 1px solid #dfe8df; margin: 12px 0; }
+  .balance-explain table { width: 100%; border-collapse: collapse; margin: 10px 0 12px; font-size: 13px; }
+  .balance-explain th,.balance-explain td { border: 1px solid #dfe8df; padding: 7px 9px; text-align: left; vertical-align: top; }
+  .balance-explain th { background: #f3f8f4; color: var(--green-dk); font-weight: 800; }
+  .balance-explain blockquote { margin: 9px 0; padding: 8px 12px; border-left: 3px solid var(--green); background: #f6faf6; color: var(--text); }
   .balance-section-title { font-size: 12px; font-weight: 800; color: var(--text); text-transform: uppercase; letter-spacing: .5px; margin: 14px 0 8px; }
   .balance-reason-list { display: grid; gap: 8px; }
   .balance-reason-row { display: grid; grid-template-columns: minmax(180px,1fr) 140px 90px minmax(220px,1.2fr); gap: 10px; align-items: start; border-top: 1px solid #edf1ec; padding: 10px 0; }
@@ -1871,6 +1878,7 @@ function renderTable(num,td,hl,rawRowsOverride){
   const h=hl||{};
   const missing=new Set(num===1?h.missing1:h.missing2),amt=new Set(num===1?h.amt_diff1:h.amt_diff2);
   const sign=new Set(num===1?h.sign1:h.sign2),date=new Set(num===1?h.date1:h.date2);
+  const expert=new Set(num===1?h.expert1:h.expert2);
   const rr=rawRowsOverride||td.raw_rows||[];
   let html='<table class="data-table"><thead><tr>';
   td.columns.forEach(c=>html+=`<th style="width:140px">${esc(c)}</th>`);
@@ -1878,7 +1886,7 @@ function renderTable(num,td,hl,rawRowsOverride){
   td.rows.forEach((row,i)=>{
     const r=rr[i]!==undefined?rr[i]:i;
     let cls='';
-    if(missing.has(r))cls='row-missing';else if(sign.has(r))cls='row-sign';
+    if(expert.has(r))cls='row-expert';else if(missing.has(r))cls='row-missing';else if(sign.has(r))cls='row-sign';
     else if(amt.has(r))cls='row-amount';else if(date.has(r))cls='row-date';
     html+=`<tr class="${cls}" data-raw-row="${esc(r)}">`;
     td.columns.forEach(c=>html+=`<td title="${esc(row[c]||'')}">${esc(trunc(row[c]||'',80))}</td>`);
@@ -1904,6 +1912,11 @@ function toggleFilter(type,btn){
 }
 function applyDiscFilter(){
   document.querySelectorAll('#disc-body tr[data-type]').forEach(r=>r.style.display=(activeFilters.has('all')||activeFilters.has(r.dataset.type))?'':'none');
+}
+function resetDiscFilters(){
+  activeFilters=new Set(['all']);
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('fb-all')?.classList.add('active');
 }
 
 // ── Reconcile ──────────────────────────────────────────────────────
@@ -1993,6 +2006,52 @@ async function forceExpertAnalysis(){
   await runReconcile({force_balance_reason_analysis:true, ai_comment:true});
 }
 
+function expertRowsBySide(rows=[],side){
+  return rows.filter(r=>r?.side===side&&r.raw_row!==undefined&&r.raw_row!==null);
+}
+
+function buildExpertDiscrepancies(summary){
+  const analysis=summary?.balance_reason_analysis||{};
+  const items=[
+    ...(analysis.reasons||[]).map(item=>({...item,_expertType:'expert_reason'})),
+    ...(analysis.neutral_groups||[]).map(item=>({...item,_expertType:'expert_neutral'})),
+  ];
+  return items.map(item=>{
+    const rows=item.rows||[];
+    const companyRows=expertRowsBySide(rows,'doc1');
+    const supplierRows=expertRowsBySide(rows,'doc2');
+    const examples=(item.examples||[]).slice(0,3).join('; ');
+    const influence=Number(item.influence||0);
+    return {
+      type:item._expertType,
+      severity:item._expertType==='expert_neutral'?'low':(Math.abs(influence)>=100000?'high':'medium'),
+      date:'',
+      document_number:item.title||'Причина экспертного анализа',
+      description:item.check||'Проверить документы из экспертной причины.',
+      company_value:companyRows.length?`${companyRows.length} строк${examples?`: ${examples}`:''}`:'-',
+      supplier_value:supplierRows.length?`${supplierRows.length} строк${examples?`: ${examples}`:''}`:'-',
+      difference:fmtSignedMoney(influence),
+      row_company:companyRows[0]?.raw_row,
+      row_supplier:supplierRows[0]?.raw_row,
+      rows,
+    };
+  });
+}
+
+function buildExpertHighlight(summary){
+  const h={expert1:[],expert2:[]};
+  const analysis=summary?.balance_reason_analysis||{};
+  [...(analysis.reasons||[]),...(analysis.neutral_groups||[])].forEach(item=>{
+    (item.rows||[]).forEach(row=>{
+      if(row?.side==='doc1'&&row.raw_row!==undefined&&row.raw_row!==null)h.expert1.push(row.raw_row);
+      if(row?.side==='doc2'&&row.raw_row!==undefined&&row.raw_row!==null)h.expert2.push(row.raw_row);
+    });
+  });
+  h.expert1=[...new Set(h.expert1)];
+  h.expert2=[...new Set(h.expert2)];
+  return h;
+}
+
 function displayResults(data){
   const expertMode=data.summary?.result_mode==='balance_reason_analysis';
   const visibleDiscrepancies=(data.discrepancies||[]).filter(d=>d.type!=='technical_mirror');
@@ -2000,15 +2059,17 @@ function displayResults(data){
     data={...data,discrepancies:visibleDiscrepancies,summary:{...(data.summary||{}),total_discrepancies:visibleDiscrepancies.length}};
   }
   setExpertModeTabs(expertMode);
-  lastResult=data;allDisc=expertMode?[]:visibleDiscrepancies;
-  const highlight=expertMode?{}:data.highlight;
+  if(expertMode)resetDiscFilters();
+  const expertDiscrepancies=expertMode?buildExpertDiscrepancies(data.summary):[];
+  lastResult=data;allDisc=expertMode?expertDiscrepancies:visibleDiscrepancies;
+  const highlight=expertMode?buildExpertHighlight(data.summary):data.highlight;
   renderTable(1,data.table1,highlight);renderTable(2,data.table2,highlight);
   renderDiscrepancies(allDisc,data.file1_name,data.file2_name,expertMode);
   renderSummary(data.summary,data.file1_name,data.file2_name);
   if(isLoggedIn())loadHistory();
   updateAccessActions();
-  const cnt=data.summary.total_discrepancies;
-  const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=(!expertMode&&cnt)?'inline':'none';
+  const cnt=expertMode?expertDiscrepancies.length:data.summary.total_discrepancies;
+  const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
   if(expertMode)showToast('Сформирована сводка причин расхождения сальдо','warn');
   else if(cnt===0)showToast('Расхождений не обнаружено','success');
   else if(data.summary.window_suggestion?.candidate_pairs)showToast('Найдены вероятные совпадения с разницей по датам. Можно расширить окна и пересчитать.','warn');
@@ -2019,7 +2080,10 @@ function displayResults(data){
 
 function setExpertModeTabs(enabled){
   const discTab=document.querySelector('.tab[data-tab="discrepancies"]');
-  if(discTab)discTab.classList.toggle('disabled',!!enabled);
+  if(discTab){
+    discTab.classList.remove('disabled');
+    discTab.title=enabled?'Показаны причины из экспертного анализа, а не технический список строк':'';
+  }
 }
 
 function setProgress(pct,msg){
@@ -2036,7 +2100,7 @@ const TYPE_ICONS={
   sign:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h8.6m0 0L9.7 3.3m1.9 1.9L9.7 7.1M13 10.8H4.4m0 0 1.9-1.9m-1.9 1.9 1.9 1.9" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   ok:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.2 8.2 3.1 3.1 6.5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
-const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign']};
+const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign'],expert_reason:['Причина сальдо','badge-yellow','amount'],expert_neutral:['Не влияет','badge-gray','ok']};
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray']};
 function typeIcon(name){return TYPE_ICONS[name]||'';}
 function decorateTypeButtons(){
@@ -2054,11 +2118,11 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
   document.getElementById('disc-col-ctr').textContent=f2?`У контрагента (${sn(f2)})`:'У контрагента';
   const body=document.getElementById('disc-body');
-  if(expertMode){
+  if(expertMode&&(!discs||!discs.length)){
     body.innerHTML=`<tr><td colspan="8" style="padding:32px;text-align:center">
       <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px">
-        <span style="font-size:18px;font-weight:700;color:var(--green)">Расхождения свернуты в экспертную сводку</span>
-        <span style="font-size:13px;color:var(--muted)">Технические несовпавшие строки не являются отдельными бухгалтерскими причинами. Используйте вкладку «Сводка».</span>
+        <span style="font-size:18px;font-weight:700;color:var(--green)">Экспертные причины не выделены отдельными строками</span>
+        <span style="font-size:13px;color:var(--muted)">Используйте вкладку «Сводка»: технический список расхождений свернут в анализ причин сальдо.</span>
       </div></td></tr>`;
     return;
   }
@@ -2091,6 +2155,13 @@ function sideHasValue(v){
 function targetRowsForDiscrepancy(d){
   const targets=[];
   if(!d)return targets;
+  if(Array.isArray(d.rows)&&d.rows.length){
+    d.rows.forEach(row=>{
+      if(row?.side==='doc1'&&row.raw_row!==undefined&&row.raw_row!==null)targets.push({table:1,row:String(row.raw_row)});
+      if(row?.side==='doc2'&&row.raw_row!==undefined&&row.raw_row!==null)targets.push({table:2,row:String(row.raw_row)});
+    });
+    return targets;
+  }
   const hasCompanyRow=d.row_company!==undefined&&d.row_company!==null;
   const hasSupplierRow=d.row_supplier!==undefined&&d.row_supplier!==null;
   if(d.type==='missing_in_counterparty'){
@@ -2358,14 +2429,36 @@ function md(t){
     .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')
     .replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
   const lines=String(t).replace(/\r\n/g,'\n').split('\n');
-  let html='',para=[],listTag='';
+  let html='',para=[],listTag='',tableRows=[];
   const closePara=()=>{if(para.length){html+=`<p>${para.join(' ')}</p>`;para=[];}};
   const closeList=()=>{if(listTag){html+=`</${listTag}>`;listTag='';}};
+  const splitTable=line=>{
+    const raw=line.trim().replace(/^\|/,'').replace(/\|$/,'');
+    return raw.split('|').map(cell=>cell.trim());
+  };
+  const isTableSep=cells=>cells.length&&cells.every(cell=>/^:?-{3,}:?$/.test(cell.replace(/\s+/g,'')));
+  const closeTable=()=>{
+    if(!tableRows.length)return;
+    const rows=tableRows.filter(row=>!isTableSep(row));
+    if(rows.length){
+      const head=rows[0],bodyRows=rows.slice(1);
+      html+='<table><thead><tr>'+head.map(cell=>`<th>${inline(cell)}</th>`).join('')+'</tr></thead>';
+      if(bodyRows.length)html+='<tbody>'+bodyRows.map(row=>'<tr>'+row.map(cell=>`<td>${inline(cell)}</td>`).join('')+'</tr>').join('')+'</tbody>';
+      html+='</table>';
+    }
+    tableRows=[];
+  };
   lines.forEach(line=>{
     const text=line.trim();
-    if(!text){closePara();closeList();return;}
-    const heading=text.match(/^(#{1,3})\s+(.+)$/);
+    if(!text){closePara();closeList();closeTable();return;}
+    if(/^(\-{3,}|\*{3,}|_{3,})$/.test(text)){closePara();closeList();closeTable();html+='<hr>';return;}
+    const tableLike=text.includes('|')&&splitTable(text).length>=2;
+    if(tableLike){closePara();closeList();tableRows.push(splitTable(text));return;}
+    closeTable();
+    const heading=text.match(/^(#{1,6})\s+(.+)$/);
     if(heading){closePara();closeList();html+=`<h${heading[1].length}>${inline(heading[2])}</h${heading[1].length}>`;return;}
+    const quote=text.match(/^>\s+(.+)$/);
+    if(quote){closePara();closeList();html+=`<blockquote>${inline(quote[1])}</blockquote>`;return;}
     const ordered=text.match(/^\d+\.\s+(.+)$/);
     const unordered=text.match(/^[-*]\s+(.+)$/);
     if(ordered||unordered){
@@ -2378,7 +2471,7 @@ function md(t){
     closeList();
     para.push(inline(text));
   });
-  closePara();closeList();
+  closePara();closeList();closeTable();
   return html;
 }
 
