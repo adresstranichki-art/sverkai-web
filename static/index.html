@@ -953,6 +953,14 @@
           <button class="btn btn-green" id="window-suggest-btn" type="button">Применить и пересчитать</button>
         </div>
       </div>
+      <div class="summary-suggest-card" id="expert-suggest-card" style="display:none">
+        <div class="summary-suggest-title">Экспертный режим</div>
+        <div class="summary-suggest-text" id="expert-suggest-text"></div>
+        <div class="summary-suggest-meta" id="expert-suggest-meta"></div>
+        <div class="summary-suggest-actions">
+          <button class="btn btn-green" id="expert-suggest-btn" type="button">Воспользоваться экспертным режимом</button>
+        </div>
+      </div>
       <div class="summary-detail-grid" id="summary-detail-grid" style="display:none"></div>
       <div class="balance-analysis" id="balance-analysis-card" style="display:none">
         <div class="balance-analysis-head">
@@ -1912,7 +1920,7 @@ function cancelReconcile(){
   showToast('Анализ остановлен','warn');
 }
 
-async function runReconcile(){
+async function runReconcile(extraSettings={}){
   if(!file1||!file2)return;
   if(!isLoggedIn()&&guestUsage?.limit>0&&guestUsage.remaining<=0){
     showToast('Гостевой лимит исчерпан. Войдите с тестовым доступом для продолжения','warn');
@@ -1922,7 +1930,8 @@ async function runReconcile(){
   abortController=new AbortController();
   document.getElementById('btn-run').disabled=true;
   setCancelVisible(true);
-  setProgress(10,'Загрузка файлов...');
+  const forceExpert=!!extraSettings.force_balance_reason_analysis;
+  setProgress(10,forceExpert?'Запуск экспертного анализа...':'Загрузка файлов...');
   const settings={
     find_missing:document.getElementById('cfg-missing').checked,
     find_amount_diff:document.getElementById('cfg-amount').checked,
@@ -1932,6 +1941,7 @@ async function runReconcile(){
     date_window_delivery:parseInt(document.getElementById('cfg-dw-del').value)||3,
     min_amount:parseFloat(document.getElementById('cfg-min-amt').value)||0,
     ai_comment:document.getElementById('cfg-ai').checked,
+    ...extraSettings,
   };
   const fd=new FormData();
   fd.append('file1',file1);fd.append('file2',file2);fd.append('settings',JSON.stringify(settings));
@@ -1955,6 +1965,9 @@ async function runReconcile(){
     const noHist=data.history_saved===false&&!isLoggedIn();
     setProgress(100,noHist?'Сверка завершена (гостевой режим — история не сохраняется)':'Сверка завершена');
     displayResults(data);
+    if(forceExpert&&data.summary?.result_mode!=='balance_reason_analysis'){
+      showToast('Экспертный режим недоступен: не удалось собрать основу по сальдо','warn');
+    }
   }catch(err){
     if(err.name==='AbortError'){return;}// уже обработано в cancelReconcile
     showToast('Ошибка: '+err.message,'error');setProgress(0,'Ошибка');
@@ -1972,6 +1985,12 @@ async function applySuggestedWindows(payDays, delDays){
   if(Number.isFinite(Number(delDays)))delEl.value=delDays;
   showToast(`Окна обновлены: оплаты ${payEl.value} дн., поставки ${delEl.value} дн. Пересчитываю...`,'warn');
   await runReconcile();
+}
+
+async function forceExpertAnalysis(){
+  if(!file1||!file2){showToast('Для экспертного режима заново загрузите оба файла','warn');return;}
+  showToast('Запускаю экспертный анализ причин сальдо','warn');
+  await runReconcile({force_balance_reason_analysis:true, ai_comment:true});
 }
 
 function displayResults(data){
@@ -2152,6 +2171,7 @@ function renderSummary(s,file1Name='',file2Name=''){
   if(s.debt_label){dc.style.display='block';document.getElementById('debt-label').textContent=s.debt_label;document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:'';}
   else dc.style.display='none';
   renderWindowSuggestion(s);
+  renderExpertSuggestion(s);
   renderSummaryDetails(s,file1Name,file2Name);
   renderBalanceAnalysis(s);
   const ac=document.getElementById('ai-card');
@@ -2256,6 +2276,31 @@ function renderWindowSuggestion(s){
   discBtn.textContent='Применить и пересчитать';
   discBtn.onclick=()=>applySuggestedWindows(hintView.payDays,hintView.delDays);
   discCard.style.display='block';
+}
+
+function canOfferExpertAnalysis(s){
+  if(!s||isExpertSummary(s)||!file1||!file2)return false;
+  if((s.total_discrepancies||0)<=0)return false;
+  return ['opening_balance_difference','transaction_net_difference','closing_balance_difference']
+    .every(key=>Number.isFinite(Number(s[key])));
+}
+
+function renderExpertSuggestion(s){
+  const card=document.getElementById('expert-suggest-card');
+  const text=document.getElementById('expert-suggest-text');
+  const meta=document.getElementById('expert-suggest-meta');
+  const btn=document.getElementById('expert-suggest-btn');
+  if(!card||!btn)return;
+  if(!canOfferExpertAnalysis(s)){
+    card.style.display='none';
+    btn.onclick=null;
+    return;
+  }
+  text.textContent='Не согласны с результатами обычной сверки? Можно переключить текущие файлы в экспертный режим и посмотреть причины через влияние на конечное сальдо.';
+  meta.textContent='Суммы и формула будут пересчитаны программно; при доступном AI-ключе объяснение сформируется расширенно.';
+  btn.textContent='Воспользоваться экспертным режимом';
+  btn.onclick=forceExpertAnalysis;
+  card.style.display='block';
 }
 
 function renderSummaryDetails(s,file1Name='',file2Name=''){

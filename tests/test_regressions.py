@@ -558,6 +558,8 @@ class RegressionReconcileTests(unittest.TestCase):
 
         self.assertIsNotNone(analysis)
         self.assertEqual(analysis['primary_tab'], 'summary')
+        self.assertEqual(analysis['trigger'], 'complex_structured_balance_case')
+        self.assertFalse(analysis['forced'])
         self.assertAlmostEqual(analysis['period_movement_difference'], 2243971.86, places=2)
         self.assertAlmostEqual(analysis['explained_movement'], 2243971.86, places=2)
         self.assertAlmostEqual(analysis['unexplained_difference'], 0.0, places=2)
@@ -574,6 +576,59 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertIn('94485', analysis['neutral_groups'][0]['title'])
         self.assertEqual(analysis['neutral_groups'][0]['row_count'], 64)
         self.assertAlmostEqual(analysis['neutral_groups'][0]['influence'], 0.0, places=2)
+
+        df1.attrs['parser_id'] = 'standard_act'
+        df2.attrs['parser_id'] = 'standard_act'
+        excel_analysis = self.main._build_balance_reason_analysis(df1, df2, result, None, self.cfg)
+        self.assertIsNotNone(excel_analysis)
+        self.assertEqual(excel_analysis['trigger'], 'complex_structured_balance_case')
+        self.assertFalse(excel_analysis['forced'])
+
+    def test_balance_reason_analysis_can_be_forced_for_small_case(self):
+        pd = self.main.pd
+        df1 = pd.DataFrame([{
+            'date': pd.to_datetime('31.03.2026', dayfirst=True),
+            'date_str': '31.03.2026',
+            'document': 'Принято (1 от 31.03.2026)',
+            'doc_num': '1',
+            'debit': 100.0,
+            'credit': None,
+            'signed_amount': -100.0,
+            'raw_row': 0,
+        }])
+        df2 = pd.DataFrame([{
+            'date': pd.to_datetime('31.03.2026', dayfirst=True),
+            'date_str': '31.03.2026',
+            'document': 'Оплата (2 от 31.03.2026)',
+            'doc_num': '2',
+            'debit': None,
+            'credit': 100.0,
+            'signed_amount': 100.0,
+            'raw_row': 0,
+        }])
+        df1.attrs['parser_id'] = 'standard_act'
+        df2.attrs['parser_id'] = 'standard_act'
+        result = {
+            'summary': {
+                'total_discrepancies': 1,
+                'opening_balance_difference': 0.0,
+                'transaction_net_difference': -100.0,
+                'closing_balance_difference': -100.0,
+            },
+            'missing_rows1': [0],
+            'missing_rows2': [],
+        }
+
+        self.assertIsNone(self.main._build_balance_reason_analysis(df1, df2, result, None, self.cfg))
+
+        forced_cfg = {**self.cfg, 'force_balance_reason_analysis': True}
+        analysis = self.main._build_balance_reason_analysis(df1, df2, result, None, forced_cfg)
+
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis['trigger'], 'manual_balance_reason_analysis')
+        self.assertTrue(analysis['forced'])
+        self.assertEqual(analysis['primary_tab'], 'summary')
+        self.assertAlmostEqual(analysis['period_movement_difference'], -100.0, places=2)
 
 
 class AuthKeyTests(unittest.TestCase):

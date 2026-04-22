@@ -1764,6 +1764,7 @@ DEFAULT_RECON_SETTINGS = {
     'find_date_diff': True, 'find_sign_mismatch': True,
     'date_window_payment': 5, 'date_window_delivery': 3,
     'min_amount': 0.0, 'ai_comment': True,
+    'force_balance_reason_analysis': False,
 }
 
 
@@ -1988,7 +1989,7 @@ def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[st
         }
         msg = client.messages.create(
             model=MODEL_MAIN,
-            max_tokens=500,
+            max_tokens=900 if analysis.get('forced') else 500,
             temperature=0,
             system=(
                 "Ты бухгалтер-аналитик. Объясни причины расхождения конечного сальдо "
@@ -2022,7 +2023,7 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
         str(getattr(df, 'attrs', {}).get('parser_id') or '')
         for df in (df1, df2)
     ]
-    pdfish = any(pid.startswith('pdf') for pid in parser_ids)
+    forced = bool(cfg.get('force_balance_reason_analysis'))
     repeated_doc_groups = {}
     for item in unmatched:
         if item.get('doc_num'):
@@ -2033,12 +2034,11 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
     )
     row_ratio = min(len(df1), len(df2)) / max(len(df1), len(df2), 1)
     complex_case = (
-        pdfish
-        and total_disc >= 30
+        total_disc >= 30
         and len(unmatched) >= 30
         and (has_zero_detail_group or row_ratio <= 0.8)
     )
-    if not complex_case:
+    if not (complex_case or forced):
         return None
 
     neutral_groups = []
@@ -2085,7 +2085,14 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
         'enabled': True,
         'mode': 'balance_reason_analysis',
         'primary_tab': 'summary',
-        'trigger': 'complex_pdf_balance_case',
+        'trigger': 'manual_balance_reason_analysis' if forced else 'complex_structured_balance_case',
+        'forced': forced,
+        'trigger_evidence': {
+            'total_discrepancies': total_disc,
+            'unmatched_rows': len(unmatched),
+            'has_zero_detail_group': has_zero_detail_group,
+            'row_count_ratio': round(row_ratio, 4),
+        },
         'technical_discrepancies_count': total_disc,
         'opening_balance_difference': round(float(opening), 2),
         'period_movement_difference': round(float(movement), 2),
