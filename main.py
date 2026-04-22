@@ -1927,7 +1927,16 @@ def _make_balance_reason(title: str, items: list[dict], check: str, *, kind: str
         'check': check,
         'examples': _unique_examples(items),
         'sides': sides,
-        'rows': [{'side': item['side'], 'raw_row': item['raw_row']} for item in items],
+        'rows': [
+            {
+                'side': item['side'],
+                'raw_row': item['raw_row'],
+                'date': item.get('date') or '',
+                'document': item.get('document') or '',
+                'effect': round(float(item.get('effect') or 0.0), 2),
+            }
+            for item in items
+        ],
         'order': order,
     }
 
@@ -2082,7 +2091,8 @@ def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[st
             temperature=0,
             system=(
                 "Ты бухгалтер-аналитик. Объясни причины расхождения конечного сальдо "
-                "простым русским языком. Используй только переданные суммы и не придумывай новые."
+                "простым русским языком. Используй только переданные суммы и не придумывай новые. "
+                "Не используй markdown-заголовки разных уровней и таблицы: пиши короткими разделами с понятными подзаголовками."
             ),
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
         )

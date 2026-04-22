@@ -568,6 +568,11 @@ class RegressionReconcileTests(unittest.TestCase):
         reasons = {item['title']: item for item in analysis['reasons']}
         bn_title = next(title for title in reasons if 'бн от 31.12.2025' in title)
         self.assertAlmostEqual(reasons[bn_title]['influence'], 2821717.86, places=2)
+        bn_rows = reasons[bn_title]['rows']
+        self.assertEqual(len(bn_rows), 2)
+        self.assertEqual(bn_rows[0]['date'], '31.03.2026')
+        self.assertIn('document', bn_rows[0])
+        self.assertAlmostEqual(sum(row['effect'] for row in bn_rows), 2821717.86, places=2)
         self.assertAlmostEqual(reasons['Документы есть только в первом акте']['influence'], -936946.0, places=2)
         writeoff_title = next(title for title in reasons if title.startswith('Списания задолженности'))
         self.assertAlmostEqual(reasons[writeoff_title]['influence'], 344200.0, places=2)
