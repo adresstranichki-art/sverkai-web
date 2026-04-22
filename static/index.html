@@ -453,9 +453,11 @@
   .disc-table tr.sev-medium td { border-left: 3px solid #f59f00; }
   .disc-table tr.sev-low td    { border-left: 3px solid #b2bec3; }
   .disc-table tr.type-sign td  { border-left: 3px solid var(--blue); }
+  .disc-table tr.type-expert td  { border-left: 3px solid var(--green); }
   .disc-table tr.type-technical td  { border-left: 3px solid #8aa4b8; }
   .badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 8px; font-size: 11px; font-weight: 700; }
   .badge-red    { background: #ffebee; color: var(--red); }
+  .badge-green  { background: #e7f4eb; color: var(--green-dk); }
   .badge-yellow { background: #fff8e1; color: var(--yellow); }
   .badge-blue   { background: #e3f2fd; color: var(--blue); }
   .badge-gray   { background: #f0f0f0; color: var(--muted); }
@@ -1194,9 +1196,9 @@
 <!-- ════════ EXPORT ════════ -->
 <div class="exp-overlay" id="exp-overlay" style="display:none" onclick="if(event.target===this)closeExportModal()">
   <div class="exp-modal">
-    <div class="exp-header"><span>Экспорт — выбор типов</span><button class="close" onclick="closeExportModal()">×</button></div>
-    <div style="padding:12px 20px 4px;font-size:13px;color:var(--muted)">Выберите типы расхождений для включения в отчёт:</div>
-    <div class="exp-list">
+    <div class="exp-header"><span id="exp-title">Экспорт — выбор типов</span><button class="close" onclick="closeExportModal()">×</button></div>
+    <div id="exp-hint" style="padding:12px 20px 4px;font-size:13px;color:var(--muted)">Выберите типы расхождений для включения в отчёт:</div>
+    <div class="exp-list" id="exp-list">
       <label><input type="checkbox" id="ex-missing_in_counterparty" checked> Нет у контрагента</label>
       <label><input type="checkbox" id="ex-missing_in_company" checked> Нет у организации</label>
       <label><input type="checkbox" id="ex-amount_diff" checked> Разница в суммах</label>
@@ -2006,6 +2008,24 @@ async function forceExpertAnalysis(){
   await runReconcile({force_balance_reason_analysis:true, ai_comment:true});
 }
 
+function pluralRu(n,one,few,many){
+  const value=Math.abs(Number(n)||0);
+  const mod100=value%100;
+  const mod10=value%10;
+  if(mod100>=11&&mod100<=14)return many;
+  if(mod10===1)return one;
+  if(mod10>=2&&mod10<=4)return few;
+  return many;
+}
+function rowsText(n){
+  const count=Number(n)||0;
+  return `${count} ${pluralRu(count,'строка','строки','строк')}`;
+}
+function technicalRowsText(n){
+  const count=Number(n)||0;
+  return `${count} ${pluralRu(count,'техническая строка','технические строки','технических строк')}`;
+}
+
 function expertRowsBySide(rows=[],side){
   return rows.filter(r=>r?.side===side&&r.raw_row!==undefined&&r.raw_row!==null);
 }
@@ -2024,12 +2044,12 @@ function buildExpertDiscrepancies(summary){
     const influence=Number(item.influence||0);
     return {
       type:item._expertType,
-      severity:item._expertType==='expert_neutral'?'low':(Math.abs(influence)>=100000?'high':'medium'),
+      severity:item._expertType==='expert_neutral'?'info':'review',
       date:'',
       document_number:item.title||'Причина экспертного анализа',
       description:item.check||'Проверить документы из экспертной причины.',
-      company_value:companyRows.length?`${companyRows.length} строк${examples?`: ${examples}`:''}`:'-',
-      supplier_value:supplierRows.length?`${supplierRows.length} строк${examples?`: ${examples}`:''}`:'-',
+      company_value:companyRows.length?`${rowsText(companyRows.length)}${examples?`: ${examples}`:''}`:'-',
+      supplier_value:supplierRows.length?`${rowsText(supplierRows.length)}${examples?`: ${examples}`:''}`:'-',
       difference:fmtSignedMoney(influence),
       row_company:companyRows[0]?.raw_row,
       row_supplier:supplierRows[0]?.raw_row,
@@ -2100,8 +2120,8 @@ const TYPE_ICONS={
   sign:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h8.6m0 0L9.7 3.3m1.9 1.9L9.7 7.1M13 10.8H4.4m0 0 1.9-1.9m-1.9 1.9 1.9 1.9" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   ok:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.2 8.2 3.1 3.1 6.5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
-const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign'],expert_reason:['Причина сальдо','badge-yellow','amount'],expert_neutral:['Не влияет','badge-gray','ok']};
-const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray']};
+const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok']};
+const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray'],review:['К проверке','badge-green'],info:['Справочно','badge-gray']};
 function typeIcon(name){return TYPE_ICONS[name]||'';}
 function decorateTypeButtons(){
   Object.entries(TYPE_MAP).forEach(([type,meta])=>{
@@ -2138,7 +2158,7 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
   body.innerHTML=discs.map((d,i)=>{
     const[tl,tb,ti]=TYPE_MAP[d.type]||[d.type,'badge-gray',''];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
-    const tc=d.type==='sign_mismatch'?'type-sign':`sev-${d.severity}`;
+    const tc=d.type==='expert_reason'?'type-expert':d.type==='expert_neutral'?'type-technical':d.type==='sign_mismatch'?'type-sign':`sev-${d.severity}`;
     return`<tr class="${tc} disc-clickable" data-type="${d.type}" data-disc-index="${i}" title="Показать строку на вкладке «Сравнение»"><td>${i+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-disc-index]').forEach(row=>{
@@ -2266,7 +2286,7 @@ function renderBalanceReasonRows(items){
         ${examples?`<div class="balance-examples">${examples}</div>`:''}
       </div>
       <div class="balance-reason-money ${moneyClass(item.influence)}">${fmtSignedMoney(item.influence)}</div>
-      <div class="balance-reason-count">${item.row_count||0} строк</div>
+      <div class="balance-reason-count">${rowsText(item.row_count||0)}</div>
       <div class="balance-reason-check">${esc(item.check||'Проверить первичные документы и отражение в актах.')}</div>
     </div>`;
   }).join('');
@@ -2278,7 +2298,7 @@ function renderBalanceAnalysis(s){
   if(!analysis||!analysis.enabled){card.style.display='none';return;}
   card.style.display='block';
   const recovered=analysis.basis_recovery?.available;
-  document.getElementById('balance-analysis-mode').textContent=`${analysis.technical_discrepancies_count||0} технических строк${recovered?' · сальдо восстановлено AI':''}`;
+  document.getElementById('balance-analysis-mode').textContent=`${technicalRowsText(analysis.technical_discrepancies_count||0)}${recovered?' · сальдо восстановлено AI':''}`;
   document.getElementById('balance-formula').innerHTML=`
     <div class="balance-formula-item"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
     <div class="balance-formula-item"><div class="k">Влияние движений периода</div><div class="v ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
@@ -2483,14 +2503,21 @@ function openExportModal(){
     openLoginModal();
     return;
   }
+  const expertMode=isExpertSummary(lastResult.summary);
+  document.getElementById('exp-title').textContent=expertMode?'Экспорт экспертного анализа':'Экспорт — выбор типов';
+  document.getElementById('exp-hint').textContent=expertMode
+    ?'В отчёт будут включены сводка и причины сальдо из экспертного анализа. Обычные технические расхождения не экспортируются.'
+    :'Выберите типы расхождений для включения в отчёт:';
+  document.getElementById('exp-list').style.display=expertMode?'none':'flex';
   document.getElementById('exp-overlay').style.display='flex';
 }
 function closeExportModal(){document.getElementById('exp-overlay').style.display='none';}
 async function doExport(){
   if(!lastResult)return;closeExportModal();
   if(!isLoggedIn()){showToast('Excel-экспорт доступен с выданным тестовым доступом','warn');return;}
+  const expertMode=isExpertSummary(lastResult.summary);
   const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
-  const filtered=lastResult.discrepancies.filter(d=>allowed.has(d.type));
+  const filtered=expertMode?buildExpertDiscrepancies(lastResult.summary):(lastResult.discrepancies||[]).filter(d=>allowed.has(d.type));
   try{
     const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
       body:JSON.stringify({discrepancies:filtered,summary:lastResult.summary,file1_name:lastResult.file1_name,file2_name:lastResult.file2_name})});

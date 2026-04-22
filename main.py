@@ -3878,7 +3878,10 @@ async def export_report(payload: dict, request: Request):
     blu = wb.add_format({'bg_color':'#cce5ff','border':1,'font_size':10})
     gry = wb.add_format({'bg_color':'#f0f0f0','border':1,'font_size':10})
 
-    ws = wb.add_worksheet('Расхождения')
+    balance_analysis = summary.get('balance_reason_analysis') or {}
+    expert_export = bool(balance_analysis.get('enabled'))
+
+    ws = wb.add_worksheet('Экспертные причины' if expert_export else 'Расхождения')
     headers = ['№','Тип','Дата','Документ',f'У организации ({f1_name})',f'У контрагента ({f2_name})','Разница','Уровень']
     widths  = [5,30,12,45,28,28,15,12]
     for col,(hdr,w) in enumerate(zip(headers,widths)):
@@ -3886,12 +3889,13 @@ async def export_report(payload: dict, request: Request):
     ws.set_row(0,35)
     TYPE_RU = {'missing_in_counterparty':'❌ Нет у контрагента','missing_in_company':'❌ Нет у организации',
                'amount_diff':'💰 Разница в суммах','date_diff':'📅 Разница в датах',
-               'sign_mismatch':'🔀 Зеркальная корректировка'}
-    SEV_RU = {'high':'Высокий','medium':'Средний','low':'Низкий'}
+               'sign_mismatch':'🔀 Зеркальная корректировка',
+               'expert_reason':'Влияет на итог','expert_neutral':'Не влияет на итог'}
+    SEV_RU = {'high':'Высокий','medium':'Средний','low':'Низкий','review':'К проверке','info':'Справочно'}
     for ri, d in enumerate(discs, 1):
         sev = d.get('severity','low')
         tp  = d.get('type','')
-        fmt = red if sev=='high' and tp!='sign_mismatch' else blu if tp == 'sign_mismatch' else yel if sev=='medium' else gry
+        fmt = blu if sev=='review' else gry if sev=='info' else red if sev=='high' and tp!='sign_mismatch' else blu if tp == 'sign_mismatch' else yel if sev=='medium' else gry
         ws.write(ri,0,ri,fmt); ws.write(ri,1,TYPE_RU.get(tp,tp),fmt)
         ws.write(ri,2,d.get('date',''),fmt); ws.write(ri,3,d.get('document_number',''),fmt)
         ws.write(ri,4,d.get('company_value',''),fmt); ws.write(ri,5,d.get('supplier_value',''),fmt)
@@ -3900,7 +3904,6 @@ async def export_report(payload: dict, request: Request):
     ws2 = wb.add_worksheet('Сводка')
     ws2.set_column(0,0,35); ws2.set_column(1,1,70)
     nf = wb.add_format({'border':1,'font_size':10,'text_wrap':True})
-    balance_analysis = summary.get('balance_reason_analysis') or {}
     if balance_analysis.get('enabled'):
         summary_rows = [
             ('Дата сверки', datetime.now().strftime('%d.%m.%Y %H:%M')),
