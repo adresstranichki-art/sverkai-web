@@ -362,6 +362,8 @@
     white-space: nowrap;
   }
   .tab:hover { color: var(--text); background: rgba(31,122,67,.04); }
+  .tab.disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
+  .tab.disabled:hover { color: var(--muted); background: transparent; }
   .tab.active {
     color: var(--green-dk);
     background: var(--panel);
@@ -479,7 +481,12 @@
   .stat-card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
   .stat-card .value { font-size: 32px; font-weight: 800; color: var(--green); }
   .stat-card .value.red { color: var(--red); }
+  .stat-card .value.warn { color: var(--yellow); }
+  .stat-card .value.green { color: var(--green-dk); }
   .stat-card .value.dark { color: var(--text); font-size: 22px; }
+  .stat-card .value.dark.red { color: var(--red); }
+  .stat-card .value.dark.warn { color: var(--yellow); }
+  .stat-card .value.dark.green { color: var(--green-dk); }
   .debt-card { background: linear-gradient(180deg, #edf7ef, #e9f3eb); border: 1px solid rgba(31,122,67,.35); border-radius: 14px; padding: 14px 18px; margin-bottom: 12px; box-shadow: 0 10px 18px rgba(31,122,67,.08); }
   .debt-card .debt-label { font-size: 15px; font-weight: 700; color: var(--green-dk); }
   .period-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
@@ -515,6 +522,11 @@
   .balance-formula-item .v.warn { color: var(--yellow); }
   .balance-equation { font-size: 13px; color: var(--text); background: #f6faf6; border-left: 3px solid var(--green); padding: 9px 12px; margin-bottom: 12px; }
   .balance-explain { font-size: 14px; line-height: 1.6; color: var(--text); margin-bottom: 14px; }
+  .balance-explain p { margin-bottom: 8px; }
+  .balance-explain ul,.balance-explain ol { padding-left: 20px; margin: 8px 0; }
+  .balance-explain li { margin-bottom: 4px; }
+  .balance-explain h1,.balance-explain h2,.balance-explain h3 { font-size: 15px; margin: 10px 0 6px; color: var(--green-dk); }
+  .balance-explain strong { font-weight: 800; color: var(--green-dk); }
   .balance-section-title { font-size: 12px; font-weight: 800; color: var(--text); text-transform: uppercase; letter-spacing: .5px; margin: 14px 0 8px; }
   .balance-reason-list { display: grid; gap: 8px; }
   .balance-reason-row { display: grid; grid-template-columns: minmax(180px,1fr) 140px 90px minmax(220px,1.2fr); gap: 10px; align-items: start; border-top: 1px solid #edf1ec; padding: 10px 0; }
@@ -1471,6 +1483,7 @@ loadHistory();
 // ── Tabs ───────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.addEventListener('click',()=>{
+    if(tab.classList.contains('disabled'))return;
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
     tab.classList.add('active');
@@ -1478,6 +1491,8 @@ document.querySelectorAll('.tab').forEach(tab=>{
   });
 });
 function switchTab(n){
+  const target=document.querySelector(`.tab[data-tab="${n}"]`);
+  if(target?.classList.contains('disabled'))n='summary';
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
   const t=document.querySelector(`.tab[data-tab="${n}"]`);if(t)t.classList.add('active');
@@ -1960,24 +1975,32 @@ async function applySuggestedWindows(payDays, delDays){
 }
 
 function displayResults(data){
+  const expertMode=data.summary?.result_mode==='balance_reason_analysis';
   const visibleDiscrepancies=(data.discrepancies||[]).filter(d=>d.type!=='technical_mirror');
   if(visibleDiscrepancies.length!==(data.discrepancies||[]).length){
     data={...data,discrepancies:visibleDiscrepancies,summary:{...(data.summary||{}),total_discrepancies:visibleDiscrepancies.length}};
   }
-  lastResult=data;allDisc=visibleDiscrepancies;
-  renderTable(1,data.table1,data.highlight);renderTable(2,data.table2,data.highlight);
-  renderDiscrepancies(allDisc,data.file1_name,data.file2_name);
+  setExpertModeTabs(expertMode);
+  lastResult=data;allDisc=expertMode?[]:visibleDiscrepancies;
+  const highlight=expertMode?{}:data.highlight;
+  renderTable(1,data.table1,highlight);renderTable(2,data.table2,highlight);
+  renderDiscrepancies(allDisc,data.file1_name,data.file2_name,expertMode);
   renderSummary(data.summary,data.file1_name,data.file2_name);
   if(isLoggedIn())loadHistory();
   updateAccessActions();
   const cnt=data.summary.total_discrepancies;
-  const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
-  if(data.summary.result_mode==='balance_reason_analysis')showToast('Сформирована сводка причин расхождения сальдо','warn');
+  const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=(!expertMode&&cnt)?'inline':'none';
+  if(expertMode)showToast('Сформирована сводка причин расхождения сальдо','warn');
   else if(cnt===0)showToast('Расхождений не обнаружено','success');
   else if(data.summary.window_suggestion?.candidate_pairs)showToast('Найдены вероятные совпадения с разницей по датам. Можно расширить окна и пересчитать.','warn');
   else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
   switchTab(data.summary.primary_tab==='summary'?'summary':'discrepancies');
   initTableResize(document.getElementById('disc-table-el'));
+}
+
+function setExpertModeTabs(enabled){
+  const discTab=document.querySelector('.tab[data-tab="discrepancies"]');
+  if(discTab)discTab.classList.toggle('disabled',!!enabled);
 }
 
 function setProgress(pct,msg){
@@ -2008,10 +2031,18 @@ function decorateTypeButtons(){
   });
 }
 decorateTypeButtons();
-function renderDiscrepancies(discs,f1='',f2=''){
+function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
   document.getElementById('disc-col-ctr').textContent=f2?`У контрагента (${sn(f2)})`:'У контрагента';
   const body=document.getElementById('disc-body');
+  if(expertMode){
+    body.innerHTML=`<tr><td colspan="8" style="padding:32px;text-align:center">
+      <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px">
+        <span style="font-size:18px;font-weight:700;color:var(--green)">Расхождения свернуты в экспертную сводку</span>
+        <span style="font-size:13px;color:var(--muted)">Технические несовпавшие строки не являются отдельными бухгалтерскими причинами. Используйте вкладку «Сводка».</span>
+      </div></td></tr>`;
+    return;
+  }
   if(!discs||!discs.length){
     body.innerHTML=`<tr><td colspan="8" style="padding:32px;text-align:center">
       <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px">
@@ -2102,9 +2133,17 @@ function goToDiscrepancy(idx){
 }
 
 // ── Summary ───────────────────────────────────────────────────────
+function isExpertSummary(s){return s?.result_mode==='balance_reason_analysis'&&s?.balance_reason_analysis?.enabled;}
+
 function renderSummary(s,file1Name='',file2Name=''){
+  const expert=isExpertSummary(s);
+  const analysis=s.balance_reason_analysis||{};
   const critical=s.critical_count||0;
-  document.getElementById('summary-cards').innerHTML=`
+  document.getElementById('summary-cards').innerHTML=expert?`
+    <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
+    <div class="stat-card"><div class="label">Влияние движений периода</div><div class="value dark ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
+    <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(analysis.closing_balance_difference)}">${fmtSignedMoney(analysis.closing_balance_difference)}</div></div>
+    <div class="stat-card"><div class="label">Причин к проверке</div><div class="value dark">${(analysis.reasons||[]).length}</div></div>`:`
     <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${(s.total_discrepancies||0)>0?'red':''}">${s.total_discrepancies||0}</div></div>
     <div class="stat-card"><div class="label">Критических</div><div class="value ${critical>0?'red':''}">${critical}</div></div>
     <div class="stat-card"><div class="label">Точных совпадений</div><div class="value">${s.exact_matches||0}</div></div>
@@ -2116,7 +2155,7 @@ function renderSummary(s,file1Name='',file2Name=''){
   renderSummaryDetails(s,file1Name,file2Name);
   renderBalanceAnalysis(s);
   const ac=document.getElementById('ai-card');
-  if(s.ai_comment){ac.style.display='block';document.getElementById('ai-text').innerHTML=md(s.ai_comment);}
+  if(!expert&&s.ai_comment){ac.style.display='block';document.getElementById('ai-text').innerHTML=md(s.ai_comment);}
   else ac.style.display='none';
 }
 
@@ -2153,7 +2192,7 @@ function renderBalanceAnalysis(s){
     <div class="balance-formula-item"><div class="k">Влияние движений периода</div><div class="v ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
     <div class="balance-formula-item"><div class="k">Разница конечного сальдо</div><div class="v ${diffClass(analysis.closing_balance_difference)}">${fmtSignedMoney(analysis.closing_balance_difference)}</div></div>`;
   document.getElementById('balance-equation').textContent=`Формула: ${analysis.formula||''}`;
-  document.getElementById('balance-explain').textContent=analysis.explanation||'';
+  document.getElementById('balance-explain').innerHTML=md(analysis.explanation||'');
   document.getElementById('balance-reasons').innerHTML=renderBalanceReasonRows(analysis.reasons||[]);
   const neutral=analysis.neutral_groups||[];
   document.getElementById('balance-neutral-title').style.display=neutral.length?'block':'none';
@@ -2221,9 +2260,14 @@ function renderWindowSuggestion(s){
 
 function renderSummaryDetails(s,file1Name='',file2Name=''){
   const wrap=document.getElementById('summary-detail-grid');
+  const expert=isExpertSummary(s);
+  const analysis=s.balance_reason_analysis||{};
+  const cmpOpening=expert?analysis.opening_balance_difference:s.opening_balance_difference;
+  const cmpMovement=expert?analysis.period_movement_difference:s.transaction_net_difference;
+  const cmpClosing=expert?analysis.closing_balance_difference:s.closing_balance_difference;
   const hasBalances=[
     s.opening_balance_doc1,s.opening_balance_doc2,s.closing_balance_doc1,s.closing_balance_doc2,
-    s.opening_balance_difference,s.closing_balance_difference,s.transaction_net_difference
+    cmpOpening,cmpClosing,cmpMovement
   ].some(v=>v!==null&&v!==undefined&&Number.isFinite(Number(v)));
   const hasPeriods=!!(s.period_doc1||s.period_doc2||s.period);
   if(!hasBalances&&!hasPeriods){wrap.style.display='none';wrap.innerHTML='';return;}
@@ -2249,24 +2293,44 @@ function renderSummaryDetails(s,file1Name='',file2Name=''){
     </div>
     <div class="summary-detail-card">
       <div class="summary-detail-head">
-        <div class="summary-detail-title">Сравнение</div>
-        <div class="summary-detail-name">${s.period_mismatch?'Разный период':'Период совпадает'}</div>
+        <div class="summary-detail-title">${expert?'Формула сальдо':'Сравнение'}</div>
+        <div class="summary-detail-name">${expert?'Экспертная сводка':(s.period_mismatch?'Разный период':'Период совпадает')}</div>
       </div>
-      <div class="summary-detail-row"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(s.opening_balance_difference)}">${fmtSignedMoney(s.opening_balance_difference)}</div></div>
-      <div class="summary-detail-row"><div class="k">Разница конечного сальдо</div><div class="v ${diffClass(s.closing_balance_difference)}">${fmtSignedMoney(s.closing_balance_difference)}</div></div>
-      <div class="summary-detail-row"><div class="k">Разница по операциям</div><div class="v ${diffClass(s.transaction_net_difference)}">${fmtSignedMoney(s.transaction_net_difference)}</div></div>
-      <div class="summary-detail-hint">${s.period_mismatch?'Периоды в шапках актов различаются и могут влиять на входящее сальдо.':'Период в шапках актов совпадает.'}</div>
+      <div class="summary-detail-row"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(cmpOpening)}">${fmtSignedMoney(cmpOpening)}</div></div>
+      <div class="summary-detail-row"><div class="k">${expert?'Влияние движений периода':'Разница по операциям'}</div><div class="v ${diffClass(cmpMovement)}">${fmtSignedMoney(cmpMovement)}</div></div>
+      <div class="summary-detail-row"><div class="k">Разница конечного сальдо</div><div class="v ${diffClass(cmpClosing)}">${fmtSignedMoney(cmpClosing)}</div></div>
+      <div class="summary-detail-hint">${expert?`Формула экспертного анализа: ${esc(analysis.formula||'')}`:(s.period_mismatch?'Периоды в шапках актов различаются и могут влиять на входящее сальдо.':'Период в шапках актов совпадает.')}</div>
     </div>`;
 }
 function md(t){
   if(!t)return'';
-  t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  t=t.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>');
-  t=t.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
-  t=t.replace(/^### (.+)$/gm,'<h3>$1</h3>');t=t.replace(/^## (.+)$/gm,'<h2>$1</h2>');t=t.replace(/^# (.+)$/gm,'<h1>$1</h1>');
-  t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
-  t=t.replace(/^[-*] (.+)$/gm,'<li>$1</li>');t=t.replace(/(<li>[\s\S]*?<\/li>)/g,'<ul>$1</ul>');
-  t=t.replace(/\n\n+/g,'</p><p>');return'<p>'+t+'</p>';
+  const inline=s=>esc(s)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
+  const lines=String(t).replace(/\r\n/g,'\n').split('\n');
+  let html='',para=[],listTag='';
+  const closePara=()=>{if(para.length){html+=`<p>${para.join(' ')}</p>`;para=[];}};
+  const closeList=()=>{if(listTag){html+=`</${listTag}>`;listTag='';}};
+  lines.forEach(line=>{
+    const text=line.trim();
+    if(!text){closePara();closeList();return;}
+    const heading=text.match(/^(#{1,3})\s+(.+)$/);
+    if(heading){closePara();closeList();html+=`<h${heading[1].length}>${inline(heading[2])}</h${heading[1].length}>`;return;}
+    const ordered=text.match(/^\d+\.\s+(.+)$/);
+    const unordered=text.match(/^[-*]\s+(.+)$/);
+    if(ordered||unordered){
+      closePara();
+      const tag=ordered?'ol':'ul';
+      if(listTag!==tag){closeList();html+=`<${tag}>`;listTag=tag;}
+      html+=`<li>${inline((ordered||unordered)[1])}</li>`;
+      return;
+    }
+    closeList();
+    para.push(inline(text));
+  });
+  closePara();closeList();
+  return html;
 }
 
 // ── Export ────────────────────────────────────────────────────────

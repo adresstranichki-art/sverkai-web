@@ -2654,24 +2654,10 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     window_suggestion = _build_window_suggestion(missing_in_2, missing_in_1)
     critical = sum(1 for d in discrepancies if d['severity'] == 'high')
     technical_mirror_count = len(technical_mirror_pairs)
-    ai_comment = ''
-    if client and discrepancies and cfg.get('ai_comment', True):
-        try:
-            sample = [d for d in discrepancies if d['type'] not in ('date_diff', 'technical_mirror')][:30]
-            if sample:
-                msg = client.messages.create(model=MODEL_MAIN, max_tokens=600, temperature=0,
-                    system="Ты бухгалтер-аналитик. Дай краткое резюме расхождений в акте сверки. 3-5 предложений на русском языке. Только суть, без лишних слов.",
-                    messages=[{"role": "user", "content":
-                        f"{debt_label}\nРасхождений: {len(discrepancies)}, критических: {critical}.\n"
-                        f"Примеры:\n{json.dumps(sample, ensure_ascii=False, indent=2)[:2000]}"}])
-                ai_comment = msg.content[0].text.strip()
-        except Exception as e:
-            ai_comment = f"(Комментарий AI недоступен: {e})"
-
     summary = {'total_discrepancies': len(discrepancies), 'critical_count': critical,
                 'fuzzy_count': len(fuzzy_matches), 'exact_matches': len(exact_pairs),
                 'net_period': net_period, 'debt_label': debt_label,
-                'ai_comment': ai_comment, 'period': period_str,
+                'ai_comment': '', 'period': period_str,
                 'opening_balance_doc1': float(start1) if start1 is not None else None,
                 'opening_balance_doc2': float(start2) if start2 is not None else None,
                 'closing_balance_doc1': float(end1) if end1 is not None else None,
@@ -2706,6 +2692,18 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         summary['balance_reason_analysis'] = balance_analysis
         summary['result_mode'] = 'balance_reason_analysis'
         summary['primary_tab'] = 'summary'
+    elif client and discrepancies and cfg.get('ai_comment', True):
+        try:
+            sample = [d for d in discrepancies if d['type'] not in ('date_diff', 'technical_mirror')][:30]
+            if sample:
+                msg = client.messages.create(model=MODEL_MAIN, max_tokens=600, temperature=0,
+                    system="Ты бухгалтер-аналитик. Дай краткое резюме расхождений в акте сверки. 3-5 предложений на русском языке. Только суть, без лишних слов.",
+                    messages=[{"role": "user", "content":
+                        f"{debt_label}\nРасхождений: {len(discrepancies)}, критических: {critical}.\n"
+                        f"Примеры:\n{json.dumps(sample, ensure_ascii=False, indent=2)[:2000]}"}])
+                summary['ai_comment'] = msg.content[0].text.strip()
+        except Exception as e:
+            summary['ai_comment'] = f"(Комментарий AI недоступен: {e})"
     return result
 
 
@@ -3579,7 +3577,23 @@ async def export_report(payload: dict, request: Request):
     ws2 = wb.add_worksheet('Сводка')
     ws2.set_column(0,0,35); ws2.set_column(1,1,70)
     nf = wb.add_format({'border':1,'font_size':10,'text_wrap':True})
-    for ri,(k,v) in enumerate([
+    balance_analysis = summary.get('balance_reason_analysis') or {}
+    if balance_analysis.get('enabled'):
+        summary_rows = [
+            ('Дата сверки', datetime.now().strftime('%d.%m.%Y %H:%M')),
+            ('Файл организации', f1_name), ('Файл контрагента', f2_name),
+            ('Режим', 'Анализ причин расхождения сальдо'),
+            ('Итог', summary.get('debt_label','')),
+            ('Формула', balance_analysis.get('formula', '')),
+            ('Разница начального сальдо', balance_analysis.get('opening_balance_difference_text', '')),
+            ('Влияние движений периода', balance_analysis.get('period_movement_difference_text', '')),
+            ('Разница конечного сальдо', balance_analysis.get('closing_balance_difference_text', '')),
+            ('Причин к проверке', len(balance_analysis.get('reasons') or [])),
+            ('Технических строк в детализации', balance_analysis.get('technical_discrepancies_count', 0)),
+            ('Период', summary.get('period','')),
+        ]
+    else:
+        summary_rows = [
         ('Дата сверки', datetime.now().strftime('%d.%m.%Y %H:%M')),
         ('Файл организации', f1_name), ('Файл контрагента', f2_name),
         ('Итог', summary.get('debt_label','')),
@@ -3589,10 +3603,10 @@ async def export_report(payload: dict, request: Request):
         ('Точных совпадений', summary.get('exact_matches',0)),
         ('Период', summary.get('period','')),
         ('Комментарий AI', summary.get('ai_comment','')),
-    ]):
+        ]
+    for ri,(k,v) in enumerate(summary_rows):
         ws2.write(ri,0,k,h); ws2.write(ri,1,str(v),nf)
 
-    balance_analysis = summary.get('balance_reason_analysis') or {}
     if balance_analysis.get('enabled'):
         ws3 = wb.add_worksheet('Причины сальдо')
         ws3_headers = ['Причина', 'Влияние на сальдо', 'Количество строк', 'Что проверить бухгалтеру', 'Примеры документов']
