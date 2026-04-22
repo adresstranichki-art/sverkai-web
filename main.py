@@ -2120,7 +2120,7 @@ def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[st
         }
         msg = client.messages.create(
             model=MODEL_MAIN,
-            max_tokens=900 if analysis.get('forced') else 500,
+            max_tokens=1800 if analysis.get('forced') else 1200,
             temperature=0,
             system=(
                 "Ты бухгалтер-аналитик. Объясни причины расхождения конечного сальдо "
@@ -4189,7 +4189,6 @@ async def export_report(payload: dict, request: Request):
             ('Файл организации', f1_name), ('Файл контрагента', f2_name),
             ('Режим', 'Анализ причин расхождения сальдо'),
             ('Итог', summary.get('debt_label','')),
-            ('Формула', balance_analysis.get('formula', '')),
             ('Разница начального сальдо', balance_analysis.get('opening_balance_difference_text', '')),
             ('Влияние движений периода', balance_analysis.get('period_movement_difference_text', '')),
             ('Разница конечного сальдо', balance_analysis.get('closing_balance_difference_text', '')),
@@ -4214,8 +4213,8 @@ async def export_report(payload: dict, request: Request):
 
     if balance_analysis.get('enabled'):
         ws3 = wb.add_worksheet('Причины сальдо')
-        ws3_headers = ['Операция', 'Влияние на сальдо', 'Количество строк', 'Что проверить бухгалтеру', 'Детали']
-        ws3_widths = [42, 18, 16, 48, 70]
+        ws3_headers = ['Операция', 'Влияние на сальдо', 'Что проверить бухгалтеру', 'Детали']
+        ws3_widths = [42, 18, 52, 70]
         for col, (hdr, width) in enumerate(zip(ws3_headers, ws3_widths)):
             ws3.write(0, col, hdr, h)
             ws3.set_column(col, col, width)
@@ -4230,9 +4229,8 @@ async def export_report(payload: dict, request: Request):
             ]
             ws3.write(row_idx, 0, item.get('title', ''), wrap_fmt)
             ws3.write_number(row_idx, 1, float(item.get('influence') or 0.0), money_fmt)
-            ws3.write_number(row_idx, 2, 1, wrap_fmt)
-            ws3.write(row_idx, 3, item.get('check', ''), wrap_fmt)
-            ws3.write(row_idx, 4, "\n".join(part for part in details if part), wrap_fmt)
+            ws3.write(row_idx, 2, item.get('check', ''), wrap_fmt)
+            ws3.write(row_idx, 3, "\n".join(part for part in details if part), wrap_fmt)
             row_idx += 1
         neutral = balance_analysis.get('neutral_groups') or []
         if neutral:
@@ -4241,9 +4239,8 @@ async def export_report(payload: dict, request: Request):
             for item in neutral:
                 ws3.write(row_idx, 0, item.get('title', ''), wrap_fmt)
                 ws3.write_number(row_idx, 1, float(item.get('influence') or 0.0), money_fmt)
-                ws3.write_number(row_idx, 2, int(item.get('row_count') or 0), wrap_fmt)
-                ws3.write(row_idx, 3, item.get('check', ''), wrap_fmt)
-                ws3.write(row_idx, 4, "\n".join(item.get('examples') or []), wrap_fmt)
+                ws3.write(row_idx, 2, item.get('check', ''), wrap_fmt)
+                ws3.write(row_idx, 3, "\n".join(item.get('examples') or []), wrap_fmt)
                 row_idx += 1
     wb.close()
     return FileResponse(path=str(fpath), filename=fname,
