@@ -1767,6 +1767,345 @@ DEFAULT_RECON_SETTINGS = {
 }
 
 
+def _safe_float(value) -> Optional[float]:
+    try:
+        if value is not None and pd.notna(value):
+            return float(value)
+    except Exception:
+        return None
+    return None
+
+
+def _money_plain(value) -> str:
+    try:
+        return f"{float(value):,.2f}".replace(",", " ").replace(".", ",")
+    except Exception:
+        return "0,00"
+
+
+def _money_signed_plain(value) -> str:
+    try:
+        amount = float(value)
+    except Exception:
+        amount = 0.0
+    sign = "+" if amount > 0 else ""
+    return f"{sign}{_money_plain(amount)}"
+
+
+def _money_formula_term(value) -> str:
+    try:
+        amount = float(value)
+    except Exception:
+        amount = 0.0
+    sign = "+" if amount >= 0 else "-"
+    return f"{sign} {_money_plain(abs(amount))}"
+
+
+def _row_balance_effect(row) -> float:
+    signed = _safe_float(row.get('signed_amount'))
+    if signed is not None:
+        return round(signed, 2)
+    debit = _safe_float(row.get('debit')) or 0.0
+    credit = _safe_float(row.get('credit')) or 0.0
+    return round(debit - credit, 2)
+
+
+def _unique_examples(items: list[dict], limit: int = 5) -> list[str]:
+    seen = set()
+    examples = []
+    for item in items:
+        doc = str(item.get('document') or '').strip()
+        if not doc or doc in seen:
+            continue
+        seen.add(doc)
+        examples.append(doc)
+        if len(examples) >= limit:
+            break
+    return examples
+
+
+def _in_side_phrase(side: str) -> str:
+    return 'в первом акте' if side == 'doc1' else 'во втором акте'
+
+
+def _operation_name(document: str) -> str:
+    text = str(document or '').strip()
+    if '(' in text:
+        text = text.split('(', 1)[0].strip()
+    return text or 'Документ'
+
+
+def _collect_balance_unmatched_rows(df: pd.DataFrame, raw_rows: list, side: str) -> list[dict]:
+    if df is None or df.empty or 'raw_row' not in df.columns:
+        return []
+    raw_set = set(raw_rows or [])
+    if not raw_set:
+        return []
+    rows = []
+    for _, row in df[df['raw_row'].isin(raw_set)].iterrows():
+        document = str(row.get('document') or '').strip()
+        doc_num_raw = row.get('doc_num')
+        doc_num = _normalize_doc_num(doc_num_raw) if doc_num_raw else ''
+        effect = _row_balance_effect(row)
+        raw_row = int(row.get('raw_row', 0) or 0)
+        rows.append({
+            'side': side,
+            'raw_row': raw_row,
+            'date': str(row.get('date_str') or '').strip(),
+            'document': document,
+            'doc_num': doc_num or None,
+            'effect': round(effect, 2),
+            'row_key': f"{side}:{raw_row}",
+        })
+    return rows
+
+
+def _make_balance_reason(title: str, items: list[dict], check: str, *, kind: str = 'reason', order: int = 100) -> dict:
+    influence = round(sum(float(item.get('effect') or 0.0) for item in items), 2)
+    sides = sorted(set(item.get('side') for item in items if item.get('side')))
+    return {
+        'title': title,
+        'kind': kind,
+        'influence': influence,
+        'row_count': len(items),
+        'check': check,
+        'examples': _unique_examples(items),
+        'sides': sides,
+        'rows': [{'side': item['side'], 'raw_row': item['raw_row']} for item in items],
+        'order': order,
+    }
+
+
+def _balance_reason_group_for_item(item: dict, doc1_group_all: bool) -> tuple[str, str, str, int]:
+    side = item.get('side')
+    side_text = _in_side_phrase(side)
+    document = str(item.get('document') or '')
+    doc_lower = document.lower()
+    doc_num = item.get('doc_num')
+
+    if side == 'doc1' and doc1_group_all:
+        return (
+            'doc1_only_documents',
+            'Документы есть только в первом акте',
+            'Проверить, почему эти документы отражены в первом акте и отсутствуют во втором: период, контрагент, договор или оферта.',
+            20,
+        )
+
+    if 'списан' in doc_lower and 'задолж' in doc_lower:
+        return (
+            f'{side}_writeoff',
+            f'Списания задолженности есть только {_in_side_phrase(side)}',
+            'Проверить основания списания задолженности и должно ли оно быть отражено во втором документе сверки.',
+            30,
+        )
+
+    if 'бн' in doc_lower:
+        doc_date = _extract_doc_date(document)
+        date_part = f" от {doc_date.strftime('%d.%m.%Y')}" if doc_date is not None and pd.notna(doc_date) else ''
+        op = _operation_name(document).lower()
+        return (
+            f'{side}_bn_{date_part}',
+            f'{op.capitalize()}ы бн{date_part} есть только {side_text}',
+            'Проверить, относятся ли эти операции к входящему сальдо, закрытому периоду или к детализации, которая раскрыта только в одном акте.',
+            10,
+        )
+
+    if 'оплата' in doc_lower and doc_num:
+        return (
+            f'{side}_payment_{doc_num}',
+            f'Оплата {doc_num} есть только {side_text}',
+            'Проверить платеж, дату отражения и привязку к договору или оферте.',
+            40,
+        )
+
+    if doc_num:
+        op = _operation_name(document)
+        return (
+            f'{side}_doc_{doc_num}',
+            f'{op} {doc_num} есть только {side_text}',
+            'Проверить документ, его сумму и привязку к договору или оферте.',
+            50,
+        )
+
+    op = _operation_name(document)
+    return (
+        f'{side}_other_{op.lower()}',
+        f'{op} есть только {side_text}',
+        'Проверить документ и причину отсутствия зеркальной операции во втором акте.',
+        60,
+    )
+
+
+def _balance_analysis_fallback_explanation(analysis: dict) -> str:
+    reasons = analysis.get('reasons') or []
+    neutral = analysis.get('neutral_groups') or []
+    top = reasons[:3]
+    parts = [
+        f"Разница конечного сальдо объясняется формулой: {analysis.get('formula', '')}.",
+        f"Движения периода дают влияние {analysis.get('period_movement_difference_text', '')}.",
+    ]
+    if top:
+        parts.append(
+            "Основные группы: " + "; ".join(
+                f"{r.get('title')} ({_money_signed_plain(r.get('influence', 0))})"
+                for r in top
+            ) + "."
+        )
+    if neutral:
+        rows = sum(int(g.get('row_count') or 0) for g in neutral)
+        parts.append(f"{rows} технических строк вынесены отдельно, потому что их чистое влияние на сальдо равно нулю.")
+    return " ".join(p for p in parts if p.strip())
+
+
+def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[str, str]:
+    fallback = _balance_analysis_fallback_explanation(analysis)
+    if not client or not cfg.get('ai_comment', True):
+        return fallback, 'deterministic'
+    try:
+        payload = {
+            'formula': analysis.get('formula'),
+            'opening_balance_difference': analysis.get('opening_balance_difference'),
+            'period_movement_difference': analysis.get('period_movement_difference'),
+            'closing_balance_difference': analysis.get('closing_balance_difference'),
+            'reasons': [
+                {
+                    'title': r.get('title'),
+                    'influence': r.get('influence'),
+                    'row_count': r.get('row_count'),
+                    'examples': r.get('examples', [])[:3],
+                }
+                for r in (analysis.get('reasons') or [])[:8]
+            ],
+            'neutral_groups': [
+                {
+                    'title': g.get('title'),
+                    'influence': g.get('influence'),
+                    'row_count': g.get('row_count'),
+                    'examples': g.get('examples', [])[:3],
+                }
+                for g in (analysis.get('neutral_groups') or [])[:5]
+            ],
+        }
+        msg = client.messages.create(
+            model=MODEL_MAIN,
+            max_tokens=500,
+            temperature=0,
+            system=(
+                "Ты бухгалтер-аналитик. Объясни причины расхождения конечного сальдо "
+                "простым русским языком. Используй только переданные суммы и не придумывай новые."
+            ),
+            messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+        )
+        text = msg.content[0].text.strip()
+        return text or fallback, 'ai'
+    except Exception:
+        return fallback, 'deterministic'
+
+
+def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, client=None, cfg=None) -> Optional[dict]:
+    cfg = cfg or DEFAULT_RECON_SETTINGS
+    summary = result.get('summary', {})
+    opening = summary.get('opening_balance_difference')
+    closing = summary.get('closing_balance_difference')
+    movement = summary.get('transaction_net_difference')
+    if opening is None or closing is None or movement is None:
+        return None
+
+    total_disc = int(summary.get('total_discrepancies', 0) or 0)
+    unmatched1 = _collect_balance_unmatched_rows(df1, result.get('missing_rows1', []), 'doc1')
+    unmatched2 = _collect_balance_unmatched_rows(df2, result.get('missing_rows2', []), 'doc2')
+    unmatched = unmatched1 + unmatched2
+    if not unmatched:
+        return None
+
+    parser_ids = [
+        str(getattr(df, 'attrs', {}).get('parser_id') or '')
+        for df in (df1, df2)
+    ]
+    pdfish = any(pid.startswith('pdf') for pid in parser_ids)
+    repeated_doc_groups = {}
+    for item in unmatched:
+        if item.get('doc_num'):
+            repeated_doc_groups.setdefault(item['doc_num'], []).append(item)
+    has_zero_detail_group = any(
+        len(items) >= 8 and abs(round(sum(float(i.get('effect') or 0.0) for i in items), 2)) <= 0.01
+        for items in repeated_doc_groups.values()
+    )
+    row_ratio = min(len(df1), len(df2)) / max(len(df1), len(df2), 1)
+    complex_case = (
+        pdfish
+        and total_disc >= 30
+        and len(unmatched) >= 30
+        and (has_zero_detail_group or row_ratio <= 0.8)
+    )
+    if not complex_case:
+        return None
+
+    neutral_groups = []
+    neutral_keys = set()
+    for doc_num, items in repeated_doc_groups.items():
+        influence = round(sum(float(item.get('effect') or 0.0) for item in items), 2)
+        if len(items) >= 8 and abs(influence) <= 0.01:
+            title = f'Документ/оферта {doc_num}: внутренняя детализация без влияния на итог'
+            neutral = _make_balance_reason(
+                title,
+                items,
+                'Не разбирать как бухгалтерскую причину расхождения: внутри группы обороты компенсируют друг друга.',
+                kind='neutral',
+                order=900,
+            )
+            neutral_groups.append(neutral)
+            neutral_keys.update(item['row_key'] for item in items)
+
+    impactful = [
+        item for item in unmatched
+        if item['row_key'] not in neutral_keys and abs(float(item.get('effect') or 0.0)) >= 0.01
+    ]
+    doc1_group_all = 0 < len([i for i in impactful if i['side'] == 'doc1']) <= 10
+    grouped = {}
+    for item in impactful:
+        key, title, check, order = _balance_reason_group_for_item(item, doc1_group_all)
+        group = grouped.setdefault(key, {'title': title, 'check': check, 'items': [], 'order': order})
+        group['items'].append(item)
+
+    reasons = [
+        _make_balance_reason(group['title'], group['items'], group['check'], order=group['order'])
+        for group in grouped.values()
+    ]
+    reasons = [r for r in reasons if abs(float(r.get('influence') or 0.0)) >= 0.01]
+    reasons.sort(key=lambda r: (r.get('order', 100), -abs(float(r.get('influence') or 0.0)), r.get('title', '')))
+    neutral_groups.sort(key=lambda r: (-int(r.get('row_count') or 0), r.get('title', '')))
+
+    reasons_total = round(sum(float(r.get('influence') or 0.0) for r in reasons), 2)
+    neutral_total = round(sum(float(r.get('influence') or 0.0) for r in neutral_groups), 2)
+    explained_total = round(reasons_total + neutral_total, 2)
+    unexplained = round(float(movement) - explained_total, 2)
+
+    analysis = {
+        'enabled': True,
+        'mode': 'balance_reason_analysis',
+        'primary_tab': 'summary',
+        'trigger': 'complex_pdf_balance_case',
+        'technical_discrepancies_count': total_disc,
+        'opening_balance_difference': round(float(opening), 2),
+        'period_movement_difference': round(float(movement), 2),
+        'closing_balance_difference': round(float(closing), 2),
+        'opening_balance_difference_text': _money_signed_plain(opening),
+        'period_movement_difference_text': _money_signed_plain(movement),
+        'closing_balance_difference_text': _money_signed_plain(closing),
+        'formula': f"{_money_signed_plain(opening)} {_money_formula_term(movement)} = {_money_signed_plain(closing)}",
+        'reasons': reasons,
+        'neutral_groups': neutral_groups,
+        'explained_movement': explained_total,
+        'unexplained_difference': unexplained,
+        'parser_ids': parser_ids,
+    }
+    explanation, source = _maybe_ai_balance_explanation(analysis, client, cfg)
+    analysis['explanation'] = explanation
+    analysis['explanation_source'] = source
+    return analysis
+
+
 # ════════════════════════════════════════════════════════════════════
 #  АЛГОРИТМ СВЕРКИ
 # ════════════════════════════════════════════════════════════════════
@@ -2329,24 +2668,25 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         except Exception as e:
             ai_comment = f"(Комментарий AI недоступен: {e})"
 
-    return {
+    summary = {'total_discrepancies': len(discrepancies), 'critical_count': critical,
+                'fuzzy_count': len(fuzzy_matches), 'exact_matches': len(exact_pairs),
+                'net_period': net_period, 'debt_label': debt_label,
+                'ai_comment': ai_comment, 'period': period_str,
+                'opening_balance_doc1': float(start1) if start1 is not None else None,
+                'opening_balance_doc2': float(start2) if start2 is not None else None,
+                'closing_balance_doc1': float(end1) if end1 is not None else None,
+                'closing_balance_doc2': float(end2) if end2 is not None else None,
+                'period_doc1': period1_str or None,
+                'period_doc2': period2_str or None,
+                'period_mismatch': bool(period1_str and period2_str and period1_str != period2_str),
+                'opening_balance_difference': opening_diff,
+                'closing_balance_difference': closing_diff,
+                'transaction_net_difference': transaction_net_diff,
+                'window_suggestion': window_suggestion,
+                'technical_mirror_count': technical_mirror_count}
+    result = {
         'discrepancies': discrepancies,
-        'summary': {'total_discrepancies': len(discrepancies), 'critical_count': critical,
-                    'fuzzy_count': len(fuzzy_matches), 'exact_matches': len(exact_pairs),
-                    'net_period': net_period, 'debt_label': debt_label,
-                    'ai_comment': ai_comment, 'period': period_str,
-                    'opening_balance_doc1': float(start1) if start1 is not None else None,
-                    'opening_balance_doc2': float(start2) if start2 is not None else None,
-                    'closing_balance_doc1': float(end1) if end1 is not None else None,
-                    'closing_balance_doc2': float(end2) if end2 is not None else None,
-                    'period_doc1': period1_str or None,
-                    'period_doc2': period2_str or None,
-                    'period_mismatch': bool(period1_str and period2_str and period1_str != period2_str),
-                    'opening_balance_difference': opening_diff,
-                    'closing_balance_difference': closing_diff,
-                    'transaction_net_difference': transaction_net_diff,
-                    'window_suggestion': window_suggestion,
-                    'technical_mirror_count': technical_mirror_count},
+        'summary': summary,
         'matched1': list(matched1), 'matched2': list(matched2),
         'missing_rows1': list(missing_in_2['raw_row'].tolist()),
         'missing_rows2': list(missing_in_1['raw_row'].tolist()),
@@ -2361,6 +2701,12 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
         'date_diff_rows2': list({r2['raw_row'] for r1,r2 in exact_pairs+fuzzy_matches
             if pd.notna(r1.get('date')) and pd.notna(r2.get('date')) and abs((r1['date']-r2['date']).days) > 0}),
     }
+    balance_analysis = _build_balance_reason_analysis(df1, df2, result, client, cfg)
+    if balance_analysis:
+        summary['balance_reason_analysis'] = balance_analysis
+        summary['result_mode'] = 'balance_reason_analysis'
+        summary['primary_tab'] = 'summary'
+    return result
 
 
 def _reconcile_via_claude(df1, df2, client, log):
@@ -3245,6 +3591,36 @@ async def export_report(payload: dict, request: Request):
         ('Комментарий AI', summary.get('ai_comment','')),
     ]):
         ws2.write(ri,0,k,h); ws2.write(ri,1,str(v),nf)
+
+    balance_analysis = summary.get('balance_reason_analysis') or {}
+    if balance_analysis.get('enabled'):
+        ws3 = wb.add_worksheet('Причины сальдо')
+        ws3_headers = ['Причина', 'Влияние на сальдо', 'Количество строк', 'Что проверить бухгалтеру', 'Примеры документов']
+        ws3_widths = [42, 18, 16, 48, 70]
+        for col, (hdr, width) in enumerate(zip(ws3_headers, ws3_widths)):
+            ws3.write(0, col, hdr, h)
+            ws3.set_column(col, col, width)
+        money_fmt = wb.add_format({'border':1,'font_size':10,'num_format':'#,##0.00'})
+        wrap_fmt = wb.add_format({'border':1,'font_size':10,'text_wrap':True,'valign':'top'})
+        row_idx = 1
+        for item in balance_analysis.get('reasons', []):
+            ws3.write(row_idx, 0, item.get('title', ''), wrap_fmt)
+            ws3.write_number(row_idx, 1, float(item.get('influence') or 0.0), money_fmt)
+            ws3.write_number(row_idx, 2, int(item.get('row_count') or 0), wrap_fmt)
+            ws3.write(row_idx, 3, item.get('check', ''), wrap_fmt)
+            ws3.write(row_idx, 4, "\n".join(item.get('examples') or []), wrap_fmt)
+            row_idx += 1
+        neutral = balance_analysis.get('neutral_groups') or []
+        if neutral:
+            ws3.write(row_idx, 0, 'Не влияет на итог / техническая детализация', h)
+            row_idx += 1
+            for item in neutral:
+                ws3.write(row_idx, 0, item.get('title', ''), wrap_fmt)
+                ws3.write_number(row_idx, 1, float(item.get('influence') or 0.0), money_fmt)
+                ws3.write_number(row_idx, 2, int(item.get('row_count') or 0), wrap_fmt)
+                ws3.write(row_idx, 3, item.get('check', ''), wrap_fmt)
+                ws3.write(row_idx, 4, "\n".join(item.get('examples') or []), wrap_fmt)
+                row_idx += 1
     wb.close()
     return FileResponse(path=str(fpath), filename=fname,
                         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

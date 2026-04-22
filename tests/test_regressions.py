@@ -507,6 +507,74 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertIn('618', set(df['doc_num']))
         self.assertIn('3-179712', set(df['doc_num']))
 
+    def test_balance_reason_analysis_groups_complex_pdf_case(self):
+        pd = self.main.pd
+
+        def make_row(raw_row, document, doc_num, effect):
+            amount = abs(effect)
+            return {
+                'date': pd.to_datetime('31.03.2026', dayfirst=True),
+                'date_str': '31.03.2026',
+                'document': document,
+                'doc_num': doc_num,
+                'debit': amount if effect < 0 else None,
+                'credit': amount if effect > 0 else None,
+                'signed_amount': effect,
+                'raw_row': raw_row,
+            }
+
+        doc1_rows = [
+            make_row(0, 'Принято (3 от 31.03.2026)', '3', -55000.0),
+            make_row(1, 'Принято (63 от 31.03.2026)', '63', -344200.0),
+            make_row(2, 'Продажа (67 от 31.03.2026)', '67', -537746.0),
+        ]
+        doc2_rows = [
+            make_row(10, 'Приход (бн от 31.12.2025)', None, 423043.30),
+            make_row(11, 'Приход (бн от 31.12.2025)', None, 2398674.56),
+        ]
+        for idx, amount in enumerate([3800, 26000, 17000, 8100, 16800, 223500, 49000], 20):
+            doc2_rows.append(make_row(idx, 'Списание дебиторской (кредиторской) задолженности (31.03.2026)', None, float(amount)))
+        doc2_rows.append(make_row(40, 'Оплата (85620 от 31.03.2026)', '85620', 15000.0))
+        for idx in range(64):
+            effect = 1000.0 if idx % 2 == 0 else -1000.0
+            doc2_rows.append(make_row(100 + idx, 'Принято (94485 от 31.03.2026)' if effect < 0 else 'Оплата (94485 от 31.03.2026)', '94485', effect))
+
+        df1 = pd.DataFrame(doc1_rows)
+        df2 = pd.DataFrame(doc2_rows)
+        df1.attrs['parser_id'] = 'pdf_text_left'
+        df2.attrs['parser_id'] = 'pdf_text_left'
+        result = {
+            'summary': {
+                'total_discrepancies': 77,
+                'opening_balance_difference': -3831198.19,
+                'transaction_net_difference': 2243971.86,
+                'closing_balance_difference': -1587226.33,
+            },
+            'missing_rows1': [0, 1, 2],
+            'missing_rows2': [row['raw_row'] for row in doc2_rows],
+        }
+
+        analysis = self.main._build_balance_reason_analysis(df1, df2, result, None, self.cfg)
+
+        self.assertIsNotNone(analysis)
+        self.assertEqual(analysis['primary_tab'], 'summary')
+        self.assertAlmostEqual(analysis['period_movement_difference'], 2243971.86, places=2)
+        self.assertAlmostEqual(analysis['explained_movement'], 2243971.86, places=2)
+        self.assertAlmostEqual(analysis['unexplained_difference'], 0.0, places=2)
+
+        reasons = {item['title']: item for item in analysis['reasons']}
+        bn_title = next(title for title in reasons if 'бн от 31.12.2025' in title)
+        self.assertAlmostEqual(reasons[bn_title]['influence'], 2821717.86, places=2)
+        self.assertAlmostEqual(reasons['Документы есть только в первом акте']['influence'], -936946.0, places=2)
+        writeoff_title = next(title for title in reasons if title.startswith('Списания задолженности'))
+        self.assertAlmostEqual(reasons[writeoff_title]['influence'], 344200.0, places=2)
+        self.assertAlmostEqual(reasons['Оплата 85620 есть только во втором акте']['influence'], 15000.0, places=2)
+
+        self.assertEqual(len(analysis['neutral_groups']), 1)
+        self.assertIn('94485', analysis['neutral_groups'][0]['title'])
+        self.assertEqual(analysis['neutral_groups'][0]['row_count'], 64)
+        self.assertAlmostEqual(analysis['neutral_groups'][0]['influence'], 0.0, places=2)
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod
