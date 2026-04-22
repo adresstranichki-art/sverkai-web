@@ -160,6 +160,11 @@
     background: rgba(255,255,255,.09);
     border-color: rgba(255,255,255,.22);
   }
+  .btn-light {
+    color: var(--green-dk);
+    background: #fff;
+    border-color: var(--line);
+  }
   .hero-points {
     display: flex;
     flex-wrap: wrap;
@@ -180,6 +185,7 @@
     width: min(1180px, calc(100% - 48px));
     margin: 0 auto;
     padding: 58px 0;
+    scroll-margin-top: 88px;
   }
   .section.compact { padding-top: 36px; }
   .section-head {
@@ -374,6 +380,116 @@
     padding-left: 12px;
   }
 
+  .request-grid {
+    display: grid;
+    grid-template-columns: .92fr 1.08fr;
+    gap: 16px;
+    align-items: stretch;
+  }
+  .request-copy,
+  .lead-form {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 10px 26px rgba(20, 28, 35, .06);
+    padding: 24px;
+  }
+  .request-copy h3 { color: var(--ink); font-size: 22px; line-height: 1.22; margin-bottom: 10px; }
+  .request-steps {
+    list-style: none;
+    display: grid;
+    gap: 10px;
+    margin: 18px 0;
+  }
+  .request-steps li {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 10px;
+    align-items: start;
+    color: var(--muted);
+  }
+  .request-steps span {
+    display: inline-flex;
+    width: 30px;
+    height: 30px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--green-soft);
+    color: var(--green-dk);
+    font-weight: 900;
+    line-height: 1;
+  }
+  .contact-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 18px;
+  }
+  .contact-link {
+    display: inline-flex;
+    min-height: 42px;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 800;
+    text-align: center;
+  }
+  .contact-link.primary {
+    background: linear-gradient(180deg, #2d8b50, var(--green));
+    border-color: rgba(31,122,67,.45);
+    color: white;
+  }
+  .lead-form {
+    display: grid;
+    gap: 13px;
+  }
+  .lead-form h3 { color: var(--ink); font-size: 22px; line-height: 1.22; }
+  .form-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .lead-form label {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 800;
+  }
+  .lead-form input,
+  .lead-form select,
+  .lead-form textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    padding: 11px 12px;
+    outline: none;
+  }
+  .lead-form textarea { min-height: 100px; resize: vertical; }
+  .lead-form input:focus,
+  .lead-form select:focus,
+  .lead-form textarea:focus {
+    border-color: rgba(31,122,67,.65);
+    box-shadow: 0 0 0 3px rgba(31,122,67,.10);
+  }
+  .form-hint,
+  .form-status {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .form-status { min-height: 20px; color: var(--green-dk); font-weight: 800; }
+
   .final-cta {
     display: flex;
     align-items: center;
@@ -407,9 +523,11 @@
     .check-grid,
     .steps,
     .two-col,
-    .note-card {
+    .note-card,
+    .request-grid {
       grid-template-columns: 1fr;
     }
+    .contact-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .steps { gap: 10px; }
     .step { min-height: auto; }
     .final-cta { align-items: flex-start; flex-direction: column; }
@@ -430,6 +548,8 @@
     .lead { font-size: 16px; }
     .btn { width: 100%; white-space: normal; text-align: center; }
     .hero-point { width: 100%; }
+    .form-row,
+    .contact-actions { grid-template-columns: 1fr; }
     .section { padding: 42px 0; }
     .section.compact { padding-top: 28px; }
     .final-cta { padding: 22px; }
@@ -456,7 +576,7 @@
     <a href="#checks">Что проверяет</a>
     <a href="#formats">Форматы</a>
     <a href="#access">Доступ</a>
-    <a class="nav-cta" href="/app">Попробовать</a>
+    <a class="nav-cta" href="#request">Тест-доступ</a>
   </nav>
 </header>
 
@@ -470,8 +590,8 @@
         Загрузите два акта сверки, получите список документов, сумм, дат и сальдо, которые нужно проверить специалисту.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/app">Попробовать сверку</a>
-        <a class="btn btn-secondary" href="#access">Получить тестовый доступ</a>
+        <a class="btn btn-primary" href="/app">Попробовать Excel-сверку</a>
+        <a class="btn btn-secondary" href="#request">Получить тестовый доступ</a>
       </div>
       <div class="hero-points" aria-label="Ключевые возможности">
         <span class="hero-point">Excel .xlsx и .xls — основной формат</span>
@@ -612,6 +732,62 @@
     </section>
   </div>
 
+  <section class="section" id="request">
+    <div class="section-head">
+      <div class="kicker">Для первых тестировщиков</div>
+      <h2>Бесплатно поможем проверить первые обезличенные акты</h2>
+      <p class="muted">Если вы регулярно сверяете взаиморасчеты, оставьте контакт или напишите напрямую. Важно протестировать сервис на реальных, но обезличенных Excel-файлах.</p>
+    </div>
+    <div class="request-grid">
+      <article class="request-copy">
+        <span class="tag green">Как протестировать</span>
+        <h3>Нужны два акта сверки и 10 минут обратной связи</h3>
+        <p class="muted">Лучше начать с Excel: так проще понять, где SverkAI уже экономит время, а где нужен ручной разбор.</p>
+        <ol class="request-steps">
+          <li><span>1</span><div>Подготовьте два обезличенных Excel-акта: от организации и контрагента.</div></li>
+          <li><span>2</span><div>Попробуйте гостевую сверку или запросите тестовый доступ для PDF, истории и экспорта.</div></li>
+          <li><span>3</span><div>Напишите, что нашлось, что было непонятно и какой формат актов встречается чаще всего.</div></li>
+        </ol>
+        <div class="contact-actions" aria-label="Контакты для тестового доступа">
+          <a class="contact-link primary" href="https://t.me/epohamm" target="_blank" rel="noopener">Telegram</a>
+          <a class="contact-link" href="mailto:alexander.anti.99@gmail.com">Email</a>
+          <a class="contact-link" href="https://max.ru/u/f9LHodD0cOI4hGLCegY-bGp2WPVjXJYxG8-wzly_UZ4pBDyXEgtUwY0toUU" target="_blank" rel="noopener">MAX</a>
+          <a class="contact-link" href="https://vk.com/adresstranichkii" target="_blank" rel="noopener">VK</a>
+        </div>
+      </article>
+      <form class="lead-form" id="lead-form">
+        <h3>Заявка на тест</h3>
+        <p class="form-hint">Форма сформирует письмо на alexander.anti.99@gmail.com. Файлы прикладывать не нужно: сначала договоримся о безопасном тесте.</p>
+        <div class="form-row">
+          <label>Имя
+            <input type="text" name="name" autocomplete="name" placeholder="Как к вам обращаться" required>
+          </label>
+          <label>Роль
+            <input type="text" name="role" placeholder="Бухгалтер, финдиректор, 1С..." required>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Контакт
+            <input type="text" name="contact" autocomplete="email" placeholder="Email или Telegram" required>
+          </label>
+          <label>Формат актов
+            <select name="format">
+              <option value="Excel">Excel .xlsx/.xls</option>
+              <option value="Excel и PDF">Excel и PDF</option>
+              <option value="PDF">В основном PDF</option>
+              <option value="Не знаю">Пока не знаю</option>
+            </select>
+          </label>
+        </div>
+        <label>Что хотите проверить
+          <textarea name="details" placeholder="Например: сверяем 10-20 актов в месяц, часто не сходятся суммы и сальдо"></textarea>
+        </label>
+        <button class="btn btn-primary" type="submit">Сформировать заявку</button>
+        <div class="form-status" id="lead-status" aria-live="polite"></div>
+      </form>
+    </div>
+  </section>
+
   <section class="section" id="safety">
     <article class="note-card">
       <div>
@@ -632,7 +808,10 @@
         <h2>Готовы проверить два акта?</h2>
         <p class="muted">Начните с Excel-файлов в гостевом режиме или войдите с тестовым доступом для PDF, истории и экспорта.</p>
       </div>
-      <a class="btn btn-primary" href="/app">Открыть SverkAI</a>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/app">Открыть SverkAI</a>
+        <a class="btn btn-light" href="https://t.me/epohamm" target="_blank" rel="noopener">Написать в Telegram</a>
+      </div>
     </div>
   </section>
 </main>
@@ -640,5 +819,37 @@
 <footer class="site-footer">
   SverkAI — сервис для ускорения сверки актов взаиморасчетов. Результаты требуют профессиональной проверки.
 </footer>
+<script>
+  const leadForm = document.getElementById('lead-form');
+  const leadStatus = document.getElementById('lead-status');
+  if (leadForm) {
+    leadForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(leadForm).entries());
+      const subject = 'Заявка на тестовый доступ SverkAI';
+      const body = [
+        'Здравствуйте! Хочу протестировать SverkAI.',
+        '',
+        `Имя: ${data.name || ''}`,
+        `Роль: ${data.role || ''}`,
+        `Контакт: ${data.contact || ''}`,
+        `Формат актов: ${data.format || ''}`,
+        `Что хочу проверить: ${data.details || ''}`,
+        '',
+        `Страница: ${window.location.href}`
+      ].join('\n');
+
+      try {
+        await navigator.clipboard?.writeText(body);
+        leadStatus.textContent = 'Текст заявки скопирован. Сейчас откроется письмо.';
+      } catch (_) {
+        leadStatus.textContent = 'Сейчас откроется письмо с заявкой.';
+      }
+
+      const mailto = `mailto:alexander.anti.99@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.location.href = mailto;
+    });
+  }
+</script>
 </body>
 </html>
