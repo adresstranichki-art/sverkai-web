@@ -768,6 +768,11 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertFalse(meta['programmatic_matches_ai'])
         self.assertAlmostEqual(summary['balance_reason_analysis']['closing_balance_difference'], 50.0)
 
+    def test_incomplete_ai_balance_explanation_is_rejected(self):
+        self.assertTrue(self.main._looks_incomplete_ai_text('### Что проверить\nНуж'))
+        self.assertTrue(self.main._looks_incomplete_ai_text('**Что проверить'))
+        self.assertFalse(self.main._looks_incomplete_ai_text('### Итог\nРасхождение объяснено полностью.'))
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod

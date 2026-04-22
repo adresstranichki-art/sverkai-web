@@ -2087,12 +2087,33 @@ def _balance_analysis_fallback_explanation(analysis: dict) -> str:
     return " ".join(p for p in parts if p.strip())
 
 
+def _looks_incomplete_ai_text(text: str) -> bool:
+    stripped = (text or '').strip()
+    if not stripped:
+        return True
+    if stripped.count('**') % 2:
+        return True
+    tail = stripped[-1]
+    if tail in '.!?…:;»")':
+        return False
+    if stripped.endswith('руб.'):
+        return False
+    return True
+
+
 def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[str, str]:
     fallback = _balance_analysis_fallback_explanation(analysis)
     if not client or not cfg.get('ai_comment', True):
         return fallback, 'deterministic'
     try:
         payload = {
+            'format': (
+                'Ответ строго до 1200 символов. Только 3 раздела: '
+                '### Итог, ### Основные причины, ### Что проверить. '
+                'В разделе "Основные причины" максимум 4 коротких пункта; '
+                'детальные операции не перечислять, они показаны в таблице ниже. '
+                'Ответ должен закончиться полным предложением.'
+            ),
             'formula': analysis.get('formula'),
             'opening_balance_difference': analysis.get('opening_balance_difference'),
             'period_movement_difference': analysis.get('period_movement_difference'),
@@ -2120,17 +2141,19 @@ def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[st
         }
         msg = client.messages.create(
             model=MODEL_MAIN,
-            max_tokens=1800 if analysis.get('forced') else 1200,
+            max_tokens=900,
             temperature=0,
             system=(
                 "Ты бухгалтер-аналитик. Объясни причины расхождения конечного сальдо "
                 "простым русским языком. Используй только переданные суммы и не придумывай новые. "
-                "Не используй markdown-заголовки разных уровней и таблицы: пиши короткими разделами с понятными подзаголовками. "
-                "Не объединяй отсутствующие операции в одну группу: если перечисляешь документы, каждый документ пиши отдельным пунктом с его суммой влияния."
+                "Пиши строго по формату из поля format. Не используй таблицы. "
+                "Не перечисляй все документы: подробный список операций уже выводится отдельной таблицей ниже."
             ),
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
         )
         text = msg.content[0].text.strip()
+        if len(text) > 1400 or _looks_incomplete_ai_text(text):
+            return fallback, 'deterministic'
         return text or fallback, 'ai'
     except Exception:
         return fallback, 'deterministic'
