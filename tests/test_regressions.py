@@ -697,6 +697,69 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertAlmostEqual(analysis['period_movement_difference'], 50.0, places=2)
         self.assertEqual(client.messages.calls, 1)
 
+    def test_first_expert_audit_switches_to_expert_when_ai_basis_differs(self):
+        pd = self.main.pd
+
+        df1 = pd.DataFrame([{
+            'date': pd.to_datetime('31.03.2026', dayfirst=True),
+            'date_str': '31.03.2026',
+            'document': 'Продажа (1 от 31.03.2026)',
+            'doc_num': '1',
+            'debit': 50.0,
+            'credit': None,
+            'signed_amount': 50.0,
+            'raw_row': 0,
+        }])
+        df2 = pd.DataFrame([{
+            'date': pd.to_datetime('31.03.2026', dayfirst=True),
+            'date_str': '31.03.2026',
+            'document': 'Оплата (2 от 31.03.2026)',
+            'doc_num': '2',
+            'debit': None,
+            'credit': 0.0,
+            'signed_amount': 0.0,
+            'raw_row': 0,
+        }])
+        result = {
+            'summary': {
+                'total_discrepancies': 1,
+                'opening_balance_difference': 0.0,
+                'transaction_net_difference': 0.0,
+                'closing_balance_difference': 0.0,
+                'debt_label': 'Взаиморасчёты совпадают',
+            },
+            'discrepancies': [],
+            'missing_rows1': [0],
+            'missing_rows2': [],
+        }
+
+        class FakeMessages:
+            def create(self, *args, **kwargs):
+                return types.SimpleNamespace(content=[types.SimpleNamespace(text='AI explanation')])
+
+        class FakeClient:
+            def __init__(self):
+                self.messages = FakeMessages()
+
+        original = self.main._ai_recover_balance_basis
+        try:
+            self.main._ai_recover_balance_basis = lambda *args, **kwargs: {
+                'doc1': {'opening_balance': 0, 'closing_balance': 50, 'period_from': '01.03.2026', 'period_to': '31.03.2026', 'evidence': {}},
+                'doc2': {'opening_balance': 0, 'closing_balance': 0, 'period_from': '01.03.2026', 'period_to': '31.03.2026', 'evidence': {}},
+            }
+            audited, meta = self.main._run_first_expert_audit(
+                df1, df2, result, FakeClient(), self.cfg, lambda *_: None
+            )
+        finally:
+            self.main._ai_recover_balance_basis = original
+
+        summary = audited['summary']
+        self.assertEqual(summary['result_mode'], 'balance_reason_analysis')
+        self.assertTrue(meta['performed'])
+        self.assertTrue(meta['used_expert_result'])
+        self.assertFalse(meta['programmatic_matches_ai'])
+        self.assertAlmostEqual(summary['balance_reason_analysis']['closing_balance_difference'], 50.0)
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod
@@ -788,6 +851,35 @@ class AuthKeyTests(unittest.TestCase):
         with self.assertRaises(self.main.HTTPException) as cm:
             self.main._guest_limit_or_raise(req)
         self.assertEqual(cm.exception.status_code, 429)
+
+    def test_guest_expert_audit_is_single_use_and_allows_pdf_upload(self):
+        import asyncio
+
+        self.main.ANTHROPIC_API_KEY = 'sk-ant-api03-system'
+        req = self._guest_request()
+
+        status = self.main._guest_usage_status(req)
+        self.assertEqual(status['expert_limit'], 1)
+        self.assertEqual(status['expert_remaining'], 1)
+        self.assertTrue(status['expert_available'])
+        self.assertTrue(self.main._guest_expert_audit_available(req))
+
+        async def upload_pdf():
+            with tempfile.TemporaryDirectory() as tmp:
+                upload = self._Upload('act.pdf', b'%PDF-1.4\n')
+                path = Path(tmp) / 'act.pdf'
+                size = await self.main._save_upload_to_path(
+                    upload, str(path), '', 'File', allow_guest_pdf=True
+                )
+                self.assertEqual(size, len(b'%PDF-1.4\n'))
+                self.assertTrue(path.exists())
+
+        asyncio.run(upload_pdf())
+
+        status = self.main._record_guest_reconcile(req, expert_audit_used=True)
+        self.assertEqual(status['expert_used'], 1)
+        self.assertEqual(status['expert_remaining'], 0)
+        self.assertFalse(self.main._guest_expert_audit_available(req))
 
     def test_system_api_key_cannot_be_used_as_user_login(self):
         guest_key = 'sk-ant-api03-system'

@@ -1268,6 +1268,15 @@ function guestLimitText() {
   return `${limit} бесплатные сверки за ${days} дней`;
 }
 
+function hasGuestExpertAudit() {
+  if (isLoggedIn()) return false;
+  if (!healthInfo?.guest_expert_audit_available) return false;
+  if (guestUsage && Number.isFinite(Number(guestUsage.expert_remaining))) {
+    return Number(guestUsage.expert_remaining) > 0;
+  }
+  return true;
+}
+
 function currentMaxFileMb() {
   return isLoggedIn()
     ? configuredLimit('user_max_file_mb', 10)
@@ -1298,12 +1307,12 @@ function updateAccessActions() {
 }
 
 function allowedUploadLabel() {
-  return isLoggedIn() ? '.xlsx, .xls, .pdf' : '.xlsx, .xls';
+  return (isLoggedIn() || hasGuestExpertAudit()) ? '.xlsx, .xls, .pdf' : '.xlsx, .xls';
 }
 
 function updateUploadFormatHints() {
   const label = allowedUploadLabel();
-  const accept = isLoggedIn() ? '.xlsx,.xls,.pdf' : '.xlsx,.xls';
+  const accept = (isLoggedIn() || hasGuestExpertAudit()) ? '.xlsx,.xls,.pdf' : '.xlsx,.xls';
   document.querySelectorAll('.upload-format-hint').forEach(el => { el.textContent = label; });
   ['input1', 'input2'].forEach(id => {
     const input = document.getElementById(id);
@@ -1326,10 +1335,10 @@ function resetFileSlot(num, statusText) {
 }
 
 function clearPdfFilesForGuest() {
-  if (isLoggedIn()) return false;
+  if (isLoggedIn() || hasGuestExpertAudit()) return false;
   let cleared = false;
-  if (isPdfFile(file1)) { resetFileSlot(1, 'Загрузка PDF-файлов после входа'); cleared = true; }
-  if (isPdfFile(file2)) { resetFileSlot(2, 'Загрузка PDF-файлов после входа'); cleared = true; }
+  if (isPdfFile(file1)) { resetFileSlot(1, 'PDF доступен в первом экспертном анализе или после входа'); cleared = true; }
+  if (isPdfFile(file2)) { resetFileSlot(2, 'PDF доступен в первом экспертном анализе или после входа'); cleared = true; }
   if (cleared) {
     updatePdfFormatNote();
     updateRunBtn();
@@ -1363,6 +1372,9 @@ function renderAuthArea() {
     const usage = guestUsage?.limit > 0
       ? `Осталось: ${guestUsage.remaining} из ${guestUsage.limit}`
       : guestLimitText();
+    const expertText = hasGuestExpertAudit()
+      ? 'Первый анализ будет дополнительно проверен экспертным AI-анализом; можно загрузить PDF.'
+      : 'PDF, история и Excel-экспорт доступны с выданным тестовым доступом.';
     const maxFileMb = currentMaxFileMb();
     const fileLimitText = maxFileMb > 0 ? `Лимит файла: до ${fmtMb(maxFileMb)}. ` : '';
     area.innerHTML = `
@@ -1370,7 +1382,7 @@ function renderAuthArea() {
       <button class="btn-login" onclick="openLoginModal()">Войти</button>`;
     guestNotice.innerHTML = `
       <strong>Гостевой режим:</strong> ${usage}. Можно загрузить два Excel-акта и посмотреть результат на сайте.
-      ${fileLimitText}Загрузка PDF-файлов, история и Excel-экспорт доступны с выданным тестовым доступом.
+      ${fileLimitText}${expertText}
       Результат требует проверки специалистом; для первого теста лучше использовать обезличенные документы.
       <a onclick="openLoginModal()">Войти с тестовым доступом</a>.`;
     guestNotice.style.display = 'block';
@@ -1407,11 +1419,12 @@ function selectMode(mode) {
 async function doLogin() {
   if (loginMode === 'guest') {
     localStorage.removeItem(LS_KEY);
+    await loadGuestStatus();
     renderAuthArea();
     clearPdfFilesForGuest();
     loadHistory();
     closeLoginModal();
-    showToast('Гостевой режим: загрузка PDF-файлов, история и Excel-экспорт недоступны', 'warn');
+    showToast(hasGuestExpertAudit()?'Гостевой режим: доступен первый экспертный анализ':'Гостевой режим: PDF, история и Excel-экспорт недоступны', 'warn');
     return;
   }
 
@@ -1457,6 +1470,7 @@ async function doLogin() {
 
 function logout() {
   localStorage.removeItem(LS_KEY);
+  loadGuestStatus();
   renderAuthArea();
   clearPdfFilesForGuest();
   // Очищаем историю в UI
@@ -1492,9 +1506,23 @@ async function checkHealth(){
   }
 }
 
+async function loadGuestStatus(){
+  if(isLoggedIn())return;
+  try{
+    const r=await fetch('/api/guest-status',{headers:authHeaders()});
+    const d=await r.json();
+    if(d?.guest_usage){
+      guestUsage=d.guest_usage;
+      renderAuthArea();
+      clearPdfFilesForGuest();
+    }
+  }catch{}
+}
+
 // ── Init ──────────────────────────────────────────────────────────
 renderAuthArea();
 checkHealth();
+loadGuestStatus();
 loadHistory();
 
 // ── Tabs ───────────────────────────────────────────────────────────
@@ -1645,16 +1673,16 @@ function isPdfFile(f){return !!(f&&/\.pdf$/i.test(f.name||''));}
 function updatePdfFormatNote(){
   const el=document.getElementById('pdf-format-note');
   if(!el)return;
-  el.classList.toggle('visible',isLoggedIn()&&(isPdfFile(file1)||isPdfFile(file2)));
+  el.classList.toggle('visible',(isLoggedIn()||hasGuestExpertAudit())&&(isPdfFile(file1)||isPdfFile(file2)));
 }
 
 async function handleFile(f,num){
   if(!f)return;
   if(!/\.(xlsx|xls|pdf)$/i.test(f.name)){showToast(`Поддерживаются: ${allowedUploadLabel()}`,'error');return;}
-  if(isPdfFile(f)&&!isLoggedIn()){
+  if(isPdfFile(f)&&!isLoggedIn()&&!hasGuestExpertAudit()){
     const se=document.getElementById(`file${num}-status`);
-    if(se){se.className='file-status warn';se.textContent='Загрузка PDF-файлов после входа';}
-    showToast('Загрузка PDF-файлов доступна только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls','warn');
+    if(se){se.className='file-status warn';se.textContent='PDF доступен после входа';}
+    showToast('PDF доступен в первом бесплатном экспертном анализе или после входа с тестовым доступом. Сейчас загрузите .xlsx или .xls','warn');
     return;
   }
   const maxMb=currentMaxFileMb();

@@ -1,5 +1,5 @@
 """sverkAI v2.1 — веб-версия (FastAPI) с поддержкой личных API-ключей"""
-import os, re, json, tempfile, shutil, uuid, hashlib, base64, io
+import os, re, json, tempfile, shutil, uuid, hashlib, base64, io, copy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -60,6 +60,7 @@ def _env_mb(name: str, default: float) -> int:
 
 
 GUEST_RECONCILE_LIMIT = _env_int("SVERKAI_GUEST_RECONCILE_LIMIT", 2, 0, 50)
+GUEST_EXPERT_AUDIT_LIMIT = _env_int("SVERKAI_GUEST_EXPERT_AUDIT_LIMIT", 1, 0, 10)
 GUEST_USAGE_WINDOW_DAYS = _env_int("SVERKAI_GUEST_USAGE_WINDOW_DAYS", 30, 1, 365)
 GUEST_MAX_FILE_BYTES = _env_mb("SVERKAI_GUEST_MAX_FILE_MB", 2)
 USER_MAX_FILE_BYTES = _env_mb("SVERKAI_USER_MAX_FILE_MB", 10)
@@ -318,27 +319,55 @@ def _guest_usage_entry(data: dict, subject: str, now: datetime) -> dict:
         start = now
     entry.setdefault("period_start", start.isoformat(timespec="seconds"))
     entry["used"] = max(0, int(entry.get("used") or 0))
+    entry["expert_used"] = max(0, int(entry.get("expert_used") or 0))
     data[subject] = entry
     return entry
 
 
-def _guest_usage_status(request: Request) -> dict:
-    if GUEST_RECONCILE_LIMIT <= 0:
-        return {"limit": 0, "used": 0, "remaining": None, "window_days": GUEST_USAGE_WINDOW_DAYS}
-    data = _load_guest_usage()
-    now = datetime.now()
-    entry = _guest_usage_entry(data, _guest_subject(request), now)
-    used = entry["used"]
-    remaining = max(0, GUEST_RECONCILE_LIMIT - used)
+def _guest_usage_payload(entry: dict, now: datetime) -> dict:
+    used = max(0, int(entry.get("used") or 0))
+    expert_used = max(0, int(entry.get("expert_used") or 0))
+    expert_remaining = max(0, GUEST_EXPERT_AUDIT_LIMIT - expert_used)
     return {
         "limit": GUEST_RECONCILE_LIMIT,
         "used": used,
-        "remaining": remaining,
+        "remaining": max(0, GUEST_RECONCILE_LIMIT - used) if GUEST_RECONCILE_LIMIT > 0 else None,
         "window_days": GUEST_USAGE_WINDOW_DAYS,
         "reset_at": (
             datetime.fromisoformat(entry["period_start"]) + timedelta(days=GUEST_USAGE_WINDOW_DAYS)
         ).isoformat(timespec="seconds"),
+        "expert_limit": GUEST_EXPERT_AUDIT_LIMIT,
+        "expert_used": expert_used,
+        "expert_remaining": expert_remaining,
+        "expert_available": GUEST_EXPERT_AUDIT_LIMIT > 0 and expert_remaining > 0 and bool(ANTHROPIC_API_KEY.strip()),
+        "expert_requires_ai_key": GUEST_EXPERT_AUDIT_LIMIT > 0 and not bool(ANTHROPIC_API_KEY.strip()),
     }
+
+
+def _guest_usage_status(request: Request) -> dict:
+    if GUEST_RECONCILE_LIMIT <= 0:
+        return {
+            "limit": 0,
+            "used": 0,
+            "remaining": None,
+            "window_days": GUEST_USAGE_WINDOW_DAYS,
+            "expert_limit": GUEST_EXPERT_AUDIT_LIMIT,
+            "expert_used": 0,
+            "expert_remaining": GUEST_EXPERT_AUDIT_LIMIT,
+            "expert_available": GUEST_EXPERT_AUDIT_LIMIT > 0 and bool(ANTHROPIC_API_KEY.strip()),
+            "expert_requires_ai_key": GUEST_EXPERT_AUDIT_LIMIT > 0 and not bool(ANTHROPIC_API_KEY.strip()),
+        }
+    data = _load_guest_usage()
+    now = datetime.now()
+    entry = _guest_usage_entry(data, _guest_subject(request), now)
+    return _guest_usage_payload(entry, now)
+
+
+def _guest_expert_audit_available(request: Request) -> bool:
+    if GUEST_EXPERT_AUDIT_LIMIT <= 0 or not ANTHROPIC_API_KEY.strip():
+        return False
+    status = _guest_usage_status(request)
+    return int(status.get("expert_remaining") or 0) > 0
 
 
 def _guest_limit_or_raise(request: Request) -> None:
@@ -353,14 +382,17 @@ def _guest_limit_or_raise(request: Request) -> None:
         )
 
 
-def _record_guest_reconcile(request: Request) -> dict:
-    if GUEST_RECONCILE_LIMIT <= 0:
+def _record_guest_reconcile(request: Request, expert_audit_used: bool = False) -> dict:
+    if GUEST_RECONCILE_LIMIT <= 0 and not expert_audit_used:
         return _guest_usage_status(request)
     data = _load_guest_usage()
     now = datetime.now()
     subject = _guest_subject(request)
     entry = _guest_usage_entry(data, subject, now)
-    entry["used"] += 1
+    if GUEST_RECONCILE_LIMIT > 0:
+        entry["used"] += 1
+    if expert_audit_used and GUEST_EXPERT_AUDIT_LIMIT > 0:
+        entry["expert_used"] = min(GUEST_EXPERT_AUDIT_LIMIT, int(entry.get("expert_used") or 0) + 1)
     cutoff = now - timedelta(days=GUEST_USAGE_WINDOW_DAYS * 2)
     for key, value in list(data.items()):
         try:
@@ -369,27 +401,19 @@ def _record_guest_reconcile(request: Request) -> dict:
         except Exception:
             data.pop(key, None)
     _save_guest_usage(data)
-    used = entry["used"]
-    return {
-        "limit": GUEST_RECONCILE_LIMIT,
-        "used": used,
-        "remaining": max(0, GUEST_RECONCILE_LIMIT - used),
-        "window_days": GUEST_USAGE_WINDOW_DAYS,
-        "reset_at": (
-            datetime.fromisoformat(entry["period_start"]) + timedelta(days=GUEST_USAGE_WINDOW_DAYS)
-        ).isoformat(timespec="seconds"),
-    }
+    return _guest_usage_payload(entry, now)
 
 
-async def _save_upload_to_path(upload: UploadFile, path: str, user_key: str, label: str) -> int:
+async def _save_upload_to_path(upload: UploadFile, path: str, user_key: str, label: str, allow_guest_pdf: bool = False) -> int:
     filename = upload.filename or label
     ext = Path(filename).suffix.lower()
-    allowed_exts = SUPPORTED_UPLOAD_EXTS if user_key else GUEST_UPLOAD_EXTS
+    guest_can_upload_pdf = bool(allow_guest_pdf and not user_key and ANTHROPIC_API_KEY.strip())
+    allowed_exts = SUPPORTED_UPLOAD_EXTS if user_key or guest_can_upload_pdf else GUEST_UPLOAD_EXTS
     if ext not in allowed_exts:
         if ext == ".pdf" and not user_key:
             raise HTTPException(
                 status_code=400,
-                detail="Загрузка PDF-файлов доступна только после входа с тестовым доступом. В гостевом режиме загрузите .xlsx или .xls.",
+                detail="Загрузка PDF-файлов доступна после входа или в рамках первого бесплатного экспертного анализа. В гостевом режиме без экспертного анализа загрузите .xlsx или .xls.",
             )
         allowed_label = SUPPORTED_UPLOAD_EXTS_LABEL if user_key else GUEST_UPLOAD_EXTS_LABEL
         raise HTTPException(status_code=400, detail=f"Поддерживаются только файлы {allowed_label}")
@@ -2324,6 +2348,194 @@ def _maybe_recover_balance_basis_with_ai(df1: pd.DataFrame, df2: pd.DataFrame, r
     return True
 
 
+def _balance_values_from_summary(summary: dict) -> dict:
+    analysis = summary.get('balance_reason_analysis') or {}
+    if analysis.get('enabled'):
+        return {
+            'opening_balance_difference': analysis.get('opening_balance_difference'),
+            'period_movement_difference': analysis.get('period_movement_difference'),
+            'closing_balance_difference': analysis.get('closing_balance_difference'),
+        }
+    return {
+        'opening_balance_difference': summary.get('opening_balance_difference'),
+        'period_movement_difference': summary.get('transaction_net_difference'),
+        'closing_balance_difference': summary.get('closing_balance_difference'),
+    }
+
+
+def _balance_values_match(programmatic: dict, expert_basis: dict, tolerance: float = 0.01) -> bool:
+    for key in ('opening_balance_difference', 'period_movement_difference', 'closing_balance_difference'):
+        left = programmatic.get(key)
+        right = expert_basis.get(key)
+        if left is None or right is None:
+            return False
+        try:
+            if abs(float(left) - float(right)) > tolerance:
+                return False
+        except Exception:
+            return False
+    return True
+
+
+def _ai_extract_balance_basis_for_audit(df1: pd.DataFrame, df2: pd.DataFrame, summary: dict, client, log) -> Optional[dict]:
+    if not client:
+        return None
+    try:
+        log("Бесплатная экспертная проверка: AI извлекает сальдо для контроля результата...")
+        payload = _ai_recover_balance_basis(df1, df2, summary, client)
+    except Exception as exc:
+        log(f"Бесплатная экспертная проверка недоступна: {exc}")
+        return None
+
+    doc1 = payload.get('doc1') if isinstance(payload, dict) else None
+    doc2 = payload.get('doc2') if isinstance(payload, dict) else None
+    if not isinstance(doc1, dict) or not isinstance(doc2, dict):
+        return None
+    start1 = _json_money(doc1.get('opening_balance'))
+    start2 = _json_money(doc2.get('opening_balance'))
+    end1 = _json_money(doc1.get('closing_balance'))
+    end2 = _json_money(doc2.get('closing_balance'))
+    if any(v is None for v in (start1, start2, end1, end2)):
+        return None
+
+    opening_diff = round(float(start1) - float(start2), 2)
+    closing_diff = round(float(end1) - float(end2), 2)
+    movement_diff = round(closing_diff - opening_diff, 2)
+    if abs(round(opening_diff + movement_diff - closing_diff, 2)) > 0.01:
+        return None
+
+    return {
+        'available': True,
+        'opening_balance_doc1': round(float(start1), 2),
+        'opening_balance_doc2': round(float(start2), 2),
+        'closing_balance_doc1': round(float(end1), 2),
+        'closing_balance_doc2': round(float(end2), 2),
+        'opening_balance_difference': opening_diff,
+        'period_movement_difference': movement_diff,
+        'closing_balance_difference': closing_diff,
+        'formula': f"{_money_signed_plain(opening_diff)} {_money_formula_term(movement_diff)} = {_money_signed_plain(closing_diff)}",
+        'doc1': doc1,
+        'doc2': doc2,
+    }
+
+
+def _period_text_from_ai_doc(doc: dict) -> str:
+    start = _json_date(doc.get('period_from') if isinstance(doc, dict) else None)
+    end = _json_date(doc.get('period_to') if isinstance(doc, dict) else None)
+    if start is not None and end is not None:
+        return f"{start.strftime('%d.%m.%Y')} - {end.strftime('%d.%m.%Y')}"
+    if end is not None:
+        return end.strftime('%d.%m.%Y')
+    if start is not None:
+        return start.strftime('%d.%m.%Y')
+    return ''
+
+
+def _apply_ai_balance_basis_to_summary(summary: dict, basis: dict) -> None:
+    opening_diff = round(float(basis['opening_balance_difference']), 2)
+    closing_diff = round(float(basis['closing_balance_difference']), 2)
+    movement_diff = round(float(basis['period_movement_difference']), 2)
+    summary.update({
+        'opening_balance_doc1': basis['opening_balance_doc1'],
+        'opening_balance_doc2': basis['opening_balance_doc2'],
+        'closing_balance_doc1': basis['closing_balance_doc1'],
+        'closing_balance_doc2': basis['closing_balance_doc2'],
+        'opening_balance_difference': opening_diff,
+        'closing_balance_difference': closing_diff,
+        'transaction_net_difference': movement_diff,
+        'balance_basis_recovered': True,
+    })
+    period1 = _period_text_from_ai_doc(basis.get('doc1') or {})
+    period2 = _period_text_from_ai_doc(basis.get('doc2') or {})
+    if period1:
+        summary['period_doc1'] = period1
+    if period2:
+        summary['period_doc2'] = period2
+    if period1 and period1 == period2:
+        summary['period'] = period1
+    summary['period_mismatch'] = bool(period1 and period2 and period1 != period2)
+
+    period_text = summary.get('period') or ''
+    summary['net_period'] = 0.0 if abs(closing_diff) < 0.01 else closing_diff
+    if abs(closing_diff) < 0.01:
+        summary['debt_label'] = f'Взаиморасчёты совпадают (за период {period_text})' if period_text else 'Взаиморасчёты совпадают'
+    elif closing_diff > 0:
+        summary['debt_label'] = f'Расхождение конечного сальдо в пользу организации: {closing_diff:,.2f} руб. (за период {period_text})'
+    else:
+        summary['debt_label'] = f'Расхождение конечного сальдо в пользу контрагента: {abs(closing_diff):,.2f} руб. (за период {period_text})'
+    summary['balance_basis_recovery'] = {
+        'attempted': True,
+        'available': True,
+        'method': 'ai_first_expert_audit',
+        'reason': 'ok',
+        'formula': basis.get('formula'),
+        'evidence': {
+            'doc1': (basis.get('doc1') or {}).get('evidence') or {},
+            'doc2': (basis.get('doc2') or {}).get('evidence') or {},
+        },
+    }
+
+
+def _run_first_expert_audit(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, client, cfg: dict, log) -> tuple[dict, dict]:
+    meta = {
+        'eligible': True,
+        'performed': False,
+        'used_expert_result': False,
+        'programmatic_matches_ai': None,
+        'reason': 'not_started',
+    }
+    if not client:
+        meta['reason'] = 'api_key_required'
+        return result, meta
+
+    summary = result.get('summary') or {}
+    meta['performed'] = True
+    ai_basis = _ai_extract_balance_basis_for_audit(df1, df2, summary, client, log)
+    if not ai_basis:
+        meta['reason'] = 'ai_basis_unavailable'
+        summary['expert_audit'] = meta
+        return result, meta
+
+    programmatic_values = _balance_values_from_summary(summary)
+    matches = _balance_values_match(programmatic_values, ai_basis)
+    meta.update({
+        'programmatic_matches_ai': matches,
+        'ai_formula': ai_basis.get('formula'),
+        'programmatic_values': programmatic_values,
+        'ai_values': {
+            'opening_balance_difference': ai_basis.get('opening_balance_difference'),
+            'period_movement_difference': ai_basis.get('period_movement_difference'),
+            'closing_balance_difference': ai_basis.get('closing_balance_difference'),
+        },
+    })
+
+    already_expert = summary.get('result_mode') == 'balance_reason_analysis' and (summary.get('balance_reason_analysis') or {}).get('enabled')
+    if matches:
+        meta['reason'] = 'programmatic_matches_ai'
+        summary['expert_audit'] = meta
+        return result, meta
+
+    audit_result = copy.deepcopy(result)
+    audit_summary = audit_result.get('summary') or {}
+    audit_summary.pop('balance_reason_analysis', None)
+    audit_summary.pop('ai_comment', None)
+    _apply_ai_balance_basis_to_summary(audit_summary, ai_basis)
+    audit_cfg = {**cfg, 'force_balance_reason_analysis': True, 'ai_comment': True}
+    balance_analysis = _build_balance_reason_analysis(df1, df2, audit_result, client, audit_cfg)
+    if not balance_analysis:
+        meta['reason'] = 'ai_diff_but_expert_summary_unavailable'
+        summary['expert_audit'] = meta
+        return result, meta
+
+    audit_summary['balance_reason_analysis'] = balance_analysis
+    audit_summary['result_mode'] = 'balance_reason_analysis'
+    audit_summary['primary_tab'] = 'summary'
+    audit_summary['expert_audit'] = {**meta, 'used_expert_result': True, 'reason': 'ai_differs_from_programmatic'}
+    if already_expert:
+        audit_summary['expert_audit']['reason'] = 'ai_corrected_existing_expert_basis'
+    return audit_result, audit_summary['expert_audit']
+
+
 def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, client=None, cfg=None) -> Optional[dict]:
     cfg = cfg or DEFAULT_RECON_SETTINGS
     summary = result.get('summary', {})
@@ -3665,6 +3877,15 @@ async def reconcile(
         cfg = {**DEFAULT_RECON_SETTINGS, **json.loads(settings)}
     except Exception:
         cfg = DEFAULT_RECON_SETTINGS.copy()
+    forced_expert = bool(cfg.get('force_balance_reason_analysis'))
+    guest_expert_available = (not user_key) and _guest_expert_audit_available(request)
+    user_first_run = bool(user_key and not _load_user_history(user_key))
+    first_expert_audit_eligible = (
+        not forced_expert
+        and bool(eff_key)
+        and (guest_expert_available or user_first_run)
+    )
+    allow_guest_pdf = bool(guest_expert_available)
 
     tmpdir = None
     try:
@@ -3673,8 +3894,8 @@ async def reconcile(
         ext2 = Path(file2.filename or "").suffix.lower()
         p1 = os.path.join(tmpdir, f"file1{ext1}")
         p2 = os.path.join(tmpdir, f"file2{ext2}")
-        await _save_upload_to_path(file1, p1, user_key, "Файл 1")
-        await _save_upload_to_path(file2, p2, user_key, "Файл 2")
+        await _save_upload_to_path(file1, p1, user_key, "Файл 1", allow_guest_pdf=allow_guest_pdf)
+        await _save_upload_to_path(file2, p2, user_key, "Файл 2", allow_guest_pdf=allow_guest_pdf)
 
         logs = []
         try:
@@ -3714,9 +3935,29 @@ async def reconcile(
                 cand1['df'], cand2['df'], cand1['type'], cand2['type'],
                 client, lambda t: logs.append(t), cfg
             )
-            return cand1, cand2, final_result
+            audit_meta = None
+            audit_consumed = False
+            summary = final_result.get('summary') or {}
+            is_expert_result = summary.get('result_mode') == 'balance_reason_analysis' and (summary.get('balance_reason_analysis') or {}).get('enabled')
+            if first_expert_audit_eligible:
+                if is_expert_result:
+                    audit_meta = {
+                        'eligible': True,
+                        'performed': False,
+                        'used_expert_result': True,
+                        'programmatic_matches_ai': None,
+                        'reason': 'automatic_expert_result',
+                    }
+                    summary['expert_audit'] = audit_meta
+                    audit_consumed = True
+                else:
+                    final_result, audit_meta = _run_first_expert_audit(
+                        cand1['df'], cand2['df'], final_result, client, cfg, lambda t: logs.append(t)
+                    )
+                    audit_consumed = bool((audit_meta or {}).get('performed'))
+            return cand1, cand2, final_result, audit_meta, audit_consumed
 
-        df1_choice, df2_choice, result = await loop.run_in_executor(
+        df1_choice, df2_choice, result, audit_meta, audit_consumed = await loop.run_in_executor(
             ThreadPoolExecutor(max_workers=1),
             _pick_and_run
         )
@@ -3768,7 +4009,7 @@ async def reconcile(
                 }
             })
             _save_user_history(history, user_key)
-        guest_usage = None if user_key else _record_guest_reconcile(request)
+        guest_usage = None if user_key else _record_guest_reconcile(request, expert_audit_used=audit_consumed)
 
         return JSONResponse({'ok': True, 'logs': logs, 'summary': result['summary'],
             'discrepancies': result['discrepancies'],
@@ -3793,13 +4034,14 @@ async def preview_file(request: Request, file: UploadFile = File(...)):
     """Парсит один файл и возвращает таблицу для предпросмотра + статус детекта."""
     user_key = _authorized_user_key_or_raise(request)
     eff_key  = _effective_key(user_key)
+    allow_guest_pdf = (not user_key) and _guest_expert_audit_available(request)
 
     tmpdir = None
     try:
         tmpdir = tempfile.mkdtemp()
         ext = Path(file.filename or "").suffix.lower()
         path = os.path.join(tmpdir, f"preview{ext}")
-        await _save_upload_to_path(file, path, user_key, "Файл")
+        await _save_upload_to_path(file, path, user_key, "Файл", allow_guest_pdf=allow_guest_pdf)
 
         label = ""
         needs_manual = False
@@ -4031,6 +4273,8 @@ async def health():
         "allowed_user_keys": len(allowed_users),
         "guest_keys_blocked": len(_guest_key_hashes()),
         "guest_reconcile_limit": GUEST_RECONCILE_LIMIT,
+        "guest_expert_audit_limit": GUEST_EXPERT_AUDIT_LIMIT,
+        "guest_expert_audit_available": GUEST_EXPERT_AUDIT_LIMIT > 0 and bool(ANTHROPIC_API_KEY.strip()),
         "guest_usage_window_days": GUEST_USAGE_WINDOW_DAYS,
         "guest_max_file_mb": round(GUEST_MAX_FILE_BYTES / 1024 / 1024, 2),
         "user_max_file_mb": round(USER_MAX_FILE_BYTES / 1024 / 1024, 2),
@@ -4038,3 +4282,10 @@ async def health():
         "version": APP_VERSION,
         "admin_enabled": bool(ADMIN_SECRET),
     }
+
+
+@app.get("/api/guest-status")
+async def guest_status(request: Request):
+    if _get_user_key(request):
+        return JSONResponse({"guest": False})
+    return JSONResponse({"guest": True, "guest_usage": _guest_usage_status(request)})
