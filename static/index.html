@@ -2555,9 +2555,16 @@ async function loadHistory(){
     if(clearBtn)clearBtn.disabled=false;
     body.innerHTML=historyData.map((h,i)=>{
       const hasResult=!!(h.result?.discrepancies);
+      const summary=h.result?.summary||{};
+      const analysis=summary.balance_reason_analysis||{};
+      const expert=h.mode==='balance_reason_analysis'||isExpertSummary(summary);
+      const reasonCount=expert?((analysis.reasons||[]).length+(analysis.neutral_groups||[]).length):0;
+      const displayReasonCount=reasonCount||h.total||0;
+      const totalCell=expert?`${displayReasonCount} ${pluralRu(displayReasonCount,'причина','причины','причин')}`:(h.total||0);
+      const criticalCell=expert?'—':(h.critical||0);
       return`<tr onclick="loadHistoryItem(${i})" title="${hasResult?'Нажмите для восстановления результатов':'Нет сохранённых данных'}">
         <td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td>
-        <td>${h.total||0}</td><td>${h.critical||0}</td>
+        <td>${esc(totalCell)}</td><td>${esc(criticalCell)}</td>
         <td>${esc(trunc(h.debt_label||'',50))}</td>
       </tr>`;
     }).join('');

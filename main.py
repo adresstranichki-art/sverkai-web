@@ -3736,15 +3736,20 @@ async def reconcile(
         # ── Сохранение истории только для авторизованных пользователей ──
         if user_key:
             history = _load_user_history(user_key)
+            summary = result.get('summary') or {}
+            balance_analysis = summary.get('balance_reason_analysis') or {}
+            is_expert_history = summary.get('result_mode') == 'balance_reason_analysis' and balance_analysis.get('enabled')
+            expert_reason_count = len(balance_analysis.get('reasons') or []) + len(balance_analysis.get('neutral_groups') or [])
             history.append({
                 'date':       datetime.now().strftime('%d.%m.%Y %H:%M'),
                 'file1':      file1.filename,
                 'file2':      file2.filename,
-                'total':      result['summary'].get('total_discrepancies', 0),
-                'critical':   result['summary'].get('critical_count', 0),
-                'debt_label': result['summary'].get('debt_label', ''),
+                'mode':       summary.get('result_mode', 'standard'),
+                'total':      expert_reason_count if is_expert_history else summary.get('total_discrepancies', 0),
+                'critical':   None if is_expert_history else summary.get('critical_count', 0),
+                'debt_label': summary.get('debt_label', ''),
                 'result': {
-                    'summary':       result['summary'],
+                    'summary':       summary,
                     'discrepancies': result['discrepancies'],
                     'highlight': {
                         'missing1':  result.get('missing_rows1',[]),
