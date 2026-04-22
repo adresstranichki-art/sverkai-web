@@ -2035,19 +2035,50 @@ def _balance_reason_group_for_item(item: dict, doc1_group_all: bool) -> tuple[st
     )
 
 
+def _balance_reason_operations_for_display(reasons: list[dict], limit: int | None = None) -> list[dict]:
+    operations = []
+    for reason in reasons or []:
+        rows = reason.get('rows') or []
+        if rows:
+            for row in rows:
+                op = {
+                    'title': row.get('document') or reason.get('title') or 'Операция',
+                    'date': row.get('date') or '',
+                    'side': row.get('side') or '',
+                    'influence': round(float(row.get('effect') or 0.0), 2),
+                    'check': reason.get('check') or '',
+                    'group_title': reason.get('title') or '',
+                }
+                operations.append(op)
+                if limit and len(operations) >= limit:
+                    return operations
+            continue
+        operations.append({
+            'title': reason.get('title') or 'Операция',
+            'date': '',
+            'side': '',
+            'influence': round(float(reason.get('influence') or 0.0), 2),
+            'check': reason.get('check') or '',
+            'group_title': reason.get('title') or '',
+        })
+        if limit and len(operations) >= limit:
+            return operations
+    return operations
+
+
 def _balance_analysis_fallback_explanation(analysis: dict) -> str:
     reasons = analysis.get('reasons') or []
     neutral = analysis.get('neutral_groups') or []
-    top = reasons[:3]
+    top_operations = _balance_reason_operations_for_display(reasons, limit=5)
     parts = [
         f"Разница конечного сальдо объясняется формулой: {analysis.get('formula', '')}.",
         f"Движения периода дают влияние {analysis.get('period_movement_difference_text', '')}.",
     ]
-    if top:
+    if top_operations:
         parts.append(
-            "Основные группы: " + "; ".join(
-                f"{r.get('title')} ({_money_signed_plain(r.get('influence', 0))})"
-                for r in top
+            "Операции к проверке: " + "; ".join(
+                f"{op.get('title')} ({_money_signed_plain(op.get('influence', 0))})"
+                for op in top_operations
             ) + "."
         )
     if neutral:
@@ -2066,12 +2097,14 @@ def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[st
             'opening_balance_difference': analysis.get('opening_balance_difference'),
             'period_movement_difference': analysis.get('period_movement_difference'),
             'closing_balance_difference': analysis.get('closing_balance_difference'),
+            'operations_to_check': _balance_reason_operations_for_display(analysis.get('reasons') or [], limit=20),
             'reasons': [
                 {
                     'title': r.get('title'),
                     'influence': r.get('influence'),
                     'row_count': r.get('row_count'),
                     'examples': r.get('examples', [])[:3],
+                    'rows': (r.get('rows') or [])[:10],
                 }
                 for r in (analysis.get('reasons') or [])[:8]
             ],
@@ -2092,7 +2125,8 @@ def _maybe_ai_balance_explanation(analysis: dict, client, cfg: dict) -> tuple[st
             system=(
                 "Ты бухгалтер-аналитик. Объясни причины расхождения конечного сальдо "
                 "простым русским языком. Используй только переданные суммы и не придумывай новые. "
-                "Не используй markdown-заголовки разных уровней и таблицы: пиши короткими разделами с понятными подзаголовками."
+                "Не используй markdown-заголовки разных уровней и таблицы: пиши короткими разделами с понятными подзаголовками. "
+                "Не объединяй отсутствующие операции в одну группу: если перечисляешь документы, каждый документ пиши отдельным пунктом с его суммой влияния."
             ),
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
         )
@@ -4159,7 +4193,7 @@ async def export_report(payload: dict, request: Request):
             ('Разница начального сальдо', balance_analysis.get('opening_balance_difference_text', '')),
             ('Влияние движений периода', balance_analysis.get('period_movement_difference_text', '')),
             ('Разница конечного сальдо', balance_analysis.get('closing_balance_difference_text', '')),
-            ('Причин к проверке', len(balance_analysis.get('reasons') or [])),
+            ('Операций к проверке', len(_balance_reason_operations_for_display(balance_analysis.get('reasons') or []))),
             ('Технических строк в детализации', balance_analysis.get('technical_discrepancies_count', 0)),
             ('Период', summary.get('period','')),
         ]
@@ -4180,7 +4214,7 @@ async def export_report(payload: dict, request: Request):
 
     if balance_analysis.get('enabled'):
         ws3 = wb.add_worksheet('Причины сальдо')
-        ws3_headers = ['Причина', 'Влияние на сальдо', 'Количество строк', 'Что проверить бухгалтеру', 'Примеры документов']
+        ws3_headers = ['Операция', 'Влияние на сальдо', 'Количество строк', 'Что проверить бухгалтеру', 'Детали']
         ws3_widths = [42, 18, 16, 48, 70]
         for col, (hdr, width) in enumerate(zip(ws3_headers, ws3_widths)):
             ws3.write(0, col, hdr, h)
@@ -4188,12 +4222,17 @@ async def export_report(payload: dict, request: Request):
         money_fmt = wb.add_format({'border':1,'font_size':10,'num_format':'#,##0.00'})
         wrap_fmt = wb.add_format({'border':1,'font_size':10,'text_wrap':True,'valign':'top'})
         row_idx = 1
-        for item in balance_analysis.get('reasons', []):
+        for item in _balance_reason_operations_for_display(balance_analysis.get('reasons') or []):
+            details = [
+                f"Дата: {item.get('date')}" if item.get('date') else '',
+                'Есть только в первом акте' if item.get('side') == 'doc1' else 'Есть только во втором акте' if item.get('side') == 'doc2' else '',
+                item.get('group_title') or '',
+            ]
             ws3.write(row_idx, 0, item.get('title', ''), wrap_fmt)
             ws3.write_number(row_idx, 1, float(item.get('influence') or 0.0), money_fmt)
-            ws3.write_number(row_idx, 2, int(item.get('row_count') or 0), wrap_fmt)
+            ws3.write_number(row_idx, 2, 1, wrap_fmt)
             ws3.write(row_idx, 3, item.get('check', ''), wrap_fmt)
-            ws3.write(row_idx, 4, "\n".join(item.get('examples') or []), wrap_fmt)
+            ws3.write(row_idx, 4, "\n".join(part for part in details if part), wrap_fmt)
             row_idx += 1
         neutral = balance_analysis.get('neutral_groups') or []
         if neutral:

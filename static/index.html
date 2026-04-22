@@ -980,14 +980,13 @@
         <div class="balance-analysis-head">
           <div>
             <div class="balance-analysis-title">Анализ причин расхождения сальдо</div>
-            <div class="balance-analysis-sub">Для сложной сверки сгруппированы бухгалтерские причины, а технические строки оставлены отдельно.</div>
+            <div class="balance-analysis-sub">Для сложной сверки каждая отсутствующая операция показана отдельно, а техническая детализация оставлена ниже.</div>
           </div>
-          <div class="balance-analysis-pill" id="balance-analysis-mode">Экспертный режим</div>
         </div>
         <div class="balance-formula" id="balance-formula"></div>
         <div class="balance-equation" id="balance-equation"></div>
         <div class="balance-explain" id="balance-explain"></div>
-        <div class="balance-section-title">Причины, влияющие на конечное сальдо</div>
+        <div class="balance-section-title">Операции, влияющие на конечное сальдо</div>
         <div class="balance-reason-list" id="balance-reasons"></div>
         <div class="balance-section-title" id="balance-neutral-title" style="display:none">Не влияет на итог / техническая детализация</div>
         <div class="balance-reason-list" id="balance-neutral"></div>
@@ -2055,10 +2054,6 @@ function rowsText(n){
   const count=Number(n)||0;
   return `${count} ${pluralRu(count,'строка','строки','строк')}`;
 }
-function technicalRowsText(n){
-  const count=Number(n)||0;
-  return `${count} ${pluralRu(count,'техническая строка','технические строки','технических строк')}`;
-}
 
 function expertRowsBySide(rows=[],side){
   return rows.filter(r=>r?.side===side&&r.raw_row!==undefined&&r.raw_row!==null);
@@ -2326,7 +2321,7 @@ function renderSummary(s,file1Name='',file2Name=''){
     <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
     <div class="stat-card"><div class="label">Влияние движений периода</div><div class="value dark ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
     <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(analysis.closing_balance_difference)}">${fmtSignedMoney(analysis.closing_balance_difference)}</div></div>
-    <div class="stat-card"><div class="label">Причин к проверке</div><div class="value dark">${(analysis.reasons||[]).length}</div></div>`:`
+    <div class="stat-card"><div class="label">Операций к проверке</div><div class="value dark">${balanceReasonOperationCount(analysis.reasons||[])}</div></div>`:`
     <div class="stat-card"><div class="label">Всего расхождений</div><div class="value ${(s.total_discrepancies||0)>0?'red':''}">${s.total_discrepancies||0}</div></div>
     <div class="stat-card"><div class="label">Критических</div><div class="value ${critical>0?'red':''}">${critical}</div></div>
     <div class="stat-card"><div class="label">Точных совпадений</div><div class="value">${s.exact_matches||0}</div></div>
@@ -2349,13 +2344,51 @@ function moneyClass(v){
   return n>0?'pos':'neg';
 }
 
-function renderBalanceReasonRows(items){
-  if(!items||!items.length)return '<div class="balance-reason-check">Нет отдельных групп для показа.</div>';
-  return items.map(item=>{
+function expertSideText(side){
+  if(side==='doc1')return 'Есть только в первом акте';
+  if(side==='doc2')return 'Есть только во втором акте';
+  return '';
+}
+
+function balanceReasonDisplayRows(items,{expandRows=false}={}){
+  const display=[];
+  (items||[]).forEach(item=>{
+    const rows=(item.rows||[]).filter(row=>row&&row.raw_row!==undefined&&row.raw_row!==null);
+    if(expandRows&&rows.length){
+      rows.forEach(row=>{
+        const effect=Number(row.effect);
+        const meta=[row.date?`Дата: ${row.date}`:'',expertSideText(row.side)].filter(Boolean);
+        display.push({
+          title:row.document||item.title||'Операция',
+          influence:Number.isFinite(effect)?effect:Number(item.influence||0),
+          row_count:1,
+          check:item.check,
+          examples:meta,
+        });
+      });
+    }else{
+      display.push(item);
+    }
+  });
+  return display;
+}
+
+function balanceReasonOperationCount(items){
+  return (items||[]).reduce((total,item)=>{
+    const rows=(item.rows||[]).filter(row=>row&&row.raw_row!==undefined&&row.raw_row!==null);
+    if(rows.length)return total+rows.length;
+    return total+Math.max(1,Number(item.row_count||0));
+  },0);
+}
+
+function renderBalanceReasonRows(items,{expandRows=false,emptyText='Нет отдельных операций для показа.'}={}){
+  const display=balanceReasonDisplayRows(items,{expandRows});
+  if(!display.length)return `<div class="balance-reason-check">${esc(emptyText)}</div>`;
+  return display.map(item=>{
     const examples=(item.examples||[]).slice(0,3).map(x=>esc(x)).join('<br>');
     return `<div class="balance-reason-row">
       <div>
-        <div class="balance-reason-title">${esc(item.title||'Причина')}</div>
+        <div class="balance-reason-title">${esc(item.title||'Операция')}</div>
         ${examples?`<div class="balance-examples">${examples}</div>`:''}
       </div>
       <div class="balance-reason-money ${moneyClass(item.influence)}">${fmtSignedMoney(item.influence)}</div>
@@ -2370,18 +2403,16 @@ function renderBalanceAnalysis(s){
   const card=document.getElementById('balance-analysis-card');
   if(!analysis||!analysis.enabled){card.style.display='none';return;}
   card.style.display='block';
-  const recovered=analysis.basis_recovery?.available;
-  document.getElementById('balance-analysis-mode').textContent=`${technicalRowsText(analysis.technical_discrepancies_count||0)}${recovered?' · сальдо восстановлено AI':''}`;
   document.getElementById('balance-formula').innerHTML=`
     <div class="balance-formula-item"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
     <div class="balance-formula-item"><div class="k">Влияние движений периода</div><div class="v ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
     <div class="balance-formula-item"><div class="k">Разница конечного сальдо</div><div class="v ${diffClass(analysis.closing_balance_difference)}">${fmtSignedMoney(analysis.closing_balance_difference)}</div></div>`;
   document.getElementById('balance-equation').textContent=`Формула: ${analysis.formula||''}`;
   document.getElementById('balance-explain').innerHTML=md(analysis.explanation||'');
-  document.getElementById('balance-reasons').innerHTML=renderBalanceReasonRows(analysis.reasons||[]);
+  document.getElementById('balance-reasons').innerHTML=renderBalanceReasonRows(analysis.reasons||[],{expandRows:true});
   const neutral=analysis.neutral_groups||[];
   document.getElementById('balance-neutral-title').style.display=neutral.length?'block':'none';
-  document.getElementById('balance-neutral').innerHTML=neutral.length?renderBalanceReasonRows(neutral):'';
+  document.getElementById('balance-neutral').innerHTML=neutral.length?renderBalanceReasonRows(neutral,{emptyText:'Нет технической детализации для показа.'}):'';
 }
 
 function getWindowSuggestionView(hint){
@@ -2636,9 +2667,9 @@ async function loadHistory(){
       const summary=h.result?.summary||{};
       const analysis=summary.balance_reason_analysis||{};
       const expert=h.mode==='balance_reason_analysis'||isExpertSummary(summary);
-      const reasonCount=expert?((analysis.reasons||[]).length+(analysis.neutral_groups||[]).length):0;
+      const reasonCount=expert?(balanceReasonOperationCount(analysis.reasons||[])+(analysis.neutral_groups||[]).length):0;
       const displayReasonCount=reasonCount||h.total||0;
-      const totalCell=expert?`${displayReasonCount} ${pluralRu(displayReasonCount,'причина','причины','причин')}`:(h.total||0);
+      const totalCell=expert?`${displayReasonCount} ${pluralRu(displayReasonCount,'операция','операции','операций')}`:(h.total||0);
       const criticalCell=expert?'—':(h.critical||0);
       return`<tr onclick="loadHistoryItem(${i})" title="${hasResult?'Нажмите для восстановления результатов':'Нет сохранённых данных'}">
         <td>${esc(h.date||'')}</td><td>${esc(h.file1||'')}</td><td>${esc(h.file2||'')}</td>
