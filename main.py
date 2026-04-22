@@ -2511,7 +2511,8 @@ def _run_first_expert_audit(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, 
 
     already_expert = summary.get('result_mode') == 'balance_reason_analysis' and (summary.get('balance_reason_analysis') or {}).get('enabled')
     if matches:
-        meta['reason'] = 'programmatic_matches_ai'
+        meta['used_expert_result'] = already_expert
+        meta['reason'] = 'expert_matches_ai' if already_expert else 'programmatic_matches_ai'
         summary['expert_audit'] = meta
         return result, meta
 
@@ -3937,24 +3938,11 @@ async def reconcile(
             )
             audit_meta = None
             audit_consumed = False
-            summary = final_result.get('summary') or {}
-            is_expert_result = summary.get('result_mode') == 'balance_reason_analysis' and (summary.get('balance_reason_analysis') or {}).get('enabled')
             if first_expert_audit_eligible:
-                if is_expert_result:
-                    audit_meta = {
-                        'eligible': True,
-                        'performed': False,
-                        'used_expert_result': True,
-                        'programmatic_matches_ai': None,
-                        'reason': 'automatic_expert_result',
-                    }
-                    summary['expert_audit'] = audit_meta
-                    audit_consumed = True
-                else:
-                    final_result, audit_meta = _run_first_expert_audit(
-                        cand1['df'], cand2['df'], final_result, client, cfg, lambda t: logs.append(t)
-                    )
-                    audit_consumed = bool((audit_meta or {}).get('performed'))
+                final_result, audit_meta = _run_first_expert_audit(
+                    cand1['df'], cand2['df'], final_result, client, cfg, lambda t: logs.append(t)
+                )
+                audit_consumed = bool((audit_meta or {}).get('performed'))
             return cand1, cand2, final_result, audit_meta, audit_consumed
 
         df1_choice, df2_choice, result, audit_meta, audit_consumed = await loop.run_in_executor(
