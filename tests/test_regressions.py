@@ -482,6 +482,31 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertEqual(df.attrs.get('start_balance'), 161570.38)
         self.assertEqual(df.attrs.get('end_balance'), 121308.64)
 
+    def test_pdf_contract_detail_ignores_contract_balances_and_shifted_rows(self):
+        first_page = [
+            ['', 'Дата', 'Документ', 'Дебет', 'Кредит', 'Дата', 'Документ', 'Дебет', 'Кредит'],
+            ['', 'Сальдо начальное', None, '26 288 695,96', '', 'Сальдо начальное', None, '', '26 288 695,96'],
+            ['', 'Договор оферты id(315413340)', None, None, None, None, None, None, None],
+            ['', 'Сальдо начальное по договору:', None, '', '7 385,31', '', None, None, None],
+            ['', '19.03.26', 'Оплата (552 от 19.03.2026)', '', '8 000,00', '', '', '', ''],
+        ]
+        shifted_continuation = [
+            ['Сальдо начальное по договору:', None, '', '7 385,31', '', None, None, None],
+            ['25.03.26', 'Оплата (618 от 25.03.2026)', '', '114 000,00', '', '', '', ''],
+            ['31.03.26', 'УПД (03-179712 от 31.03.2026)', '10 340,07', '', '', '', '', ''],
+            ['Сальдо конечное по договору:', None, '', '5 045,24', '', None, None, None],
+            ['Сальдо конечное', None, '31 033 380,31', '', 'Сальдо конечное', None, '', '31 033 380,31'],
+        ]
+
+        df = self.main._parse_pdf_tables_to_structured([first_page, shifted_continuation], side='left')
+
+        self.assertEqual(len(df), 3)
+        self.assertEqual(df.attrs.get('start_balance'), 26288695.96)
+        self.assertEqual(df.attrs.get('end_balance'), 31033380.31)
+        self.assertIn('552', set(df['doc_num']))
+        self.assertIn('618', set(df['doc_num']))
+        self.assertIn('3-179712', set(df['doc_num']))
+
 
 class AuthKeyTests(unittest.TestCase):
     @classmethod

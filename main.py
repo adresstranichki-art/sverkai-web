@@ -1104,6 +1104,40 @@ def _pdf_row_spec(row: list[str], spec: dict) -> dict:
     ):
         return spec
 
+    def shifted_spec(date_col: int, doc_col: int, debit_col: int, credit_col: int) -> Optional[dict]:
+        if min(date_col, doc_col, debit_col, credit_col) < 0 or len(row) <= max(date_col, doc_col, debit_col, credit_col):
+            return None
+        date_text = _pdf_cell(row[date_col])
+        doc_text = _pdf_cell(row[doc_col])
+        if not _PDF_DATE_RE.match(date_text) or not doc_text:
+            return None
+        if _to_float(row[debit_col]) is None and _to_float(row[credit_col]) is None:
+            return None
+        return {
+            'date': date_col,
+            'doc': doc_col,
+            'debit': debit_col,
+            'credit': credit_col,
+            'effect': spec.get('effect', 'debit_credit'),
+        }
+
+    # Contract-detail PDF pages sometimes lose the leading blank column after
+    # a page break, so Date/Document/Debit/Credit all shift one column left.
+    shifted = shifted_spec(
+        int(spec['date']) - 1,
+        int(spec['doc']) - 1,
+        int(spec['debit']) - 1,
+        int(spec['credit']) - 1,
+    )
+    if shifted:
+        return shifted
+
+    if int(spec.get('date') or 0) <= 2:
+        for candidate in ((0, 1, 2, 3), (0, 1, 3, 4), (1, 2, 3, 4), (1, 2, 4, 5)):
+            shifted = shifted_spec(*candidate)
+            if shifted:
+                return shifted
+
     # Continuation pages of some ledger PDFs lose merged blank columns.
     if int(spec.get('date') or 0) >= 4:
         for doc_col, date_col, debit_col, credit_col in ((0, 2, 3, 4), (1, 3, 4, 5)):
@@ -1145,6 +1179,20 @@ def _pdf_balance_amount(debit, credit) -> Optional[float]:
     if credit_v is None:
         return abs(float(debit_v))
     return abs(float(debit_v)) if abs(float(debit_v)) >= abs(float(credit_v)) else abs(float(credit_v))
+
+
+def _pdf_balance_amount_from_row(row: list[str], row_spec: dict, side: str) -> Optional[float]:
+    amount = _pdf_balance_amount(row[row_spec['debit']], row[row_spec['credit']])
+    if amount is not None:
+        return amount
+    amounts = []
+    for cell in row:
+        value = _to_float(cell)
+        if value is not None:
+            amounts.append(abs(float(value)))
+    if not amounts:
+        return None
+    return amounts[-1] if side == 'right' else amounts[0]
 
 
 def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.DataFrame:
@@ -1203,7 +1251,9 @@ def _parse_pdf_tables_to_structured(tables: list, side: str = 'left') -> pd.Data
 
             balance_lower = operation_lower if 'сальдо' in operation_lower else row_text
             if 'сальдо' in balance_lower:
-                amount = _pdf_balance_amount(debit, credit)
+                if 'по договору' in balance_lower:
+                    continue
+                amount = _pdf_balance_amount_from_row(row, row_spec, side)
                 if amount is not None:
                     if 'конеч' in balance_lower:
                         end_balance = amount
