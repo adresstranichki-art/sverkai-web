@@ -846,6 +846,18 @@ class AuthKeyTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(reason, 'guest_key')
 
+    def test_key_hashes_env_value_exports_active_entries(self):
+        value = self.main._key_hashes_env_value([
+            {'hash': 'b' * 24, 'label': 'Guest Block', 'role': 'guest', 'enabled': True},
+            {'hash': 'a' * 24, 'label': 'Main User', 'role': 'user', 'enabled': True},
+            {'hash': 'c' * 24, 'label': 'Disabled User', 'role': 'user', 'enabled': False},
+            {'hash': 'd' * 24, 'label': 'Ops: Team', 'role': 'user', 'enabled': True},
+        ], 'user')
+        self.assertEqual(
+            value,
+            'aaaaaaaaaaaaaaaaaaaaaaaa:Main User:user,dddddddddddddddddddddddd:Ops Team:user'
+        )
+
     def test_guest_reconcile_limit_is_recorded_per_browser_and_ip(self):
         req = self._guest_request()
 

@@ -158,6 +158,28 @@ def _load_allowed_keys() -> list:
     return merged
 
 
+def _env_label(label: str, fallback: str = "Key") -> str:
+    text = re.sub(r"[\r\n,;:]+", " ", str(label or "")).strip()
+    text = re.sub(r"\s+", " ", text)
+    return text or fallback
+
+
+def _key_hashes_env_value(entries: list, role: str = "user") -> str:
+    seen = set()
+    items = []
+    for entry in entries or []:
+        if entry.get("role", "user") != role or entry.get("enabled", True) is False:
+            continue
+        h = str(entry.get("hash") or "").strip().lower()[:24]
+        if not re.fullmatch(r"[0-9a-f]{24}", h) or h in seen:
+            continue
+        seen.add(h)
+        label = _env_label(entry.get("label"), "Guest key" if role == "guest" else "User key")
+        items.append((label.lower(), h, f"{h}:{label}:{role}"))
+    items.sort(key=lambda item: (item[0], item[1]))
+    return ",".join(item[2] for item in items)
+
+
 def _save_allowed_keys(entries: list) -> None:
     entries = _normalize_key_entries(entries, "file")
     for entry in entries:
@@ -3927,6 +3949,21 @@ async def admin_list_keys(request: Request):
     if not ADMIN_SECRET or secret != ADMIN_SECRET:
         raise HTTPException(status_code=403, detail="Нет доступа")
     return JSONResponse({"entries": _load_allowed_keys()})
+
+
+@app.get("/api/admin/export-key-envs")
+async def admin_export_key_envs(request: Request):
+    """Возвращает готовые env-строки для постоянного allowlist."""
+    secret = request.headers.get("X-Admin-Secret", "")
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        raise HTTPException(status_code=403, detail="Нет доступа")
+    entries = _load_allowed_keys()
+    return JSONResponse({
+        "user_env_name": "SVERKAI_ALLOWED_KEY_HASHES",
+        "user_env_value": _key_hashes_env_value(entries, "user"),
+        "guest_env_name": "SVERKAI_GUEST_KEY_HASHES",
+        "guest_env_value": _key_hashes_env_value(entries, "guest"),
+    })
 
 
 @app.post("/api/reconcile")

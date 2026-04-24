@@ -8,6 +8,7 @@ manage_keys.py — управление белым списком API-ключе
   python manage_keys.py remove sk-ant-...
   python manage_keys.py list
   python manage_keys.py hash   sk-ant-...   # только показать хеш, не добавлять
+  python manage_keys.py env                 # показать готовые env-строки
 
 Либо через HTTP-эндпоинты (нужна переменная ADMIN_SECRET):
   POST /api/admin/add-key    {"admin_secret":"...", "api_key":"sk-ant-...", "label":"..."}
@@ -25,6 +26,14 @@ _KEYS_FILE = _DATA_DIR / "allowed_keys.json"
 
 def _user_id(key: str) -> str:
     return hashlib.sha256(key.strip().encode()).hexdigest()[:24]
+
+
+def _env_label(label: str, fallback: str = "Key") -> str:
+    text = str(label or "").replace("\r", " ").replace("\n", " ")
+    for ch in ",;:":
+        text = text.replace(ch, " ")
+    text = " ".join(text.split())
+    return text or fallback
 
 
 def load() -> list:
@@ -91,6 +100,28 @@ def cmd_hash(key: str):
     print(f"SHA256[:24] = {_user_id(key)}")
 
 
+def _env_value(entries: list, role: str) -> str:
+    seen = set()
+    parts = []
+    for e in entries:
+        if e.get("role", "user") != role or e.get("enabled", True) is False:
+            continue
+        h = str(e.get("hash", "")).strip().lower()[:24]
+        if len(h) != 24 or h in seen:
+            continue
+        seen.add(h)
+        label = _env_label(e.get("label"), "Guest key" if role == "guest" else "User key")
+        parts.append((label.lower(), h, f"{h}:{label}:{role}"))
+    parts.sort(key=lambda item: (item[0], item[1]))
+    return ",".join(item[2] for item in parts)
+
+
+def cmd_env():
+    entries = load()
+    print(f"SVERKAI_ALLOWED_KEY_HASHES={_env_value(entries, 'user')}")
+    print(f"SVERKAI_GUEST_KEY_HASHES={_env_value(entries, 'guest')}")
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     if not args:
@@ -107,5 +138,7 @@ if __name__ == "__main__":
         cmd_remove(args[1])
     elif cmd == "hash" and len(args) >= 2:
         cmd_hash(args[1])
+    elif cmd == "env":
+        cmd_env()
     else:
         print(__doc__)

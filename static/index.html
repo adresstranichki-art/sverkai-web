@@ -637,6 +637,12 @@
   .admin-table th { background: #f3f5f2; text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
   .admin-table td { padding: 9px 12px; border-bottom: 1px solid #edf1ec; vertical-align: middle; }
   .admin-table tr:last-child td { border-bottom: none; }
+  .admin-env-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 12px; margin-top: 14px; }
+  .admin-env-box { border: 1px solid #e6ece7; border-radius: 12px; padding: 12px; background: #fafcfa; }
+  .admin-env-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .admin-env-name { font-size: 13px; font-weight: 800; color: var(--green-dk); margin-bottom: 8px; }
+  .admin-env-box textarea { width: 100%; min-height: 96px; resize: vertical; border: 1px solid #d9e4dd; border-radius: 10px; padding: 10px 12px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); background: #fff; }
+  .admin-env-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
   .admin-muted { color: var(--muted); font-size: 12px; }
   .admin-danger { color: var(--red); border-color: rgba(184,59,54,.24); background: #fff6f6; }
   .env-badge {
@@ -1096,6 +1102,25 @@
             <tbody id="admin-keys-body"><tr><td colspan="7" class="empty-hist">Введите ADMIN_SECRET и нажмите «Открыть админку»</td></tr></tbody>
           </table>
         </div>
+        <div class="admin-env-grid" id="admin-env-grid" style="display:none">
+          <div class="admin-env-box">
+            <div class="admin-env-title">Постоянный allowlist</div>
+            <div class="admin-env-name">SVERKAI_ALLOWED_KEY_HASHES</div>
+            <textarea id="admin-user-env" readonly></textarea>
+            <div class="admin-env-actions">
+              <button class="btn btn-ghost" type="button" onclick="copyAdminEnv('user')">Скопировать</button>
+            </div>
+          </div>
+          <div class="admin-env-box">
+            <div class="admin-env-title">Постоянный guest-blocklist</div>
+            <div class="admin-env-name">SVERKAI_GUEST_KEY_HASHES</div>
+            <textarea id="admin-guest-env" readonly></textarea>
+            <div class="admin-env-actions">
+              <button class="btn btn-ghost" type="button" onclick="copyAdminEnv('guest')">Скопировать</button>
+            </div>
+          </div>
+        </div>
+        <p class="admin-muted">Скопируйте эти значения в Railway env, если хотите, чтобы новые ключи переживали redeploy без коммита в репозиторий.</p>
       </div>
     </div>
   </div>
@@ -1599,22 +1624,50 @@ function renderAdminKeys(entries=[]){
   }).join('');
 }
 
+let adminEnvData={};
+
+function renderAdminEnvExport(data={}){
+  adminEnvData=data||{};
+  const grid=document.getElementById('admin-env-grid');
+  const user=document.getElementById('admin-user-env');
+  const guest=document.getElementById('admin-guest-env');
+  if(!grid||!user||!guest)return;
+  user.value=adminEnvData.user_env_value||'';
+  guest.value=adminEnvData.guest_env_value||'';
+  grid.style.display='grid';
+}
+
+async function copyAdminEnv(kind){
+  const name=kind==='guest'?(adminEnvData.guest_env_name||'SVERKAI_GUEST_KEY_HASHES'):(adminEnvData.user_env_name||'SVERKAI_ALLOWED_KEY_HASHES');
+  const value=kind==='guest'?(adminEnvData.guest_env_value||''):(adminEnvData.user_env_value||'');
+  try{
+    await navigator.clipboard.writeText(value);
+    showToast(`Скопировано значение для ${name}`,'success');
+  }catch(e){
+    showToast('Не удалось скопировать env-строку','error');
+  }
+}
+
 async function adminLoad(){
   const secret=getAdminSecret();
   if(!secret){showToast('Введите ADMIN_SECRET','warn');return;}
   try{
-    const [healthResp, keysResp]=await Promise.all([
+    const [healthResp, keysResp, envResp]=await Promise.all([
       fetch('/api/health'),
-      fetch('/api/admin/list-keys',{headers:{'X-Admin-Secret':secret}})
+      fetch('/api/admin/list-keys',{headers:{'X-Admin-Secret':secret}}),
+      fetch('/api/admin/export-key-envs',{headers:{'X-Admin-Secret':secret}})
     ]);
     const health=await healthResp.json().catch(()=>({}));
     const keys=await keysResp.json().catch(()=>({}));
+    const envs=await envResp.json().catch(()=>({}));
     if(!keysResp.ok){showToast(keys.detail||'Нет доступа к админке','error');return;}
+    if(!envResp.ok){showToast(envs.detail||'Не удалось собрать env-строки','error');return;}
     sessionStorage.setItem(SS_ADMIN_SECRET,secret);
     document.getElementById('admin-tab')?.classList.add('visible');
     healthInfo=health;
     renderAdminStatus(health);
     renderAdminKeys(keys.entries||[]);
+    renderAdminEnvExport(envs);
     showToast('Админка открыта','success');
   }catch(e){showToast('Ошибка админки: '+e.message,'error');}
 }
@@ -1660,6 +1713,9 @@ function adminForget(){
   sessionStorage.removeItem(SS_ADMIN_SECRET);
   document.getElementById('admin-secret').value='';
   document.getElementById('admin-keys-body').innerHTML='<tr><td colspan="7" class="empty-hist">Введите ADMIN_SECRET и нажмите «Открыть админку»</td></tr>';
+  adminEnvData={};
+  const grid=document.getElementById('admin-env-grid');
+  if(grid)grid.style.display='none';
   showToast('Секрет забыт в этой вкладке','warn');
 }
 
