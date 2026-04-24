@@ -1084,6 +1084,7 @@
               <button class="btn btn-green" onclick="adminAddKey()">Добавить</button>
               <button class="btn btn-ghost" onclick="adminClearKeyForm()">Очистить</button>
             </div>
+            <p class="admin-muted">Ключ, добавленный через админку, сохраняется в файле текущего деплоя. Чтобы он не пропал после redeploy, его хеш нужно держать в репозитории `data/allowed_keys.json` или в `SVERKAI_ALLOWED_KEY_HASHES`.</p>
           </div>
         </div>
       </div>
