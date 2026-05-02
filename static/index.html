@@ -2531,7 +2531,6 @@ function renderWindowSuggestion(s){
 
 function canOfferExpertAnalysis(s){
   if(!s||isExpertSummary(s)||!file1||!file2)return false;
-  if((s.total_discrepancies||0)<=0)return false;
   return true;
 }
 
