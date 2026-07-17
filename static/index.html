@@ -292,6 +292,17 @@
     width: 64px;
     font-size: 13px;
   }
+  .window-control { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .window-limit-error {
+    display: none;
+    max-width: 180px;
+    color: var(--red);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .window-limit-error.visible { display: block; }
+  .settings-bar input.window-invalid { border-color: var(--red); box-shadow: 0 0 0 2px rgba(196,55,55,.1); }
   .tip {
     display: none;
     position: absolute;
@@ -886,8 +897,8 @@
     <label><input type="checkbox" id="cfg-amount" checked> Разница в суммах <span class="tip">Один документ у обеих сторон, но суммы не совпадают</span></label>
     <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Показывать только зеркальные операции, которые влияют на сальдо; технические зеркала распознаются и скрываются</span></label>
     <label><input type="checkbox" id="cfg-date" checked> Разница в датах <span class="tip">Документ совпадает по номеру/сумме, но даты отличаются (низкий приоритет)</span></label>
-    <label>Окно оплат (дн): <input type="number" id="cfg-dw-pay" value="5" min="0" max="120"> <span class="tip">Макс. расхождение в датах при поиске пар оплат</span></label>
-    <label>Окно поставок (дн): <input type="number" id="cfg-dw-del" value="3" min="0" max="120"> <span class="tip">То же для накладных и КСФ</span></label>
+    <label>Окно оплат (дн): <span class="window-control"><input type="number" id="cfg-dw-pay" value="5" min="0" max="120"><small class="window-limit-error" id="cfg-dw-pay-error" aria-live="polite"></small></span> <span class="tip">Максимальный сдвиг дат при поиске пар оплат. Максимально допустимое окно — 120 дней</span></label>
+    <label>Окно поставок (дн): <span class="window-control"><input type="number" id="cfg-dw-del" value="3" min="0" max="120"><small class="window-limit-error" id="cfg-dw-del-error" aria-live="polite"></small></span> <span class="tip">Максимальный сдвиг дат для накладных, продаж и корректировок. Максимально допустимое окно — 120 дней</span></label>
     <label>Мин. сумма: <input type="number" id="cfg-min-amt" value="0" min="0" step="100"> <span class="tip">Расхождения меньше этой суммы не показывать (0 = все)</span></label>
     <label><input type="checkbox" id="cfg-ai" checked> AI-комментарий <span class="tip">Генерировать краткий текстовый разбор расхождений</span></label>
   </div>
@@ -2025,6 +2036,36 @@ function cancelReconcile(){
   showToast('Анализ остановлен','warn');
 }
 
+const MAX_RECON_WINDOW_DAYS=120;
+
+function validateWindowInput(input,error){
+  const value=Number(input.value);
+  if(Number.isFinite(value)&&value>MAX_RECON_WINDOW_DAYS){
+    input.value=MAX_RECON_WINDOW_DAYS;
+    input.classList.add('window-invalid');
+    error.textContent=`Максимально допустимое значение окна — ${MAX_RECON_WINDOW_DAYS} дней`;
+    error.classList.add('visible');
+    return false;
+  }
+  if(Number.isFinite(value)&&value<0)input.value=0;
+  input.classList.remove('window-invalid');
+  error.textContent='';
+  error.classList.remove('visible');
+  return true;
+}
+
+function initWindowInputValidation(){
+  for(const [inputId,errorId] of [
+    ['cfg-dw-pay','cfg-dw-pay-error'],
+    ['cfg-dw-del','cfg-dw-del-error'],
+  ]){
+    const input=document.getElementById(inputId);
+    const error=document.getElementById(errorId);
+    if(!input||!error)continue;
+    input.addEventListener('input',()=>validateWindowInput(input,error));
+  }
+}
+
 async function runReconcile(extraSettings={}){
   if(!file1||!file2)return;
   if(!isLoggedIn()&&guestUsage?.limit>0&&guestUsage.remaining<=0){
@@ -2039,7 +2080,7 @@ async function runReconcile(extraSettings={}){
   setProgress(10,forceExpert?'Запуск экспертного анализа...':'Загрузка файлов...');
   const readWindow=(id,fallback)=>{
     const value=Number.parseInt(document.getElementById(id).value,10);
-    return Number.isFinite(value)?Math.max(0,Math.min(120,value)):fallback;
+    return Number.isFinite(value)?Math.max(0,Math.min(MAX_RECON_WINDOW_DAYS,value)):fallback;
   };
   const settings={
     find_missing:document.getElementById('cfg-missing').checked,
@@ -2205,21 +2246,28 @@ function isIndependentExpertSummary(summary){
 function buildIndependentExpertDiscrepancies(summary){
   const report=summary?.expert_report||{};
   return (report.discrepancies||[]).map(item=>{
-    const rows=(item.resolved_evidence||[]).map(evidence=>({
+    const resolved=item.resolved_evidence||[];
+    const rows=resolved.map(evidence=>({
       side:evidence.side,
       raw_row:evidence.raw_row,
       row_id:evidence.row_id,
     }));
+    const evidenceText=side=>resolved.filter(evidence=>evidence.side===side).map(evidence=>{
+      const label=[evidence.document,evidence.date].filter(Boolean).join(' · ');
+      const hasAmount=evidence.amount!==null&&evidence.amount!==undefined&&Number.isFinite(Number(evidence.amount));
+      return `${label}${label&&hasAmount?': ':''}${hasAmount?fmtMoney(evidence.amount):''}`||'-';
+    }).join('; ');
     const doc1=[item.doc1_document,item.doc1_date].filter(Boolean).join(' · ');
     const doc2=[item.doc2_document,item.doc2_date].filter(Boolean).join(' · ');
+    const sourceDates=[...new Set(resolved.map(evidence=>evidence.date).filter(Boolean))];
     return {
       type:item.category||'ambiguous',
       severity:item.confidence||'low',
-      date:[item.doc1_date,item.doc2_date].filter(Boolean).join(' ↔ '),
+      date:sourceDates.join(' ↔ ')||[item.doc1_date,item.doc2_date].filter(Boolean).join(' ↔ '),
       document_number:item.title||'Вывод экспертного анализа',
       description:item.reason||'',
-      company_value:item.doc1_value===null||item.doc1_value===undefined?(doc1||'-'):`${doc1?`${doc1}: `:''}${fmtMoney(item.doc1_value)}`,
-      supplier_value:item.doc2_value===null||item.doc2_value===undefined?(doc2||'-'):`${doc2?`${doc2}: `:''}${fmtMoney(item.doc2_value)}`,
+      company_value:evidenceText('doc1')||(item.doc1_value===null||item.doc1_value===undefined?(doc1||'-'):`${doc1?`${doc1}: `:''}${fmtMoney(item.doc1_value)}`),
+      supplier_value:evidenceText('doc2')||(item.doc2_value===null||item.doc2_value===undefined?(doc2||'-'):`${doc2?`${doc2}: `:''}${fmtMoney(item.doc2_value)}`),
       difference:fmtSignedMoney(item.influence),
       confidence:item.confidence||'low',
       action:item.action||'',
@@ -2943,6 +2991,7 @@ function diffClass(v){const n=Number(v);if(!Number.isFinite(n)||Math.abs(n)<0.00
 
 // Init disc table resize after page load
 document.addEventListener('DOMContentLoaded',()=>{
+  initWindowInputValidation();
   initTableResize(document.getElementById('disc-table-el'));
 });
 </script>

@@ -103,6 +103,14 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertEqual(payload['documents'][0]['rows'][0]['id'], 'd1:r11')
         self.assertEqual(payload['documents'][0]['opening_balance']['side'], 'debit')
         self.assertEqual(payload['documents'][1]['opening_balance']['side'], 'credit')
+        self.assertEqual(
+            payload['balance_comparison']['opening_difference'],
+            -3543.0,
+        )
+        self.assertEqual(
+            payload['balance_comparison']['closing_difference'],
+            -32588.0,
+        )
         self.assertNotIn('discrepancies', json.dumps(payload))
         self.assertIn(('doc1', 'd1:r11'), row_index)
 
@@ -124,6 +132,20 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertFalse(result['report']['discrepancies'][0]['clickable'])
         self.assertTrue(warnings)
 
+    def test_resolved_evidence_contains_source_details_for_the_ui(self):
+        df1, df2 = self._frames()
+        _, row_index = build_expert_payload(df1, df2)
+
+        result, warnings = resolve_expert_evidence(
+            _valid_report(), row_index,
+        )
+
+        self.assertFalse(warnings)
+        source = result['report']['discrepancies'][0]['resolved_evidence'][0]
+        self.assertEqual(source['date'], '21.01.2026')
+        self.assertEqual(source['document'], 'Корректировка 77')
+        self.assertEqual(source['amount'], 7070.0)
+
     def test_expert_analysis_uses_one_structured_output_call(self):
         df1, df2 = self._frames()
         messages = _FakeMessages(_valid_report())
@@ -135,12 +157,138 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertEqual(len(messages.calls), 1)
         call = messages.calls[0]
         self.assertEqual(call['model'], 'claude-sonnet-test')
-        self.assertEqual(call['max_tokens'], 2200)
+        self.assertEqual(call['max_tokens'], 2800)
         self.assertEqual(call['output_config']['format']['type'], 'json_schema')
         sent_payload = json.loads(call['messages'][0]['content'])
         self.assertNotIn('summary', sent_payload)
         self.assertNotIn('discrepancies', sent_payload)
         self.assertEqual(result['usage'], {'input_tokens': 321, 'output_tokens': 123})
+
+    def test_structured_output_schema_uses_only_supported_constraints(self):
+        df1, df2 = self._frames()
+        messages = _FakeMessages(_valid_report())
+        client = types.SimpleNamespace(messages=messages)
+
+        result = run_independent_expert_analysis(
+            df1, df2, client, 'claude-sonnet-test',
+        )
+
+        self.assertEqual(result['status'], 'complete')
+        sent_schema = messages.calls[0]['output_config']['format']['schema']
+        serialized = json.dumps(sent_schema)
+        for unsupported in (
+            'minimum', 'maximum', 'minLength', 'maxLength', 'maxItems',
+        ):
+            self.assertNotIn(f'"{unsupported}"', serialized)
+
+    def test_structured_report_does_not_repeat_source_row_fields(self):
+        df1, df2 = self._frames()
+        messages = _FakeMessages(_valid_report())
+
+        run_independent_expert_analysis(
+            df1, df2, types.SimpleNamespace(messages=messages),
+            'claude-sonnet-test',
+        )
+
+        item_properties = (
+            messages.calls[0]['output_config']['format']['schema']
+            ['properties']['discrepancies']['items']['properties']
+        )
+        root_properties = (
+            messages.calls[0]['output_config']['format']['schema']
+            ['properties']
+        )
+        self.assertNotIn('totals', root_properties)
+        self.assertNotIn('balances', root_properties)
+        for duplicate in (
+            'doc1_date', 'doc2_date', 'doc1_document', 'doc2_document',
+            'doc1_value', 'doc2_value', 'action',
+        ):
+            self.assertNotIn(duplicate, item_properties)
+        self.assertIn('не более 8', messages.calls[0]['system'].lower())
+        self.assertIn('balance_comparison уже рассчитан', messages.calls[0]['system'].lower())
+        self.assertIn(
+            'opening_balance_bridge — только операция',
+            messages.calls[0]['system'].lower(),
+        )
+        self.assertIn(
+            'likely_date_pair требует одинаковый модуль суммы',
+            messages.calls[0]['system'].lower(),
+        )
+        self.assertIn(
+            'сначала перечисли все confirmed_missing',
+            messages.calls[0]['system'].lower(),
+        )
+
+    def test_report_totals_are_derived_from_discrepancies(self):
+        df1, df2 = self._frames()
+        report = _valid_report()
+        report.pop('totals')
+        report['discrepancies'].append({
+            'category': 'confirmed_missing',
+            'title': 'Отсутствующая корректировка',
+            'influence': -11845.0,
+            'reason': 'Нет зеркальной операции.',
+            'confidence': 'high',
+            'evidence': [{'side': 'doc1', 'row_id': 'd1:r11'}],
+        })
+
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+        )
+
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['report']['totals'], {
+            'confirmed_count': 1,
+            'confirmed_amount': 11845.0,
+            'review_count': 1,
+        })
+
+    def test_report_balances_are_derived_from_source_sides(self):
+        df1, df2 = self._frames()
+        report = _valid_report()
+        report.pop('balances')
+
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+        )
+
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['report']['balances'], {
+            'opening_difference': -3543.0,
+            'period_movement': -29045.0,
+            'closing_difference': -32588.0,
+            'formula': '-3 543,00 + -29 045,00 = -32 588,00',
+        })
+
+    def test_token_limit_returns_a_specific_failure(self):
+        df1, df2 = self._frames()
+
+        class TokenLimitedMessages:
+            def create(self, **kwargs):
+                return types.SimpleNamespace(
+                    content=[types.SimpleNamespace(text='{"version":')],
+                    stop_reason='max_tokens',
+                    usage=types.SimpleNamespace(
+                        input_tokens=100, output_tokens=2200,
+                    ),
+                )
+
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=TokenLimitedMessages()),
+            'claude-sonnet-test',
+        )
+
+        self.assertEqual(result, {
+            'status': 'failed',
+            'error': 'max_tokens',
+            'usage': {'input_tokens': 100, 'output_tokens': 2200},
+        })
 
 
 if __name__ == '__main__':
