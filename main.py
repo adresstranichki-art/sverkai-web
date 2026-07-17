@@ -1617,7 +1617,13 @@ def parse_generic(path: str) -> pd.DataFrame:
 def parse_with_profile(path: str, profile: dict) -> pd.DataFrame:
     ext = Path(path).suffix.lower()
     engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
-    raw = pd.read_excel(path, engine=engine, header=None, dtype=str)
+    raw = pd.read_excel(
+        path,
+        engine=engine,
+        sheet_name=profile.get('sheet_name', 0),
+        header=None,
+        dtype=str,
+    )
     data_start   = int(profile.get('data_start_row', 1))
     date_col     = profile.get('date_col')
     doc_col      = profile.get('doc_col')
@@ -1736,34 +1742,16 @@ def detect_file_type(path: str) -> str:
 #  АВТОДЕТЕКТ ЧЕРЕЗ CLAUDE
 # ════════════════════════════════════════════════════════════════════
 
-def claude_detect_columns(path: str, api_key: str) -> Optional[dict]:
-    """Определяет структуру колонок файла через Claude API.
-    Кеширование профилей выполняется в _load_and_parse по оригинальному имени файла."""
+def claude_detect_columns(path: str, api_key: str, sample: Optional[dict] = None) -> Optional[dict]:
+    """Определяет профиль неизвестной Excel-структуры по ограниченной выборке."""
     try:
-        ext = Path(path).suffix.lower()
-        engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
-        raw = pd.read_excel(path, engine=engine, header=None, dtype=str, nrows=30)
+        sample = sample or _build_workbook_structure_sample(path)
     except Exception:
         return None
-    preview = raw.to_string()
-    prompt = f"""Ты анализируешь фрагмент Excel-файла акта сверки взаимных расчётов.
-Нужно определить структуру таблицы для программной обработки.
-
-ФРАГМЕНТ ФАЙЛА (первые 30 строк, колонки пронумерованы с 0):
-{preview}
-
-ВАЖНЫЕ ПРАВИЛА АНАЛИЗА:
-1. Если лист двусторонний (обе стороны рядом — «По данным X» и «По данным Y»),
-   читай ТОЛЬКО левую сторону организации (меньшие индексы колонок).
-2. Дата может быть в формате ДД.ММ.ГГ или ДД.ММ.ГГГГ.
-3. «Сумма документа» — вспомогательная колонка (присутствует в каждой строке).
-   Дебет и Кредит — взаимоисключающие: в каждой строке заполнена только одна из них.
-4. Суммы со знаком минус (сторно/возврат) — это нормально, не путай с кредитом.
-5. Строки-заголовки, сальдо начальное, «обороты за период», «сальдо конечное» — НЕ данные.
-6. Если есть отдельная колонка с типом операции (Оплата / Продажа / Приход) — укажи doc_type_col.
-
-Верни ТОЛЬКО корректный JSON без markdown, без комментариев:
+    compact_sample = json.dumps(sample, ensure_ascii=False, separators=(',', ':'))
+    prompt = f"""Определи структуру Excel-акта для программного чтения. Выбери лист и одну сторону таблицы. Сальдо/обороты не являются операциями. Верни только JSON:
 {{
+  "sheet_name": <имя или индекс листа>,
   "header_row": <номер строки с заголовками (0-based), или null>,
   "data_start_row": <номер первой строки с данными транзакций (0-based)>,
   "date_col": <индекс колонки с датой операции (0-based)>,
@@ -1775,11 +1763,14 @@ def claude_detect_columns(path: str, api_key: str) -> Optional[dict]:
   "amount_col": <индекс единственной колонки суммы если нет раздельных дебет/кредит (0-based), или null>,
   "amount_sign": <"positive_is_credit" | "positive_is_debit" | "signed" | "unknown">,
   "footer_keywords": ["обороты за период", "сальдо конечное"],
+  "opening_balance_keywords": ["сальдо начальное"],
+  "closing_balance_keywords": ["сальдо конечное"],
   "confidence": <"high" | "medium" | "low">
-}}"""
+}}
+ВЫБОРКА:{compact_sample}"""
     try:
         client = Anthropic(api_key=api_key)
-        msg = client.messages.create(model=MODEL_MAIN, max_tokens=500, temperature=0,
+        msg = client.messages.create(model=MODEL_MAIN, max_tokens=900, temperature=0,
                                      messages=[{"role": "user", "content": prompt}])
         text = msg.content[0].text.strip()
         if "```" in text:
@@ -1799,6 +1790,88 @@ def claude_detect_columns(path: str, api_key: str) -> Optional[dict]:
         return profile
     except Exception:
         return None
+
+
+def parse_unknown_sheet_with_ai(
+    path: str,
+    api_key: str,
+    sample: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Резервно извлекает операции из всего неизвестного Excel-файла."""
+    if not api_key:
+        raise ValueError('Для полного AI-разбора нужен API-ключ')
+    ext = Path(path).suffix.lower()
+    engine = 'openpyxl' if ext == '.xlsx' else 'xlrd'
+    sheets = pd.read_excel(path, engine=engine, sheet_name=None, header=None, dtype=str)
+    client = Anthropic(api_key=api_key)
+    extracted = []
+    balance_meta = {}
+    block_limit = 140
+
+    for sheet_index, (sheet_name, raw) in enumerate(sheets.items()):
+        current_meta = _extract_balance_meta(raw)
+        if len(current_meta) > len(balance_meta):
+            balance_meta = current_meta
+        source_rows = []
+        for row_index, row in raw.iterrows():
+            cells = [_structure_text(value) for value in row.tolist()]
+            if any(cells):
+                source_rows.append({'r': int(row_index), 'c': cells})
+        for start in range(0, len(source_rows), block_limit):
+            block = source_rows[start:start + block_limit]
+            if not block:
+                continue
+            payload = json.dumps(
+                {'sheet': str(sheet_name), 'rows': block},
+                ensure_ascii=False,
+                separators=(',', ':'),
+            )
+            prompt = (
+                'Извлеки только операции акта сверки из строк Excel. '
+                'Не включай заголовки, сальдо, обороты, итоги и подписи. '
+                'Сохрани номер исходной строки r. Даты ДД.ММ.ГГГГ, суммы числа. '
+                'Верни JSON {"rows":[{"r":0,"date":"","doc":"","num":null,'
+                '"debit":null,"credit":null}]}. ДАННЫЕ:' + payload
+            )
+            msg = client.messages.create(
+                model=MODEL_MAIN,
+                max_tokens=4096,
+                temperature=0,
+                messages=[{'role': 'user', 'content': prompt}],
+            )
+            response_text = '\n'.join(
+                getattr(item, 'text', '')
+                for item in msg.content
+                if getattr(item, 'text', '')
+            )
+            parsed = _extract_json_payload(response_text)
+            for item in parsed.get('rows', []) if isinstance(parsed, dict) else []:
+                if not isinstance(item, dict):
+                    continue
+                document = _structure_text(item.get('doc') or item.get('document'))
+                debit = _to_float(item.get('debit'))
+                credit = _to_float(item.get('credit'))
+                if not document or (debit is None and credit is None):
+                    continue
+                raw_row = int(item.get('r', 0) or 0)
+                date_str = _structure_text(item.get('date'))
+                date_value = pd.to_datetime(date_str, dayfirst=True, errors='coerce')
+                extracted.append({
+                    'date': date_value,
+                    'date_str': date_value.strftime('%d.%m.%Y') if pd.notna(date_value) else date_str,
+                    'document': document,
+                    'doc_num': _normalize_doc_num(item.get('num')) or _extract_doc_num(document),
+                    'debit': debit,
+                    'credit': credit,
+                    'match_date': _extract_doc_date(document) or date_value,
+                    'signed_amount': float(debit or 0.0) - float(credit or 0.0),
+                    'raw_row': sheet_index * 1_000_000 + raw_row,
+                    'source_sheet': str(sheet_name),
+                    'source_raw_row': raw_row,
+                })
+    if not extracted:
+        raise ValueError('Claude не извлёк операции из неизвестного Excel-файла')
+    return _attach_meta(pd.DataFrame(extracted), **balance_meta)
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -3427,6 +3500,145 @@ def _score_parsed_dataframe(df: pd.DataFrame) -> dict:
     }
 
 
+STRUCTURE_PROFILE_VERSION = 2
+STRUCTURE_SAMPLE_MAX_CHARS = 24000
+_STRUCTURE_KEYWORDS = (
+    'акт сверки', 'дата', 'документ', 'номер', 'операц', 'дебет', 'кредит',
+    'сальдо', 'оборот', 'приход', 'продаж', 'оплат', 'по данным',
+)
+
+
+def _structure_text(value) -> str:
+    if value is None:
+        return ''
+    try:
+        if not isinstance(value, str) and pd.isna(value):
+            return ''
+    except Exception:
+        pass
+    return re.sub(r'\s+', ' ', str(value).replace('\n', ' ')).strip()
+
+
+def _structure_cell_signature(value, *, data_row: bool) -> str:
+    text = _structure_text(value)
+    if not text:
+        return ''
+    if _to_float(text) is not None:
+        return 'number'
+    if _extract_any_date(text) is not None:
+        return 'date'
+    if data_row:
+        return 'text'
+    lowered = re.sub(r'\d+', '#', text.lower())
+    markers = [keyword for keyword in _STRUCTURE_KEYWORDS if keyword in lowered]
+    return '|'.join(markers) if markers else 'text'
+
+
+def _workbook_structure_fingerprint(path: str) -> str:
+    sheets = pd.read_excel(path, sheet_name=None, header=None, dtype=str)
+    signature = {
+        'version': STRUCTURE_PROFILE_VERSION,
+        'extension': Path(path).suffix.lower(),
+        'sheets': [],
+    }
+    date_re = re.compile(r'^\d{2}\.\d{2}\.\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$')
+    for name, raw in sheets.items():
+        rows = []
+        for row in raw.head(30).itertuples(index=False, name=None):
+            cells = [_structure_text(value) for value in row]
+            data_row = any(date_re.match(cell) for cell in cells if cell)
+            rows.append([
+                _structure_cell_signature(value, data_row=data_row)
+                for value in row
+            ])
+        total_rows = len(raw)
+        row_band = 0 if total_rows == 0 else min(6, len(str(total_rows)))
+        signature['sheets'].append({
+            'name': _structure_text(name).lower(),
+            'row_band': row_band,
+            'columns': len(raw.columns),
+            'rows': rows,
+        })
+    encoded = json.dumps(
+        signature, ensure_ascii=False, sort_keys=True, separators=(',', ':'),
+    ).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _build_workbook_structure_sample(path: str) -> dict:
+    sheets = pd.read_excel(path, sheet_name=None, header=None, dtype=str)
+    payload = {'version': STRUCTURE_PROFILE_VERSION, 'sheets': []}
+    for name, raw in sheets.items():
+        indexes = set(range(min(20, len(raw))))
+        indexes.update(range(max(0, len(raw) - 12), len(raw)))
+        if len(raw) > 40:
+            middle = len(raw) // 2
+            indexes.update(range(max(0, middle - 5), min(len(raw), middle + 6)))
+        protected = set()
+        for idx, row in raw.iterrows():
+            text = ' '.join(
+                _structure_text(value).lower()
+                for value in row.tolist()
+                if _structure_text(value)
+            )
+            if 'сальдо' in text or 'оборот' in text:
+                indexes.add(int(idx))
+                protected.add(int(idx))
+        rows = [{
+            'row': int(idx),
+            'cells': [_structure_text(value) for value in raw.iloc[idx].tolist()],
+            '_protected': idx in protected or idx < 20,
+        } for idx in sorted(indexes)]
+        payload['sheets'].append({
+            'name': str(name),
+            'rows_total': len(raw),
+            'columns_total': len(raw.columns),
+            'sample_rows': rows,
+        })
+
+    def payload_size() -> int:
+        return len(json.dumps(payload, ensure_ascii=False, separators=(',', ':')))
+
+    while payload_size() > STRUCTURE_SAMPLE_MAX_CHARS:
+        removable = [
+            (sheet, idx)
+            for sheet in payload['sheets']
+            for idx, row in enumerate(sheet['sample_rows'])
+            if not row.get('_protected')
+        ]
+        if not removable:
+            break
+        sheet, idx = removable[len(removable) // 2]
+        sheet['sample_rows'].pop(idx)
+    for sheet in payload['sheets']:
+        for row in sheet['sample_rows']:
+            row.pop('_protected', None)
+    return payload
+
+
+def _validate_profile_parse(path: str, profile: dict, df: pd.DataFrame) -> dict:
+    sheet_name = profile.get('sheet_name', 0)
+    raw = pd.read_excel(path, sheet_name=sheet_name, header=None, dtype=str)
+    expected_rows = _estimate_raw_transaction_rows(raw)
+    quality = _score_parsed_dataframe(df)
+    parsed_rows = len(df)
+    coverage = parsed_rows / expected_rows if expected_rows else (1.0 if parsed_rows else 0.0)
+    valid = (
+        profile.get('confidence') == 'high'
+        and parsed_rows > 0
+        and coverage >= 0.65
+        and float(quality.get('date_ratio') or 0.0) >= 0.6
+        and float(quality.get('amount_ratio') or 0.0) >= 0.8
+    )
+    return {
+        'valid': bool(valid),
+        'expected_rows': int(expected_rows),
+        'parsed_rows': int(parsed_rows),
+        'coverage': round(float(coverage), 4),
+        'quality': quality,
+    }
+
+
 def _profile_cache_file() -> Path:
     return _DATA_DIR / 'col_profiles.json'
 
@@ -3635,37 +3847,87 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
         elif ftype == 'pdf_no_text':
             logs.append(f"{cache_name}: для PDF без текстового слоя нужен API-ключ или исходный Excel/текстовый PDF.")
 
-    cache = _load_profile_cache()
-    cache_key = f"col_profile_{cache_name}"
-    profile = cache.get(cache_key)
-    profile_source = 'cache' if profile else ''
     ai_reason = _ai_profile_trigger_reason(candidates, raw_preview, is_sheet, is_act_like)
-    if profile is None and ai_reason and eff_key and is_sheet:
+    cache = _load_profile_cache()
+    profile = None
+    profile_candidate_added = False
+    cache_key = ''
+    structure_sample = None
+
+    def add_profile_candidate(candidate_profile: dict, source: str) -> bool:
         try:
-            logs.append(f"Пробую AI-структуру для {cache_name}: {ai_reason}.")
-            profile = claude_detect_columns(path, eff_key)
-            profile_source = 'ai'
-            if profile and profile.get('confidence') != 'low':
-                cache[cache_key] = profile
-                _save_profile_cache(cache)
-        except Exception:
-            profile = None
-    elif profile is None and ai_reason and is_sheet:
-        logs.append(f"AI-структура могла бы помочь для {cache_name}: {ai_reason}, но API ключ не указан.")
-    if profile and profile.get('confidence') != 'low':
-        try:
-            df = parse_with_profile(path, profile)
+            df = parse_with_profile(path, candidate_profile)
+            validation = _validate_profile_parse(path, candidate_profile, df)
+            if not validation.get('valid'):
+                return False
             df.attrs['source_path'] = path
             df.attrs['source_name'] = cache_name
-            confidence = profile.get('confidence', 'medium')
-            label = 'Кеш профиля' if profile_source == 'cache' else f'Автодетект AI ({confidence})'
-            ai_bonus = 18 if profile_source == 'cache' else 10
+            df.attrs['profile_validation'] = validation
+            confidence = candidate_profile.get('confidence', 'medium')
+            label = 'Кеш профиля структуры' if source == 'cache' else f'Автодетект AI ({confidence})'
+            ai_bonus = 18 if source == 'cache' else 10
             candidate = _make_parse_candidate(df, 'generic_detected', label, f'ai_profile_{confidence}', ai_bonus)
             if candidate:
-                candidate['profile'] = profile
+                candidate['profile'] = candidate_profile
+                candidate['profile_validation'] = validation
                 candidates.append(candidate)
+                return True
         except Exception:
-            pass
+            return False
+        return False
+
+    if ai_reason and is_sheet:
+        try:
+            structure_sample = _build_workbook_structure_sample(path)
+            cache_key = f"structure_v{STRUCTURE_PROFILE_VERSION}:{_workbook_structure_fingerprint(path)}"
+        except Exception:
+            structure_sample = None
+            cache_key = ''
+
+        cached_profile = cache.get(cache_key) if cache_key else None
+        if cached_profile:
+            profile_candidate_added = add_profile_candidate(cached_profile, 'cache')
+            if profile_candidate_added:
+                profile = cached_profile
+            elif cache_key:
+                cache.pop(cache_key, None)
+                _save_profile_cache(cache)
+
+        if not profile_candidate_added and eff_key:
+            try:
+                logs.append(f"Пробую AI-структуру для {cache_name}: {ai_reason}.")
+                detected_profile = claude_detect_columns(path, eff_key, structure_sample)
+                if detected_profile and add_profile_candidate(detected_profile, 'ai'):
+                    profile = detected_profile
+                    profile_candidate_added = True
+                    if cache_key and detected_profile.get('confidence') == 'high':
+                        cache[cache_key] = detected_profile
+                        _save_profile_cache(cache)
+            except Exception:
+                profile = None
+
+        if not profile_candidate_added and eff_key:
+            try:
+                logs.append(f"{cache_name}: профиль не прошёл проверку, запускаю полный AI-разбор.")
+                full_df = parse_unknown_sheet_with_ai(path, eff_key, structure_sample)
+                full_df.attrs['source_path'] = path
+                full_df.attrs['source_name'] = cache_name
+                full_candidate = _make_parse_candidate(
+                    full_df,
+                    'generic_detected',
+                    'Полный AI-разбор неизвестной структуры',
+                    'ai_full_extract',
+                    8,
+                )
+                if full_candidate:
+                    full_candidate['profile'] = None
+                    candidates.append(full_candidate)
+            except Exception:
+                pass
+        elif not profile_candidate_added and not eff_key:
+            logs.append(
+                f"AI-структура могла бы помочь для {cache_name}: {ai_reason}, но API ключ не указан."
+            )
 
     candidates.sort(key=lambda c: (c['score'], c['quality']['rows']), reverse=True)
     return display_df, candidates

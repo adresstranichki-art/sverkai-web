@@ -5,6 +5,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 def _install_stubs() -> None:
@@ -261,6 +262,169 @@ class RegressionReconcileTests(unittest.TestCase):
             self.assertTrue(calls)
             self.assertEqual(len(ai_candidates), 1)
             self.assertEqual(len(ai_candidates[0]['df']), 2)
+
+    def test_structure_fingerprint_ignores_filename_but_changes_with_layout(self):
+        pd = self.main.pd
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / 'one.xlsx'
+            second = Path(tmp) / 'two.xlsx'
+            different = Path(tmp) / 'different.xlsx'
+            rows = [
+                ['Акт сверки', '', ''],
+                ['Дата', 'Документ', 'Дебет'],
+                ['01.01.2026', 'Продажа 1', 100],
+            ]
+            shifted = [
+                ['Акт сверки', '', '', ''],
+                ['Дата', '', 'Документ', 'Дебет'],
+                ['01.01.2026', '', 'Продажа 1', 100],
+            ]
+            pd.DataFrame(rows).to_excel(first, header=False, index=False)
+            pd.DataFrame(rows).to_excel(second, header=False, index=False)
+            pd.DataFrame(shifted).to_excel(different, header=False, index=False)
+
+            self.assertEqual(
+                self.main._workbook_structure_fingerprint(str(first)),
+                self.main._workbook_structure_fingerprint(str(second)),
+            )
+            self.assertNotEqual(
+                self.main._workbook_structure_fingerprint(str(first)),
+                self.main._workbook_structure_fingerprint(str(different)),
+            )
+
+    def test_structure_sample_contains_header_middle_tail_and_balances(self):
+        sample = self.main._build_workbook_structure_sample('tmp_analysis/proopt.xls')
+        text = json.dumps(sample, ensure_ascii=False)
+
+        self.assertIn('сальдо', text.lower())
+        self.assertLessEqual(len(text), self.main.STRUCTURE_SAMPLE_MAX_CHARS)
+        self.assertTrue(sample['sheets'])
+
+    def test_profile_validation_rejects_incomplete_parse(self):
+        df = self.main.pd.DataFrame([{
+            'date': self.main.pd.Timestamp('2026-01-01'),
+            'document': 'Продажа 1',
+            'debit': 1.0,
+            'credit': None,
+            'raw_row': 1,
+        }])
+
+        result = self.main._validate_profile_parse(
+            'tmp_analysis/proopt.xls',
+            {'confidence': 'high', 'sheet_name': 0},
+            df,
+        )
+
+        self.assertFalse(result['valid'])
+        self.assertGreater(result['expected_rows'], result['parsed_rows'])
+
+    def test_verified_profile_cache_uses_structure_fingerprint(self):
+        pd = self.main.pd
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = [
+                ['Акт сверки взаиморасчетов', '', '', '', ''],
+                ['Дата', '', 'Документ', '', 'Дебет'],
+                ['01.03.2026', '', 'Продажа 1', '', 50],
+                ['02.03.2026', '', 'Продажа 2', '', 70],
+            ]
+            first = Path(tmp) / 'first.xlsx'
+            second = Path(tmp) / 'second.xlsx'
+            pd.DataFrame(rows).to_excel(first, header=False, index=False)
+            pd.DataFrame(rows).to_excel(second, header=False, index=False)
+            profile = {
+                'sheet_name': 0,
+                'data_start_row': 2,
+                'date_col': 0,
+                'doc_col': 2,
+                'doc_num_col': None,
+                'doc_type_col': None,
+                'debit_col': 4,
+                'credit_col': None,
+                'amount_col': None,
+                'amount_sign': 'unknown',
+                'footer_keywords': [],
+                'confidence': 'high',
+            }
+            cache = {}
+            calls = []
+
+            with patch.object(self.main, '_load_profile_cache', side_effect=lambda: cache.copy()), \
+                 patch.object(self.main, '_save_profile_cache', side_effect=lambda value: cache.update(value)), \
+                 patch.object(
+                     self.main,
+                     'claude_detect_columns',
+                     side_effect=lambda *_args, **_kwargs: calls.append(1) or profile,
+                 ):
+                self.main._collect_parse_candidates(str(first), [], 'sk-ant-test', first.name)
+                self.main._collect_parse_candidates(str(second), [], 'sk-ant-test', second.name)
+
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(any(key.startswith('structure_v2:') for key in cache))
+
+    def test_invalid_profile_is_not_cached_and_uses_full_ai_parse(self):
+        pd = self.main.pd
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'unknown.xlsx'
+            rows = [
+                ['Акт сверки', '', ''],
+                ['Дата', 'Документ', 'Дебет'],
+                ['01.03.2026', 'Продажа 1', 50],
+                ['02.03.2026', 'Продажа 2', 70],
+            ]
+            pd.DataFrame(rows).to_excel(path, header=False, index=False)
+            invalid_profile = {
+                'sheet_name': 0,
+                'data_start_row': 2,
+                'date_col': 1,
+                'doc_col': 0,
+                'doc_num_col': None,
+                'doc_type_col': None,
+                'debit_col': 2,
+                'credit_col': None,
+                'amount_col': None,
+                'amount_sign': 'unknown',
+                'footer_keywords': [],
+                'confidence': 'high',
+            }
+            extracted = pd.DataFrame([
+                {
+                    'date': pd.Timestamp('2026-03-01'),
+                    'date_str': '01.03.2026',
+                    'document': 'Продажа 1',
+                    'doc_num': '1',
+                    'debit': 50.0,
+                    'credit': None,
+                    'raw_row': 2,
+                },
+                {
+                    'date': pd.Timestamp('2026-03-02'),
+                    'date_str': '02.03.2026',
+                    'document': 'Продажа 2',
+                    'doc_num': '2',
+                    'debit': 70.0,
+                    'credit': None,
+                    'raw_row': 3,
+                },
+            ])
+            cache = {}
+            full_calls = []
+
+            with patch.object(self.main, '_load_profile_cache', return_value=cache), \
+                 patch.object(self.main, '_save_profile_cache', side_effect=lambda value: cache.update(value)), \
+                 patch.object(self.main, 'claude_detect_columns', return_value=invalid_profile), \
+                 patch.object(
+                     self.main,
+                     'parse_unknown_sheet_with_ai',
+                     create=True,
+                     side_effect=lambda *_args, **_kwargs: full_calls.append(1) or extracted,
+                 ):
+                _, candidates = self.main._collect_parse_candidates(
+                    str(path), [], 'sk-ant-test', path.name,
+                )
+
+            self.assertEqual(len(full_calls), 1)
+            self.assertFalse(cache)
+            self.assertTrue(any(c['parser_id'] == 'ai_full_extract' for c in candidates))
 
     def test_balance_state_vs_two_sided(self):
         cand1, cand2, result = self._run_case(
