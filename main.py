@@ -588,8 +588,33 @@ def _extract_balance_meta(raw: pd.DataFrame) -> dict:
     period_from, period_to = _extract_period_bounds(header_text)
     start_balance = None
     end_balance = None
+    start_balance_side = None
+    end_balance_side = None
+    start_balance_raw_row = None
+    end_balance_raw_row = None
     start_row_text = ''
     end_row_text = ''
+    debit_columns = set()
+    credit_columns = set()
+    for row_idx in range(min(20, len(raw))):
+        for col_idx, value in enumerate(raw.iloc[row_idx].tolist()):
+            cell = str(value).strip().lower() if pd.notna(value) else ''
+            if 'дебет' in cell:
+                debit_columns.add(col_idx)
+            if 'кредит' in cell:
+                credit_columns.add(col_idx)
+
+    def balance_side(column: int, row_text: str) -> Optional[str]:
+        if column in debit_columns and column not in credit_columns:
+            return 'debit'
+        if column in credit_columns and column not in debit_columns:
+            return 'credit'
+        if 'дебетов' in row_text and 'кредитов' not in row_text:
+            return 'debit'
+        if 'кредитов' in row_text and 'дебетов' not in row_text:
+            return 'credit'
+        return None
+
     for idx in range(len(raw)):
         row_vals = [
             str(v).strip() for v in raw.iloc[idx].tolist()
@@ -619,24 +644,33 @@ def _extract_balance_meta(raw: pd.DataFrame) -> dict:
                 and abs(first_val) < max(abs(v) for _, v in middle_candidates)
             ):
                 amount_candidates = middle_candidates
-        amount = amount_candidates[-1][1]
+        amount_column, amount = amount_candidates[-1]
+        side = balance_side(amount_column, row_text)
         has_saldo = 'сальдо' in row_text
         if not has_saldo:
             continue
         if start_balance is None and 'началь' in row_text:
             start_balance = amount
+            start_balance_side = side
+            start_balance_raw_row = idx
             start_row_text = ' '.join(row_vals)
             continue
         if end_balance is None and 'конеч' in row_text:
             end_balance = amount
+            end_balance_side = side
+            end_balance_raw_row = idx
             end_row_text = ' '.join(row_vals)
             continue
         if 'началь' not in row_text and 'конеч' not in row_text:
             if start_balance is None:
                 start_balance = amount
+                start_balance_side = side
+                start_balance_raw_row = idx
                 start_row_text = ' '.join(row_vals)
             else:
                 end_balance = amount
+                end_balance_side = side
+                end_balance_raw_row = idx
                 end_row_text = ' '.join(row_vals)
     if period_from is None:
         period_from = _extract_any_date(start_row_text)
@@ -645,8 +679,14 @@ def _extract_balance_meta(raw: pd.DataFrame) -> dict:
     meta = {}
     if start_balance is not None:
         meta['start_balance'] = float(start_balance)
+        meta['start_balance_raw_row'] = int(start_balance_raw_row)
+        if start_balance_side:
+            meta['start_balance_side'] = start_balance_side
     if end_balance is not None:
         meta['end_balance'] = float(end_balance)
+        meta['end_balance_raw_row'] = int(end_balance_raw_row)
+        if end_balance_side:
+            meta['end_balance_side'] = end_balance_side
     if period_from is not None and pd.notna(period_from):
         meta['period_from'] = period_from
     if period_to is not None and pd.notna(period_to):
@@ -1624,6 +1664,7 @@ def parse_with_profile(path: str, profile: dict) -> pd.DataFrame:
         header=None,
         dtype=str,
     )
+    meta = _extract_balance_meta(raw)
     data_start   = int(profile.get('data_start_row', 1))
     date_col     = profile.get('date_col')
     doc_col      = profile.get('doc_col')
@@ -1667,8 +1708,11 @@ def parse_with_profile(path: str, profile: dict) -> pd.DataFrame:
             credit = _to_float(str(row[credit_col]) if credit_col is not None and pd.notna(row[credit_col]) else '')
         rows.append({'date': date_p, 'date_str': date_val, 'document': doc_val,
                      'doc_num': doc_num, 'doc_type': doc_type,
-                     'debit': debit, 'credit': credit, 'raw_row': idx})
-    return pd.DataFrame(rows)
+                     'debit': debit, 'credit': credit,
+                     'match_date': _extract_doc_date(doc_val) or date_p,
+                     'signed_amount': float(debit or 0) - float(credit or 0),
+                     'raw_row': idx})
+    return _attach_meta(pd.DataFrame(rows), **meta)
 
 
 # ════════════════════════════════════════════════════════════════════

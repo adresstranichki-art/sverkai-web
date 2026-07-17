@@ -300,6 +300,20 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertLessEqual(len(text), self.main.STRUCTURE_SAMPLE_MAX_CHARS)
         self.assertTrue(sample['sheets'])
 
+    def test_balance_meta_preserves_debit_credit_side_and_source_row(self):
+        raw = self.main.pd.DataFrame([
+            ['', 'Дебет', 'Кредит'],
+            ['Сальдо начальное', 12972, None],
+            ['Сальдо конечное', None, 9429],
+        ])
+
+        meta = self.main._extract_balance_meta(raw)
+
+        self.assertEqual(meta['start_balance_side'], 'debit')
+        self.assertEqual(meta['end_balance_side'], 'credit')
+        self.assertEqual(meta['start_balance_raw_row'], 1)
+        self.assertEqual(meta['end_balance_raw_row'], 2)
+
     def test_profile_validation_rejects_incomplete_parse(self):
         df = self.main.pd.DataFrame([{
             'date': self.main.pd.Timestamp('2026-01-01'),
