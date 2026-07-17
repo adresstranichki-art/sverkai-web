@@ -426,6 +426,58 @@ class RegressionReconcileTests(unittest.TestCase):
             self.assertFalse(cache)
             self.assertTrue(any(c['parser_id'] == 'ai_full_extract' for c in candidates))
 
+    def test_reconciliation_windows_are_clamped_to_120(self):
+        cfg = self.main._normalize_recon_settings({
+            'date_window_payment': -4,
+            'date_window_delivery': 121,
+        })
+
+        self.assertEqual(cfg['date_window_payment'], 0)
+        self.assertEqual(cfg['date_window_delivery'], 120)
+
+    def test_single_unique_adjustment_pair_suggests_37_day_window(self):
+        pd = self.main.pd
+        df1 = pd.DataFrame([{
+            'date': pd.Timestamp('2026-01-21'),
+            'match_date': pd.Timestamp('2026-01-21'),
+            'date_str': '21.01.2026',
+            'document': 'Корректировка прихода',
+            'doc_num': None,
+            'doc_type': 'Корректировка прихода',
+            'debit': 7070.0,
+            'credit': None,
+            'signed_amount': 7070.0,
+            'raw_row': 11,
+        }])
+        df2 = pd.DataFrame([{
+            'date': pd.Timestamp('2026-02-27'),
+            'match_date': pd.Timestamp('2026-02-27'),
+            'date_str': '27.02.2026',
+            'document': 'Корректировка продажи',
+            'doc_num': None,
+            'doc_type': 'Корректировка продажи',
+            'debit': 7070.0,
+            'credit': None,
+            'signed_amount': -7070.0,
+            'raw_row': 22,
+        }])
+
+        result = self.main._reconcile_structured(
+            df1,
+            df2,
+            'generic_detected',
+            'generic_detected',
+            None,
+            lambda *_: None,
+            self.cfg,
+        )
+        hint = result['summary'].get('window_suggestion')
+
+        self.assertIsNotNone(hint)
+        self.assertEqual(hint['candidate_pairs'], 1)
+        self.assertEqual(hint['recommended_delivery_window'], 37)
+        self.assertEqual(len(hint['examples']), 1)
+
     def test_balance_state_vs_two_sided(self):
         cand1, cand2, result = self._run_case(
             'tmp_analysis1/balance_248098_10.xls',

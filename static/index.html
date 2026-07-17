@@ -885,8 +885,8 @@
     <label><input type="checkbox" id="cfg-amount" checked> Разница в суммах <span class="tip">Один документ у обеих сторон, но суммы не совпадают</span></label>
     <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Показывать только зеркальные операции, которые влияют на сальдо; технические зеркала распознаются и скрываются</span></label>
     <label><input type="checkbox" id="cfg-date" checked> Разница в датах <span class="tip">Документ совпадает по номеру/сумме, но даты отличаются (низкий приоритет)</span></label>
-    <label>Окно оплат (дн): <input type="number" id="cfg-dw-pay" value="5" min="0" max="30"> <span class="tip">Макс. расхождение в датах при поиске пар оплат</span></label>
-    <label>Окно поставок (дн): <input type="number" id="cfg-dw-del" value="3" min="0" max="30"> <span class="tip">То же для накладных и КСФ</span></label>
+    <label>Окно оплат (дн): <input type="number" id="cfg-dw-pay" value="5" min="0" max="120"> <span class="tip">Макс. расхождение в датах при поиске пар оплат</span></label>
+    <label>Окно поставок (дн): <input type="number" id="cfg-dw-del" value="3" min="0" max="120"> <span class="tip">То же для накладных и КСФ</span></label>
     <label>Мин. сумма: <input type="number" id="cfg-min-amt" value="0" min="0" step="100"> <span class="tip">Расхождения меньше этой суммы не показывать (0 = все)</span></label>
     <label><input type="checkbox" id="cfg-ai" checked> AI-комментарий <span class="tip">Генерировать краткий текстовый разбор расхождений</span></label>
   </div>
@@ -2036,13 +2036,17 @@ async function runReconcile(extraSettings={}){
   setCancelVisible(true);
   const forceExpert=!!extraSettings.force_balance_reason_analysis;
   setProgress(10,forceExpert?'Запуск экспертного анализа...':'Загрузка файлов...');
+  const readWindow=(id,fallback)=>{
+    const value=Number.parseInt(document.getElementById(id).value,10);
+    return Number.isFinite(value)?Math.max(0,Math.min(120,value)):fallback;
+  };
   const settings={
     find_missing:document.getElementById('cfg-missing').checked,
     find_amount_diff:document.getElementById('cfg-amount').checked,
     find_sign_mismatch:document.getElementById('cfg-sign').checked,
     find_date_diff:document.getElementById('cfg-date').checked,
-    date_window_payment:parseInt(document.getElementById('cfg-dw-pay').value)||5,
-    date_window_delivery:parseInt(document.getElementById('cfg-dw-del').value)||3,
+    date_window_payment:readWindow('cfg-dw-pay',5),
+    date_window_delivery:readWindow('cfg-dw-del',3),
     min_amount:parseFloat(document.getElementById('cfg-min-amt').value)||0,
     ai_comment:document.getElementById('cfg-ai').checked,
     ...extraSettings,
@@ -2487,9 +2491,14 @@ function getWindowSuggestionView(hint){
     ? 'Обнаружено много операций с высокой вероятностью совпадения, которые отличаются датой отражения больше текущего допуска.'
     : 'Обнаружены операции с высокой вероятностью совпадения, которые отличаются датой отражения больше текущего допуска.';
 
+  const examples=(hint.examples||[]).slice(0,3).map(item=>{
+    const category=item.category==='оплата'?'оплата':item.category==='корректировка'?'корректировка':'поставка';
+    return `${category}: ${item.date_a||'—'} ↔ ${item.date_b||'—'}, ${fmtMoney(item.amount)} (${item.days} дн.)`;
+  });
+
   return {
     text:`${lead} Рекомендуем увеличить ${windowParts.join(' и ')} и повторить сверку.`,
-    meta:`Вероятных совпадений: ${hint.candidate_pairs}. ${detailParts.length?`Из них: ${detailParts.join(', ')}.`:''}${hint.max_shift_days?` Максимальный сдвиг дат: ${hint.max_shift_days} дн.`:''}`,
+    meta:`Вероятных совпадений: ${hint.candidate_pairs}. ${detailParts.length?`Из них: ${detailParts.join(', ')}.`:''}${hint.max_shift_days?` Максимальный сдвиг дат: ${hint.max_shift_days} дн.`:''}${examples.length?` Примеры: ${examples.join('; ')}.`:''}`,
     payDays: hint.recommended_payment_window,
     delDays: hint.recommended_delivery_window,
   };

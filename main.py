@@ -1887,6 +1887,20 @@ DEFAULT_RECON_SETTINGS = {
 }
 
 
+def _normalize_recon_settings(settings: Optional[dict] = None) -> dict:
+    cfg = {**DEFAULT_RECON_SETTINGS, **(settings or {})}
+    for key, default in (
+        ('date_window_payment', 5),
+        ('date_window_delivery', 3),
+    ):
+        try:
+            value = int(cfg.get(key, default))
+        except (TypeError, ValueError):
+            value = default
+        cfg[key] = max(0, min(120, value))
+    return cfg
+
+
 def _safe_float(value) -> Optional[float]:
     try:
         if value is not None and pd.notna(value):
@@ -2804,7 +2818,7 @@ def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result:
 # ════════════════════════════════════════════════════════════════════
 
 def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
-    if cfg is None: cfg = DEFAULT_RECON_SETTINGS
+    cfg = _normalize_recon_settings(cfg)
     if 'raw_row' not in df1.columns: df1 = df1.copy(); df1['raw_row'] = range(len(df1))
     if 'raw_row' not in df2.columns: df2 = df2.copy(); df2['raw_row'] = range(len(df2))
     if df1.empty or df2.empty: return _reconcile_via_claude(df1, df2, client, log)
@@ -3099,13 +3113,32 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
     missing_in_1 = missing_in_1[~missing_in_1['raw_row'].isin(rb1 | rb2)]
 
     def _build_window_suggestion(side_a, side_b):
-        max_pay_scan = min(max(dw_payment + 7, 10), 14)
-        max_del_scan = min(max(dw_delivery + 7, 10), 14)
+        max_pay_scan = 120
+        max_del_scan = 120
         if max_pay_scan <= dw_payment and max_del_scan <= dw_delivery:
             return None
 
         candidates = []
         used_b = set()
+
+        def amount_key(row):
+            for column in ('debit', 'credit'):
+                value = _sf(row.get(column))
+                if value is not None:
+                    return round(abs(value), 2)
+            return None
+
+        amount_counts_a = {}
+        amount_counts_b = {}
+        for _, row in side_a.iterrows():
+            key = amount_key(row)
+            if key is not None:
+                amount_counts_a[key] = amount_counts_a.get(key, 0) + 1
+        for _, row in side_b.iterrows():
+            key = amount_key(row)
+            if key is not None:
+                amount_counts_b[key] = amount_counts_b.get(key, 0) + 1
+
         for _, ra in side_a.iterrows():
             da = _md(ra)
             cat_a = _cat(ra)
@@ -3141,24 +3174,32 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
                     if dd <= base_dw or dd > scan_dw:
                         continue
                     norm_b = _normalize_doc_num(rb.get('doc_num')) if rb.get('doc_num') else ''
-                    same_doc = 1 if norm_a and norm_b and norm_a == norm_b else 0
-                    score = same_doc * 100 - dd
+                    same_doc = bool(norm_a and norm_b and norm_a == norm_b)
+                    strong_identity = same_doc or _has_strong_doc_identity(ra, rb)
+                    key = round(abs(va), 2)
+                    unique_amount = amount_counts_a.get(key) == 1 and amount_counts_b.get(key) == 1
+                    if not (strong_identity or unique_amount):
+                        continue
+                    score = int(strong_identity) * 1000 + int(unique_amount) * 100 - dd
                     if best_score is None or score > best_score:
                         best_score = score
-                        best = (rb, dd, cat_a)
+                        best = (rb, dd, cat_a, abs(va), strong_identity, unique_amount)
             if best is None:
                 continue
-            rb, dd, cat_name = best
+            rb, dd, cat_name, amount, strong_identity, unique_amount = best
             used_b.add(rb['raw_row'])
             candidates.append({
                 'category': cat_name,
                 'days': int(dd),
                 'row_a': int(ra.get('raw_row', 0)),
                 'row_b': int(rb.get('raw_row', 0)),
+                'date_a': da.strftime('%d.%m.%Y'),
+                'date_b': _md(rb).strftime('%d.%m.%Y'),
+                'document_a': str(ra.get('document') or ''),
+                'document_b': str(rb.get('document') or ''),
+                'amount': round(float(amount), 2),
+                'basis': 'document' if strong_identity else 'unique_amount',
             })
-
-        if len(candidates) < 4:
-            return None
 
         payment_pairs = [item for item in candidates if item['category'] == 'оплата']
         delivery_pairs = [item for item in candidates if item['category'] == 'поставка']
@@ -3180,6 +3221,7 @@ def _reconcile_structured(df1, df2, type1, type2, client, log, cfg=None):
             'recommended_payment_window': int(rec_pay),
             'recommended_delivery_window': int(rec_del),
             'max_shift_days': max(item['days'] for item in candidates),
+            'examples': candidates[:3],
         }
 
     log("Шаг 3/3: Формирование отчёта...")
@@ -4241,9 +4283,9 @@ async def reconcile(
         _guest_limit_or_raise(request)
 
     try:
-        cfg = {**DEFAULT_RECON_SETTINGS, **json.loads(settings)}
+        cfg = _normalize_recon_settings(json.loads(settings))
     except Exception:
-        cfg = DEFAULT_RECON_SETTINGS.copy()
+        cfg = _normalize_recon_settings()
     forced_expert = bool(cfg.get('force_balance_reason_analysis'))
     guest_expert_available = (not user_key) and _guest_expert_audit_available(request)
     user_first_run = bool(user_key and not _load_user_history(user_key))
