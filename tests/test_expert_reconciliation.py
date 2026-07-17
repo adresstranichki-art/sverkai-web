@@ -27,8 +27,6 @@ def _valid_report(evidence=None):
             'confirmed_amount': 0.0,
             'review_count': 1,
         },
-        'actions': ['Проверить даты отражения корректировки.'],
-        'limitations': [],
         'discrepancies': [{
             'category': 'likely_date_pair',
             'title': 'Корректировка 7 070 руб.',
@@ -97,10 +95,24 @@ class ExpertReconciliationTests(unittest.TestCase):
 
     def test_payload_contains_rows_and_balance_sides_without_standard_result(self):
         df1, df2 = self._frames()
+        df1.attrs['display_name'] = 'ООО «ПРООПТ»'
+        df2.attrs['display_name'] = 'ООО «Автомир-Трейд»'
+        settings = {
+            'find_missing': True,
+            'find_amount_diff': False,
+            'find_sign_mismatch': True,
+            'find_date_diff': False,
+            'date_window_payment': 45,
+            'date_window_delivery': 60,
+            'min_amount': 1000,
+        }
 
-        payload, row_index = build_expert_payload(df1, df2)
+        payload, row_index = build_expert_payload(df1, df2, settings)
 
         self.assertEqual(payload['documents'][0]['rows'][0]['id'], 'd1:r11')
+        self.assertEqual(payload['documents'][0]['display_name'], 'ООО «ПРООПТ»')
+        self.assertEqual(payload['documents'][1]['display_name'], 'ООО «Автомир-Трейд»')
+        self.assertEqual(payload['analysis_scope'], settings)
         self.assertEqual(payload['documents'][0]['opening_balance']['side'], 'debit')
         self.assertEqual(payload['documents'][1]['opening_balance']['side'], 'credit')
         self.assertEqual(
@@ -200,6 +212,8 @@ class ExpertReconciliationTests(unittest.TestCase):
         )
         self.assertNotIn('totals', root_properties)
         self.assertNotIn('balances', root_properties)
+        self.assertNotIn('actions', root_properties)
+        self.assertNotIn('limitations', root_properties)
         for duplicate in (
             'doc1_date', 'doc2_date', 'doc1_document', 'doc2_document',
             'doc1_value', 'doc2_value', 'action',
@@ -218,6 +232,60 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertIn(
             'сначала перечисли все confirmed_missing',
             messages.calls[0]['system'].lower(),
+        )
+        system = messages.calls[0]['system'].lower()
+        self.assertIn('analysis_scope', system)
+        self.assertIn('display_name', system)
+        self.assertIn('doc1', system)
+        ordered_categories = (
+            'confirmed_missing', 'sign_difference', 'amount_difference',
+            'opening_balance_bridge', 'likely_date_pair', 'ambiguous',
+        )
+        positions = [system.index(category) for category in ordered_categories]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_report_is_sorted_by_category_then_absolute_influence(self):
+        df1, df2 = self._frames()
+        report = _valid_report()
+        report['discrepancies'] = [
+            {
+                'category': category,
+                'title': category,
+                'influence': influence,
+                'reason': category,
+                'confidence': 'high',
+                'evidence': [{'side': 'doc1', 'row_id': 'd1:r11'}],
+            }
+            for category, influence in (
+                ('ambiguous', 100),
+                ('amount_difference', 200),
+                ('confirmed_missing', 300),
+                ('likely_date_pair', 0),
+                ('amount_difference', -500),
+                ('opening_balance_bridge', 50),
+                ('sign_difference', 250),
+            )
+        ]
+
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+            {'find_date_diff': False},
+        )
+
+        items = result['report']['discrepancies']
+        self.assertEqual(
+            [(item['category'], item['influence']) for item in items],
+            [
+                ('confirmed_missing', 300),
+                ('sign_difference', 250),
+                ('amount_difference', -500),
+                ('amount_difference', 200),
+                ('opening_balance_bridge', 50),
+                ('likely_date_pair', 0),
+                ('ambiguous', 100),
+            ],
         )
 
     def test_report_totals_are_derived_from_discrepancies(self):
@@ -302,6 +370,26 @@ class ExpertReconciliationTests(unittest.TestCase):
             'confirmed_amount': 0.0,
             'review_count': 1,
         })
+
+    def test_disabled_date_scope_does_not_create_date_pair(self):
+        df1, df2 = self._frames()
+        report = _valid_report([{'side': 'doc1', 'row_id': 'd1:r11'}])
+        report['discrepancies'][0].update({
+            'category': 'confirmed_missing',
+            'influence': 7070.0,
+        })
+
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+            {'find_date_diff': False},
+        )
+
+        self.assertEqual(
+            result['report']['discrepancies'][0]['category'],
+            'confirmed_missing',
+        )
 
     def test_token_limit_returns_a_specific_failure(self):
         df1, df2 = self._frames()

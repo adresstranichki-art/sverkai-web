@@ -11,22 +11,32 @@ from typing import Any
 import pandas as pd
 
 
-EXPERT_CATEGORIES = (
+EXPERT_CATEGORY_ORDER = (
     'confirmed_missing',
-    'likely_date_pair',
-    'opening_balance_bridge',
-    'amount_difference',
     'sign_difference',
+    'amount_difference',
+    'opening_balance_bridge',
+    'likely_date_pair',
     'ambiguous',
 )
+EXPERT_CATEGORIES = EXPERT_CATEGORY_ORDER
 EXPERT_CONFIDENCE = ('high', 'medium', 'low')
+DEFAULT_EXPERT_SCOPE = {
+    'find_missing': True,
+    'find_amount_diff': True,
+    'find_sign_mismatch': True,
+    'find_date_diff': True,
+    'date_window_payment': 5,
+    'date_window_delivery': 3,
+    'min_amount': 0.0,
+}
 
 EXPERT_REPORT_SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
     'required': [
         'version', 'conclusion', 'confidence',
-        'discrepancies', 'actions', 'limitations',
+        'discrepancies',
     ],
     'properties': {
         'version': {'type': 'string', 'enum': ['1']},
@@ -64,16 +74,6 @@ EXPERT_REPORT_SCHEMA = {
                 },
             },
         },
-        'actions': {
-            'type': 'array',
-            'maxItems': 5,
-            'items': {'type': 'string', 'maxLength': 160},
-        },
-        'limitations': {
-            'type': 'array',
-            'maxItems': 3,
-            'items': {'type': 'string', 'maxLength': 160},
-        },
     },
 }
 
@@ -103,6 +103,15 @@ CLAUDE_EXPERT_REPORT_SCHEMA = _claude_output_schema(EXPERT_REPORT_SCHEMA)
 EXPERT_SYSTEM_PROMPT = (
     'Ты бухгалтер-эксперт. Независимо сверь два акта только по переданным строкам. '
     'balance_comparison уже рассчитан программой из исходных сальдо: используй его без пересчёта. '
+    'Порядок категорий: confirmed_missing, sign_difference, amount_difference, '
+    'opening_balance_bridge, likely_date_pair, ambiguous. '
+    'analysis_scope — обязательные границы анализа. При false не ищи и не возвращай: '
+    'find_missing→confirmed_missing, find_sign_mismatch→sign_difference, '
+    'find_amount_diff→amount_difference, find_date_diff→likely_date_pair. '
+    'Для likely_date_pair соблюдай date_window_payment для оплат и date_window_delivery для поставок. '
+    'Не возвращай расхождения меньше min_amount; opening_balance_bridge разрешён всегда. '
+    'В пользовательских conclusion, title и reason называй стороны только по documents[].display_name; '
+    'не пиши doc1, doc2, d1 или d2. Технические side и row_id используй только в evidence. '
     'Одинаковая операция с '
     'другой датой — likely_date_pair. opening_balance_bridge — только операция, закрывающая '
     'начальную разницу, а не само сальдо; укажи evidence операции. '
@@ -111,6 +120,8 @@ EXPERT_SYSTEM_PROMPT = (
     'confirmed_missing ставь только при высокой уверенности. '
     'Приход и продажа, корректировки прихода и продажи считай зеркальными типами; '
     'сначала исключи пары по модулю суммы и смыслу документа. '
+    'Группируй строго в порядке: confirmed_missing, sign_difference, amount_difference, '
+    'opening_balance_bridge, likely_date_pair, ambiguous. В группе сортируй по убыванию модуля influence. '
     'Сначала перечисли все confirmed_missing; при лимите убирай ambiguous и likely_date_pair первыми. '
     'Дай не более 8 расхождений: confirmed_missing не группируй, остальные группируй. '
     'Не выдумывай row_id: evidence содержит только id из входа. Пиши кратко, без Markdown.'
@@ -213,9 +224,30 @@ def _balance_comparison(df1: pd.DataFrame, df2: pd.DataFrame) -> dict:
     }
 
 
+def _normalize_expert_scope(settings: dict | None = None) -> dict:
+    source = settings if isinstance(settings, dict) else {}
+    scope = dict(DEFAULT_EXPERT_SCOPE)
+    for key in (
+        'find_missing', 'find_amount_diff',
+        'find_sign_mismatch', 'find_date_diff',
+    ):
+        if key in source:
+            scope[key] = bool(source[key])
+    for key in ('date_window_payment', 'date_window_delivery'):
+        try:
+            scope[key] = max(0, min(120, int(source.get(key, scope[key]))))
+        except (TypeError, ValueError):
+            pass
+    amount = _number(source.get('min_amount', scope['min_amount']))
+    if amount is not None:
+        scope['min_amount'] = max(0.0, amount)
+    return scope
+
+
 def build_expert_payload(
     df1: pd.DataFrame,
     df2: pd.DataFrame,
+    settings: dict | None = None,
 ) -> tuple[dict, dict[tuple[str, str], dict]]:
     documents = []
     row_index: dict[tuple[str, str], dict] = {}
@@ -262,17 +294,24 @@ def build_expert_payload(
                 'debit': debit,
                 'credit': credit,
             }
+        source_name = _document_text(df.attrs.get('source_name'), 120)
+        display_name = (
+            _document_text(df.attrs.get('display_name'), 120)
+            or source_name
+            or f'Документ {len(documents) + 1}'
+        )
         document_payload = {
             'side': side,
-            'name': _document_text(df.attrs.get('source_name'), 120),
+            'display_name': display_name,
             'rows': rows,
             **_balance_payload(df, prefix),
         }
-        if not document_payload['name']:
-            document_payload.pop('name')
+        if source_name and source_name != display_name:
+            document_payload['source_name'] = source_name
         documents.append(document_payload)
     return {
         'version': '1',
+        'analysis_scope': _normalize_expert_scope(settings),
         'balance_comparison': _balance_comparison(df1, df2),
         'documents': documents,
     }, row_index
@@ -347,7 +386,7 @@ def _validate_report_shape(report: Any) -> bool:
         return False
     required = {
         'version', 'conclusion', 'confidence', 'balances', 'totals',
-        'discrepancies', 'actions', 'limitations',
+        'discrepancies',
     }
     if not required.issubset(report):
         return False
@@ -379,6 +418,18 @@ def _derive_report_totals(report: dict) -> dict:
         'confirmed_amount': round(confirmed_amount, 2),
         'review_count': max(0, len(discrepancies) - len(confirmed)),
     }
+
+
+def _sort_report_discrepancies(report: dict) -> None:
+    priority = {
+        category: index
+        for index, category in enumerate(EXPERT_CATEGORY_ORDER)
+    }
+    discrepancies = report.get('discrepancies') or []
+    discrepancies.sort(key=lambda item: (
+        priority.get(item.get('category'), len(priority)),
+        -abs(_number(item.get('influence')) or 0.0),
+    ))
 
 
 def _document_family(value: Any) -> str:
@@ -472,10 +523,12 @@ def run_independent_expert_analysis(
     df2: pd.DataFrame,
     client: Any,
     model: str,
+    settings: dict | None = None,
 ) -> dict:
     if client is None:
         return {'status': 'failed', 'error': 'api_key_required'}
-    payload, row_index = build_expert_payload(df1, df2)
+    payload, row_index = build_expert_payload(df1, df2, settings)
+    scope = payload['analysis_scope']
     try:
         message = client.messages.create(
             model=model,
@@ -518,7 +571,9 @@ def run_independent_expert_analysis(
         if not _validate_report_shape(report):
             return {'status': 'failed', 'error': 'invalid_report_schema'}
         resolved, _ = resolve_expert_evidence(report, row_index)
-        _downgrade_false_confirmed_missing(resolved['report'], row_index)
+        if scope['find_date_diff']:
+            _downgrade_false_confirmed_missing(resolved['report'], row_index)
+        _sort_report_discrepancies(resolved['report'])
         resolved['report']['totals'] = _derive_report_totals(resolved['report'])
         resolved['usage'] = usage_payload
         return resolved
