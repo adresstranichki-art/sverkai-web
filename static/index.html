@@ -489,6 +489,25 @@
   /* ── Summary ── */
   .summary-pad { padding: 16px; }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 12px; margin-bottom: 14px; }
+  .summary-grid.expert-summary-host { display: block; }
+  .expert-summary-layout { display: grid; grid-template-columns: minmax(260px,.72fr) minmax(420px,1.8fr); gap: 14px; margin-bottom: 14px; }
+  .expert-summary-metrics { display: grid; gap: 10px; }
+  .expert-summary-metrics .stat-card { padding: 13px 16px; }
+  .expert-summary-metrics .stat-card .value.dark { font-size: 20px; }
+  .expert-summary-conclusion {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    padding: 20px 22px;
+    border: 1px solid rgba(31,122,67,.34);
+    border-radius: 14px;
+    background: linear-gradient(145deg, #eff8f1, #e6f3e9);
+    box-shadow: 0 10px 18px rgba(31,122,67,.08);
+  }
+  .expert-summary-conclusion .eyebrow { color: var(--green-dk); font-size: 11px; font-weight: 800; letter-spacing: .65px; text-transform: uppercase; }
+  .expert-summary-conclusion .conclusion-text { margin-top: 9px; color: var(--text); font-size: 14px; font-weight: 650; line-height: 1.6; }
+  .expert-summary-confidence { margin-top: 13px; color: var(--green-dk); font-size: 12px; font-weight: 800; }
   .stat-card {
     background: linear-gradient(180deg, #fff, #f8faf8);
     border: 1px solid rgba(210,216,209,.9);
@@ -567,7 +586,13 @@
   .balance-reason-money.zero { color: var(--green-dk); }
   .balance-reason-check { font-size: 12px; color: var(--muted); line-height: 1.45; }
   .balance-examples { font-size: 12px; color: var(--text); margin-top: 5px; line-height: 1.45; }
+  .expert-group { margin-top: 14px; }
+  .expert-group:first-child { margin-top: 0; }
+  .expert-group > .expert-group-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 7px; color: var(--green-dk); font-size: 12px; font-weight: 800; letter-spacing: .45px; text-transform: uppercase; }
+  .expert-group-count { min-width: 24px; padding: 2px 8px; border-radius: 999px; background: var(--green-lt); text-align: center; }
+  .disc-table tr.expert-group-heading td { padding: 9px 12px; border-top: 1px solid #cfe0d1; border-bottom: 1px solid #dce8dd; background: #f0f7f1 !important; color: var(--green-dk); font-size: 12px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
   @media (max-width: 760px) {
+    .expert-summary-layout { grid-template-columns: 1fr; }
     .balance-analysis-head { display: block; }
     .balance-reason-row { grid-template-columns: 1fr; gap: 5px; }
     .balance-reason-head { display: none; }
@@ -2350,8 +2375,25 @@ const TYPE_ICONS={
   ok:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.2 8.2 3.1 3.1 6.5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
 const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok'],confirmed_missing:['Подтверждённое отсутствие','badge-red','missing'],likely_date_pair:['Вероятная пара по датам','badge-blue','date'],opening_balance_bridge:['Связь с начальным сальдо','badge-green','amount'],amount_difference:['Разница в суммах','badge-yellow','amount'],sign_difference:['Разница направления','badge-yellow','sign'],ambiguous:['Требуется проверка','badge-gray','amount']};
+const EXPERT_CATEGORY_ORDER=['confirmed_missing','sign_difference','amount_difference','opening_balance_bridge','likely_date_pair','ambiguous'];
+const EXPERT_CATEGORY_LABELS={
+  confirmed_missing:'Подтверждённое отсутствие',
+  sign_difference:'Разница направления',
+  amount_difference:'Разница в суммах',
+  opening_balance_bridge:'Связь с начальным сальдо',
+  likely_date_pair:'Вероятная пара по датам',
+  ambiguous:'Требуется проверка',
+};
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray'],review:['К проверке','badge-gray'],info:['Справочно','badge-gray']};
 function typeIcon(name){return TYPE_ICONS[name]||'';}
+function sortedExpertEntries(discs){
+  const priority=new Map(EXPERT_CATEGORY_ORDER.map((type,index)=>[type,index]));
+  return (discs||[]).map((d,index)=>({d,index})).sort((left,right)=>{
+    const category=(priority.get(left.d.type)??EXPERT_CATEGORY_ORDER.length)-(priority.get(right.d.type)??EXPERT_CATEGORY_ORDER.length);
+    if(category)return category;
+    return Math.abs(Number(right.d.influence||0))-Math.abs(Number(left.d.influence||0));
+  });
+}
 function decorateTypeButtons(){
   Object.entries(TYPE_MAP).forEach(([type,meta])=>{
     const btn=document.getElementById(`fb-${type}`);
@@ -2384,7 +2426,10 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
       </div></td></tr>`;
     return;
   }
-  body.innerHTML=discs.map((d,i)=>{
+  const grouped=expertMode&&discs.some(d=>EXPERT_CATEGORY_ORDER.includes(d.type));
+  const entries=grouped?sortedExpertEntries(discs):discs.map((d,index)=>({d,index}));
+  let previousType=null;
+  body.innerHTML=entries.map(({d,index},rowIndex)=>{
     const[tl,tb,ti]=TYPE_MAP[d.type]||[d.type,'badge-gray',''];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
     const tc=d.type==='expert_neutral'?'type-technical'
@@ -2397,10 +2442,13 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
     const canNavigate=d.clickable!==false&&targetRowsForDiscrepancy(d).length>0;
     const warning=d.evidence_warning?`<span class="source-warning">${esc(d.evidence_warning)}</span>`:'';
     const rowTitle=canNavigate?'Показать строку на вкладке «Сравнение»':(d.evidence_warning||d.description||'');
-    return`<tr class="${tc}${canNavigate?' disc-clickable':''}" data-type="${d.type}" ${canNavigate?`data-disc-index="${i}"`:''} title="${esc(rowTitle)}"><td>${i+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.description||d.document_number||'')}">${esc(trunc(d.document_number||'',60))}${warning}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
+    const heading=grouped&&d.type!==previousType
+      ?`<tr class="expert-group-heading" data-type="${d.type}"><td colspan="8">${esc(EXPERT_CATEGORY_LABELS[d.type]||tl)}</td></tr>`:'';
+    previousType=d.type;
+    return`${heading}<tr class="${tc}${canNavigate?' disc-clickable':''}" data-type="${d.type}" ${canNavigate?`data-disc-index="${index}"`:''} title="${esc(rowTitle)}"><td>${rowIndex+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.description||d.document_number||'')}">${esc(trunc(d.document_number||'',60))}${warning}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-disc-index]').forEach(row=>{
-    row.addEventListener('click',()=>goToDiscrepancy(Number(row.dataset.discIndex)));
+    row.addEventListener('click',()=>openDiscrepancy(Number(row.dataset.discIndex)));
   });
   applyDiscFilter();
 }
@@ -2480,23 +2528,37 @@ function goToDiscrepancy(idx){
   showToast('Строка расхождения показана на вкладке «Сравнение»','success');
 }
 
+function openDiscrepancy(idx){
+  goToDiscrepancy(idx);
+}
+
 // ── Summary ───────────────────────────────────────────────────────
 function isLegacyExpertSummary(s){return s?.result_mode==='balance_reason_analysis'&&s?.balance_reason_analysis?.enabled;}
 function isExpertSummary(s){return isIndependentExpertSummary(s)||isLegacyExpertSummary(s);}
+function expertConfidenceText(value){return({high:'высокая',medium:'средняя',low:'низкая'})[value]||'не указана';}
 
 function renderSummary(s,file1Name='',file2Name=''){
   const independent=isIndependentExpertSummary(s);
   const expert=isLegacyExpertSummary(s);
   const report=s.expert_report||{};
   const balances=report.balances||{};
-  const totals=report.totals||{};
   const analysis=s.balance_reason_analysis||{};
   const critical=s.critical_count||0;
-  document.getElementById('summary-cards').innerHTML=independent?`
-    <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(balances.opening_difference)}">${fmtSignedMoney(balances.opening_difference)}</div></div>
-    <div class="stat-card"><div class="label">Движение периода</div><div class="value dark ${diffClass(balances.period_movement)}">${fmtSignedMoney(balances.period_movement)}</div></div>
-    <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(balances.closing_difference)}">${fmtSignedMoney(balances.closing_difference)}</div></div>
-    <div class="stat-card"><div class="label">Подтверждено / к проверке</div><div class="value dark">${totals.confirmed_count||0} / ${totals.review_count||0}</div></div>`:expert?`
+  const summaryCards=document.getElementById('summary-cards');
+  summaryCards.classList.toggle('expert-summary-host',independent);
+  summaryCards.innerHTML=independent?`
+    <div class="expert-summary-layout">
+      <div class="expert-summary-metrics">
+        <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(balances.opening_difference)}">${fmtSignedMoney(balances.opening_difference)}</div></div>
+        <div class="stat-card"><div class="label">Движение периода</div><div class="value dark ${diffClass(balances.period_movement)}">${fmtSignedMoney(balances.period_movement)}</div></div>
+        <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(balances.closing_difference)}">${fmtSignedMoney(balances.closing_difference)}</div></div>
+      </div>
+      <section class="expert-summary-conclusion" aria-label="Краткий вывод Claude">
+        <div class="eyebrow">Краткий вывод Claude</div>
+        <div class="conclusion-text">${esc(report.conclusion||'Claude не сформировал краткий вывод.')}</div>
+        <div class="expert-summary-confidence">Уверенность: ${esc(expertConfidenceText(report.confidence))}</div>
+      </section>
+    </div>`:expert?`
     <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
     <div class="stat-card"><div class="label">Влияние движений периода</div><div class="value dark ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
     <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(analysis.closing_balance_difference)}">${fmtSignedMoney(analysis.closing_balance_difference)}</div></div>
@@ -2578,11 +2640,32 @@ function renderBalanceReasonRows(items,{expandRows=false,emptyText='Нет от�
   }).join('');
 }
 
+function renderIndependentExpertGroups(items){
+  const entries=sortedExpertEntries(items);
+  const groups=EXPERT_CATEGORY_ORDER.map(category=>({
+    category,
+    items:entries.filter(({d})=>d.type===category).map(({d})=>({
+      title:d.title,
+      influence:d.influence,
+      check:'Проверить первичные документы и отражение операции в обоих актах.',
+      examples:[d.reason,d.evidence_warning].filter(Boolean),
+    })),
+  })).filter(group=>group.items.length);
+  if(!groups.length)return '<div class="balance-reason-check">Claude не выделил отдельных расхождений.</div>';
+  return groups.map(group=>`<section class="expert-group">
+    <div class="expert-group-heading"><span>${esc(EXPERT_CATEGORY_LABELS[group.category]||group.category)}</span><span class="expert-group-count">${group.items.length}</span></div>
+    ${renderBalanceReasonRows(group.items)}
+  </section>`).join('');
+}
+
 function renderBalanceAnalysis(s){
   const analysis=s.balance_reason_analysis;
   const card=document.getElementById('balance-analysis-card');
   if(!analysis||!analysis.enabled){card.style.display='none';return;}
   card.style.display='block';
+  card.querySelector('.balance-analysis-head').style.display='';
+  document.getElementById('balance-formula').style.display='';
+  document.getElementById('balance-explain').style.display='';
   document.getElementById('balance-analysis-title').textContent='Анализ причин расхождения сальдо';
   document.getElementById('balance-analysis-sub').textContent='Для сложной сверки каждая отсутствующая операция показана отдельно, а техническая детализация оставлена ниже.';
   document.getElementById('balance-reasons-title').textContent='Операции, влияющие на конечное сальдо';
@@ -2600,35 +2683,20 @@ function renderBalanceAnalysis(s){
 
 function renderIndependentExpertAnalysis(s){
   const report=s.expert_report||{};
-  const balances=report.balances||{};
   const card=document.getElementById('balance-analysis-card');
   card.style.display='block';
-  document.getElementById('balance-analysis-title').textContent='Независимый экспертный анализ Claude';
-  document.getElementById('balance-analysis-sub').textContent='Сводка и расхождения сформированы одним независимым анализом всех извлечённых операций.';
-  document.getElementById('balance-reasons-title').textContent='Выводы и операции к проверке';
-  document.getElementById('balance-formula').innerHTML=`
-    <div class="balance-formula-item"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(balances.opening_difference)}">${fmtSignedMoney(balances.opening_difference)}</div></div>
-    <div class="balance-formula-item"><div class="k">Движение периода</div><div class="v ${diffClass(balances.period_movement)}">${fmtSignedMoney(balances.period_movement)}</div></div>
-    <div class="balance-formula-item"><div class="k">Разница конечного сальдо</div><div class="v ${diffClass(balances.closing_difference)}">${fmtSignedMoney(balances.closing_difference)}</div></div>`;
-  const confidence={high:'высокая',medium:'средняя',low:'низкая'}[report.confidence]||'не указана';
-  document.getElementById('balance-explain').innerHTML=`<p>${esc(report.conclusion||'')}</p><p><strong>Формула:</strong> ${esc(balances.formula||'—')}. <strong>Уверенность:</strong> ${esc(confidence)}.</p>`;
-  const rows=(report.discrepancies||[]).map(item=>({
-    title:item.title,
-    influence:item.influence,
-    check:item.action,
-    examples:[item.reason,item.evidence_warning].filter(Boolean),
-  }));
-  document.getElementById('balance-reasons').innerHTML=renderBalanceReasonRows(rows,{emptyText:'Claude не выделил отдельных расхождений.'});
-  const notes=[
-    ...(report.actions||[]).map(text=>`Действие: ${text}`),
-    ...(report.limitations||[]).map(text=>`Ограничение: ${text}`),
-  ];
+  card.querySelector('.balance-analysis-head').style.display='none';
+  const formula=document.getElementById('balance-formula');
+  formula.style.display='none';
+  formula.innerHTML='';
+  const explain=document.getElementById('balance-explain');
+  explain.style.display='none';
+  explain.innerHTML='';
+  document.getElementById('balance-reasons-title').textContent='Расхождения по критичности';
+  document.getElementById('balance-reasons').innerHTML=renderIndependentExpertGroups(report.discrepancies||[]);
   const neutralTitle=document.getElementById('balance-neutral-title');
-  neutralTitle.style.display=notes.length?'block':'none';
-  neutralTitle.textContent='Рекомендации и ограничения';
-  document.getElementById('balance-neutral').innerHTML=notes.length
-    ?`<div class="balance-reason-check">${notes.map(text=>esc(text)).join('<br>')}</div>`
-    :'';
+  neutralTitle.style.display='none';
+  document.getElementById('balance-neutral').innerHTML='';
 }
 
 function getWindowSuggestionView(hint){
@@ -2840,7 +2908,7 @@ function openExportModal(){
   const independentMode=isIndependentExpertSummary(lastResult.summary);
   document.getElementById('exp-title').textContent=expertMode?'Экспорт экспертного анализа':'Экспорт — выбор типов';
   document.getElementById('exp-hint').textContent=expertMode
-    ?(independentMode?'В отчёт будут включены независимая сводка Claude, расхождения, рекомендации и ограничения.':'В отчёт будут включены сводка и причины сальдо из экспертного анализа. Обычные технические расхождения не экспортируются.')
+    ?(independentMode?'В отчёт будут включены независимая сводка Claude и сгруппированные расхождения.':'В отчёт будут включены сводка и причины сальдо из экспертного анализа. Обычные технические расхождения не экспортируются.')
     :'Выберите типы расхождений для включения в отчёт:';
   document.getElementById('exp-list').style.display=expertMode?'none':'flex';
   document.getElementById('exp-overlay').style.display='flex';

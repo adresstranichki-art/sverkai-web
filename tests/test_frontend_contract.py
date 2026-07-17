@@ -41,6 +41,18 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('evidence.document', self.html)
         self.assertIn('evidence.amount', self.html)
 
+    def test_independent_summary_uses_compact_layout_and_grouped_findings(self):
+        self.assertIn('class="expert-summary-layout"', self.html)
+        self.assertIn('class="expert-summary-metrics"', self.html)
+        self.assertIn('class="expert-summary-conclusion"', self.html)
+        self.assertIn('const EXPERT_CATEGORY_ORDER=', self.html)
+        self.assertIn('expert-group-heading', self.html)
+        self.assertIn('openDiscrepancy', self.html)
+        self.assertNotIn('Подтверждено / к проверке', self.html)
+        self.assertNotIn('Рекомендации и ограничения', self.html)
+        self.assertNotIn('report.actions', self.html)
+        self.assertNotIn('report.limitations', self.html)
+
     def test_legacy_expert_results_remain_supported(self):
         self.assertIn("result_mode==='balance_reason_analysis'", self.html)
         self.assertIn('balance_reason_analysis', self.html)
