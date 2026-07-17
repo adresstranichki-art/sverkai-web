@@ -492,6 +492,77 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertEqual(hint['recommended_delivery_window'], 37)
         self.assertEqual(len(hint['examples']), 1)
 
+    def test_expert_success_replaces_standard_conclusions(self):
+        standard_result = {
+            'summary': {
+                'result_mode': 'standard',
+                'total_discrepancies': 1,
+                'critical_count': 1,
+            },
+            'discrepancies': [{'type': 'missing_in_company'}],
+            'missing_rows1': [],
+            'missing_rows2': [10],
+        }
+        expert_result = {
+            'status': 'complete',
+            'warnings': [],
+            'usage': {'input_tokens': 100, 'output_tokens': 50},
+            'report': {
+                'conclusion': 'Найдены четыре подтверждённых расхождения.',
+                'confidence': 'high',
+                'totals': {
+                    'confirmed_count': 4,
+                    'confirmed_amount': 32588.0,
+                    'review_count': 2,
+                },
+                'discrepancies': [{
+                    'category': 'confirmed_missing',
+                    'confidence': 'high',
+                    'resolved_evidence': [
+                        {'side': 'doc1', 'row_id': 'd1:r11', 'raw_row': 11},
+                    ],
+                }],
+            },
+        }
+
+        result = self.main._apply_independent_expert_result(
+            standard_result,
+            expert_result,
+        )
+
+        self.assertEqual(result['summary']['result_mode'], 'independent_expert')
+        self.assertEqual(
+            result['summary']['expert_report']['conclusion'],
+            'Найдены четыре подтверждённых расхождения.',
+        )
+        self.assertEqual(result['discrepancies'][0]['category'], 'confirmed_missing')
+        self.assertEqual(result['missing_rows1'], [11])
+        self.assertNotIn('missing_in_company', json.dumps(result))
+
+    def test_expert_failure_preserves_standard_result(self):
+        standard_result = {
+            'summary': {
+                'result_mode': 'standard',
+                'total_discrepancies': 1,
+            },
+            'discrepancies': [{'type': 'missing_in_company'}],
+            'missing_rows1': [],
+            'missing_rows2': [10],
+        }
+
+        result = self.main._apply_independent_expert_result(
+            standard_result,
+            {'status': 'failed', 'error': 'api_error'},
+        )
+
+        self.assertEqual(result['discrepancies'], standard_result['discrepancies'])
+        self.assertEqual(result['summary']['result_mode'], 'standard')
+        self.assertEqual(result['summary']['expert_analysis_status'], 'failed')
+        self.assertEqual(
+            result['summary']['expert_analysis_message'],
+            'Экспертный анализ не выполнен',
+        )
+
     def test_balance_state_vs_two_sided(self):
         cand1, cand2, result = self._run_case(
             'tmp_analysis1/balance_248098_10.xls',

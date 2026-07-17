@@ -9,6 +9,8 @@ import pdfplumber
 import xlsxwriter
 from anthropic import Anthropic
 
+from expert_reconciliation import run_independent_expert_analysis
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
@@ -2757,6 +2759,65 @@ def _run_first_expert_audit(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, 
     return audit_result, audit_summary['expert_audit']
 
 
+def _apply_independent_expert_result(standard_result: dict, expert_result: dict) -> dict:
+    result = copy.deepcopy(standard_result)
+    summary = result.setdefault('summary', {})
+    status = expert_result.get('status') or 'failed'
+    summary['expert_analysis_status'] = status
+    if status == 'failed' or not isinstance(expert_result.get('report'), dict):
+        summary['expert_analysis_message'] = 'Экспертный анализ не выполнен'
+        summary['expert_analysis_error'] = expert_result.get('error') or 'unknown_error'
+        return result
+
+    report = copy.deepcopy(expert_result['report'])
+    discrepancies = report.get('discrepancies') or []
+    summary.update({
+        'result_mode': 'independent_expert',
+        'primary_tab': 'summary',
+        'expert_report': report,
+        'expert_analysis_status': status,
+        'expert_analysis_message': (
+            'Экспертный анализ завершён с предупреждениями'
+            if status == 'complete_with_warnings'
+            else 'Экспертный анализ выполнен'
+        ),
+        'expert_analysis_warnings': expert_result.get('warnings') or [],
+        'expert_analysis_usage': expert_result.get('usage') or {},
+        'total_discrepancies': len(discrepancies),
+        'critical_count': sum(
+            1 for item in discrepancies
+            if item.get('category') == 'confirmed_missing'
+            and item.get('confidence') == 'high'
+        ),
+        'debt_label': report.get('conclusion') or '',
+    })
+    result['discrepancies'] = discrepancies
+    highlight1 = []
+    highlight2 = []
+    for item in discrepancies:
+        for evidence in item.get('resolved_evidence') or []:
+            raw_row = evidence.get('raw_row')
+            if raw_row is None:
+                continue
+            if evidence.get('side') == 'doc1':
+                highlight1.append(raw_row)
+            elif evidence.get('side') == 'doc2':
+                highlight2.append(raw_row)
+    result.update({
+        'matched1': [],
+        'matched2': [],
+        'missing_rows1': list(dict.fromkeys(highlight1)),
+        'missing_rows2': list(dict.fromkeys(highlight2)),
+        'amount_diff_rows1': [],
+        'amount_diff_rows2': [],
+        'sign_mismatch_rows1': [],
+        'sign_mismatch_rows2': [],
+        'date_diff_rows1': [],
+        'date_diff_rows2': [],
+    })
+    return result
+
+
 def _build_balance_reason_analysis(df1: pd.DataFrame, df2: pd.DataFrame, result: dict, client=None, cfg=None) -> Optional[dict]:
     cfg = cfg or DEFAULT_RECON_SETTINGS
     summary = result.get('summary', {})
@@ -4379,23 +4440,60 @@ async def reconcile(
         loop = asyncio.get_event_loop()
 
         def _pick_and_run():
-            best_pair = _select_best_candidate_pair(candidates1, candidates2, cfg, logs)
+            expert_requested = forced_expert or first_expert_audit_eligible
+            standard_cfg = {
+                **cfg,
+                'force_balance_reason_analysis': False,
+                'ai_comment': False,
+            } if expert_requested else cfg
+            best_pair = _select_best_candidate_pair(
+                candidates1, candidates2, standard_cfg, logs,
+            )
             cand1 = best_pair['cand1']
             cand2 = best_pair['cand2']
             logs.append(f"Файл 1: {file1.filename} -> {cand1['label']} ({len(cand1['df'])} строк)")
             logs.append(f"Файл 2: {file2.filename} -> {cand2['label']} ({len(cand2['df'])} строк)")
-            final_result = _reconcile_structured(
+            standard_result = _reconcile_structured(
                 cand1['df'], cand2['df'], cand1['type'], cand2['type'],
-                client, lambda t: logs.append(t), cfg
+                client, lambda t: logs.append(t), standard_cfg
             )
             audit_meta = None
             audit_consumed = False
-            if first_expert_audit_eligible:
-                final_result, audit_meta = _run_first_expert_audit(
-                    cand1['df'], cand2['df'], final_result, client, cfg, lambda t: logs.append(t)
+            if expert_requested:
+                expert_cand1 = max(
+                    candidates1,
+                    key=lambda item: (item['score'], item['quality']['rows']),
                 )
-                audit_consumed = bool((audit_meta or {}).get('performed'))
-            return cand1, cand2, final_result, audit_meta, audit_consumed
+                expert_cand2 = max(
+                    candidates2,
+                    key=lambda item: (item['score'], item['quality']['rows']),
+                )
+                expert_result = run_independent_expert_analysis(
+                    expert_cand1['df'], expert_cand2['df'], client, MODEL_MAIN,
+                )
+                audit_consumed = client is not None
+                audit_meta = {
+                    'performed': audit_consumed,
+                    'status': expert_result.get('status'),
+                    'warnings': len(expert_result.get('warnings') or []),
+                    'usage': expert_result.get('usage') or {},
+                }
+                usage = audit_meta['usage']
+                logs.append(
+                    'Экспертный анализ: '
+                    f"{audit_meta['status']}; вход {int(usage.get('input_tokens') or 0)} ток., "
+                    f"выход {int(usage.get('output_tokens') or 0)} ток."
+                )
+                final_result = _apply_independent_expert_result(
+                    standard_result, expert_result,
+                )
+                if expert_result.get('status') in ('complete', 'complete_with_warnings'):
+                    return (
+                        expert_cand1, expert_cand2, final_result,
+                        audit_meta, audit_consumed,
+                    )
+                return cand1, cand2, final_result, audit_meta, audit_consumed
+            return cand1, cand2, standard_result, audit_meta, audit_consumed
 
         df1_choice, df2_choice, result, audit_meta, audit_consumed = await loop.run_in_executor(
             ThreadPoolExecutor(max_workers=1),
@@ -4419,8 +4517,13 @@ async def reconcile(
             history = _load_user_history(user_key)
             summary = result.get('summary') or {}
             balance_analysis = summary.get('balance_reason_analysis') or {}
-            is_expert_history = summary.get('result_mode') == 'balance_reason_analysis' and balance_analysis.get('enabled')
+            independent_report = summary.get('expert_report') or {}
+            is_independent_history = summary.get('result_mode') == 'independent_expert'
+            is_legacy_expert_history = summary.get('result_mode') == 'balance_reason_analysis' and balance_analysis.get('enabled')
+            is_expert_history = is_independent_history or is_legacy_expert_history
             expert_reason_count = len(balance_analysis.get('reasons') or []) + len(balance_analysis.get('neutral_groups') or [])
+            if is_independent_history:
+                expert_reason_count = len(independent_report.get('discrepancies') or [])
             history.append({
                 'date':       datetime.now().strftime('%d.%m.%Y %H:%M'),
                 'file1':      file1.filename,
@@ -4566,11 +4669,25 @@ async def export_report(payload: dict, request: Request):
     gry = wb.add_format({'bg_color':'#f0f0f0','border':1,'font_size':10})
 
     balance_analysis = summary.get('balance_reason_analysis') or {}
-    expert_export = bool(balance_analysis.get('enabled'))
+    independent_report = summary.get('expert_report') or {}
+    independent_export = summary.get('result_mode') == 'independent_expert' and bool(independent_report)
+    expert_export = bool(balance_analysis.get('enabled')) or independent_export
 
-    ws = wb.add_worksheet('Экспертные причины' if expert_export else 'Расхождения')
-    headers = ['№','Тип','Дата','Документ',f'У организации ({f1_name})',f'У контрагента ({f2_name})','Разница','Уровень']
-    widths  = [5,30,12,45,28,28,15,12]
+    ws = wb.add_worksheet(
+        'Расхождения AI' if independent_export
+        else 'Экспертные причины' if expert_export
+        else 'Расхождения'
+    )
+    if independent_export:
+        headers = [
+            '№', 'Категория', 'Операция', f'Дата ({f1_name})',
+            f'Сумма ({f1_name})', f'Дата ({f2_name})', f'Сумма ({f2_name})',
+            'Влияние', 'Уверенность', 'Причина', 'Что проверить',
+        ]
+        widths = [5, 28, 38, 14, 18, 14, 18, 18, 14, 52, 45]
+    else:
+        headers = ['№','Тип','Дата','Документ',f'У организации ({f1_name})',f'У контрагента ({f2_name})','Разница','Уровень']
+        widths  = [5,30,12,45,28,28,15,12]
     for col,(hdr,w) in enumerate(zip(headers,widths)):
         ws.write(0,col,hdr,h); ws.set_column(col,col,w)
     ws.set_row(0,35)
@@ -4579,19 +4696,67 @@ async def export_report(payload: dict, request: Request):
                'sign_mismatch':'🔀 Зеркальная корректировка',
                'expert_reason':'Влияет на итог','expert_neutral':'Не влияет на итог'}
     SEV_RU = {'high':'Высокий','medium':'Средний','low':'Низкий','review':'К проверке','info':'Справочно'}
-    for ri, d in enumerate(discs, 1):
-        sev = d.get('severity','low')
-        tp  = d.get('type','')
-        fmt = blu if sev=='review' else gry if sev=='info' else red if sev=='high' and tp!='sign_mismatch' else blu if tp == 'sign_mismatch' else yel if sev=='medium' else gry
-        ws.write(ri,0,ri,fmt); ws.write(ri,1,TYPE_RU.get(tp,tp),fmt)
-        ws.write(ri,2,d.get('date',''),fmt); ws.write(ri,3,d.get('document_number',''),fmt)
-        ws.write(ri,4,d.get('company_value',''),fmt); ws.write(ri,5,d.get('supplier_value',''),fmt)
-        ws.write(ri,6,d.get('difference',''),fmt); ws.write(ri,7,SEV_RU.get(sev,sev),fmt)
+    if independent_export:
+        category_ru = {
+            'confirmed_missing': 'Подтверждённое отсутствие',
+            'likely_date_pair': 'Вероятная пара по датам',
+            'opening_balance_bridge': 'Связь с начальным сальдо',
+            'amount_difference': 'Разница в суммах',
+            'sign_difference': 'Разница направления',
+            'ambiguous': 'Требуется проверка',
+        }
+        for ri, item in enumerate(independent_report.get('discrepancies') or [], 1):
+            confidence = item.get('confidence', 'low')
+            fmt = red if confidence == 'high' else yel if confidence == 'medium' else gry
+            values = [
+                ri,
+                category_ru.get(item.get('category'), item.get('category', '')),
+                item.get('title', ''),
+                item.get('doc1_date') or '',
+                item.get('doc1_value') if item.get('doc1_value') is not None else '',
+                item.get('doc2_date') or '',
+                item.get('doc2_value') if item.get('doc2_value') is not None else '',
+                item.get('influence', 0),
+                {'high': 'Высокая', 'medium': 'Средняя', 'low': 'Низкая'}.get(confidence, confidence),
+                item.get('reason', ''),
+                item.get('action', ''),
+            ]
+            for col, value in enumerate(values):
+                ws.write(ri, col, value, fmt)
+    else:
+        for ri, d in enumerate(discs, 1):
+            sev = d.get('severity','low')
+            tp  = d.get('type','')
+            fmt = blu if sev=='review' else gry if sev=='info' else red if sev=='high' and tp!='sign_mismatch' else blu if tp == 'sign_mismatch' else yel if sev=='medium' else gry
+            ws.write(ri,0,ri,fmt); ws.write(ri,1,TYPE_RU.get(tp,tp),fmt)
+            ws.write(ri,2,d.get('date',''),fmt); ws.write(ri,3,d.get('document_number',''),fmt)
+            ws.write(ri,4,d.get('company_value',''),fmt); ws.write(ri,5,d.get('supplier_value',''),fmt)
+            ws.write(ri,6,d.get('difference',''),fmt); ws.write(ri,7,SEV_RU.get(sev,sev),fmt)
 
     ws2 = wb.add_worksheet('Сводка')
     ws2.set_column(0,0,35); ws2.set_column(1,1,70)
     nf = wb.add_format({'border':1,'font_size':10,'text_wrap':True})
-    if balance_analysis.get('enabled'):
+    if independent_export:
+        balances = independent_report.get('balances') or {}
+        totals = independent_report.get('totals') or {}
+        summary_rows = [
+            ('Дата сверки', datetime.now().strftime('%d.%m.%Y %H:%M')),
+            ('Файл организации', f1_name), ('Файл контрагента', f2_name),
+            ('Режим', 'Независимый экспертный анализ Claude'),
+            ('Статус', summary.get('expert_analysis_status', '')),
+            ('Вывод', independent_report.get('conclusion', '')),
+            ('Уверенность', independent_report.get('confidence', '')),
+            ('Разница начального сальдо', balances.get('opening_difference', '')),
+            ('Движение периода', balances.get('period_movement', '')),
+            ('Разница конечного сальдо', balances.get('closing_difference', '')),
+            ('Формула', balances.get('formula', '')),
+            ('Подтверждено', totals.get('confirmed_count', 0)),
+            ('Подтверждённая сумма', totals.get('confirmed_amount', 0)),
+            ('Требует проверки', totals.get('review_count', 0)),
+            ('Действия', '\n'.join(independent_report.get('actions') or [])),
+            ('Ограничения', '\n'.join(independent_report.get('limitations') or [])),
+        ]
+    elif balance_analysis.get('enabled'):
         summary_rows = [
             ('Дата сверки', datetime.now().strftime('%d.%m.%Y %H:%M')),
             ('Файл организации', f1_name), ('Файл контрагента', f2_name),
@@ -4619,7 +4784,7 @@ async def export_report(payload: dict, request: Request):
     for ri,(k,v) in enumerate(summary_rows):
         ws2.write(ri,0,k,h); ws2.write(ri,1,str(v),nf)
 
-    if balance_analysis.get('enabled'):
+    if balance_analysis.get('enabled') and not independent_export:
         ws3 = wb.add_worksheet('Причины сальдо')
         ws3_headers = ['Операция', 'Влияние на сальдо', 'Что проверить бухгалтеру', 'Детали']
         ws3_widths = [42, 18, 52, 70]
