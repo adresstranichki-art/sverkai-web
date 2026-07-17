@@ -108,6 +108,8 @@ EXPERT_SYSTEM_PROMPT = (
     'analysis_scope — обязательные границы анализа. При false не ищи и не возвращай: '
     'find_missing→confirmed_missing, find_sign_mismatch→sign_difference, '
     'find_amount_diff→amount_difference, find_date_diff→likely_date_pair. '
+    'Жёсткое правило: если find_date_diff=false, likely_date_pair и любые выводы о разнице дат запрещены '
+    'во всех полях ответа. Для остальных false-флагов так же запрещены их категории и упоминания. '
     'Для likely_date_pair соблюдай date_window_payment для оплат и date_window_delivery для поставок. '
     'Не возвращай расхождения меньше min_amount; opening_balance_bridge разрешён всегда. '
     'В пользовательских conclusion, title и reason называй стороны только по documents[].display_name; '

@@ -237,6 +237,8 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertIn('analysis_scope', system)
         self.assertIn('display_name', system)
         self.assertIn('doc1', system)
+        self.assertIn('если find_date_diff=false', system)
+        self.assertIn('любые выводы о разнице дат запрещены', system)
         ordered_categories = (
             'confirmed_missing', 'sign_difference', 'amount_difference',
             'opening_balance_bridge', 'likely_date_pair', 'ambiguous',
