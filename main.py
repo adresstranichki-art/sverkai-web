@@ -706,6 +706,57 @@ def _attach_meta(df: pd.DataFrame, **meta) -> pd.DataFrame:
     return df
 
 
+def _party_name_from_accounting_label(value) -> Optional[str]:
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    match = re.search(r'по\s+данным\s+(.+?)(?:,\s*руб\.?|$)', text, re.IGNORECASE)
+    if not match:
+        return None
+    party = match.group(1).strip(' ,')
+    has_limited_company_form = bool(re.search(
+        r'\bООО\b|общество\s+с\s+ограниченной\s+ответственностью',
+        party,
+        re.IGNORECASE,
+    ))
+    quoted = re.search(r'[«"]\s*([^»"]+?)\s*[»"]', party)
+    if quoted:
+        name = quoted.group(1).strip()
+        if has_limited_company_form:
+            return f'ООО «{name}»'
+        return f'«{name}»'
+    return party if has_limited_company_form else None
+
+
+def _extract_party_display_name(
+    raw: Optional[pd.DataFrame],
+    party_column,
+    fallback: str,
+) -> str:
+    if not isinstance(raw, pd.DataFrame) or raw.empty:
+        return fallback
+    candidates = []
+    for row_index in range(min(20, len(raw))):
+        for column_index in range(len(raw.columns)):
+            value = raw.iloc[row_index, column_index]
+            if pd.isna(value):
+                continue
+            party_name = _party_name_from_accounting_label(value)
+            if party_name:
+                candidates.append((row_index, column_index, party_name))
+    if not candidates:
+        return fallback
+    try:
+        target_column = int(party_column)
+    except (TypeError, ValueError):
+        target_column = None
+    if target_column is not None:
+        candidates.sort(key=lambda item: (
+            abs(item[1] - target_column), item[0], item[1],
+        ))
+    else:
+        candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates[0][2]
+
+
 def _balance_state_doc_type(doc: str) -> str:
     text = str(doc or '').lower()
     if 'оплата' in text:
@@ -805,7 +856,7 @@ def parse_proopt(path: str) -> pd.DataFrame:
                      'match_date': _extract_doc_date(doc_val) or date_parsed,
                      'signed_amount': float(debit_val or 0) - float(credit_val or 0),
                      'raw_row': idx})
-    return _attach_meta(pd.DataFrame(rows), **meta)
+    return _attach_meta(pd.DataFrame(rows), **meta, party_column=date_col)
 
 
 def parse_partner_ledger_act(path: str) -> pd.DataFrame:
@@ -1086,7 +1137,7 @@ def parse_two_sided_act(path: str, side: str = 'left') -> pd.DataFrame:
                          else float(credit or 0) - float(debit or 0)
                      ),
                      'raw_row': idx})
-    return _attach_meta(pd.DataFrame(rows), **meta)
+    return _attach_meta(pd.DataFrame(rows), **meta, party_column=date_col)
 
 
 class PDFTextLayerMissing(Exception):
@@ -3946,6 +3997,11 @@ def _collect_parse_candidates(path: str, logs: list, api_key: str = "", original
             return
         df.attrs['source_path'] = path
         df.attrs['source_name'] = cache_name
+        df.attrs['display_name'] = _extract_party_display_name(
+            raw_preview,
+            df.attrs.get('party_column'),
+            cache_name,
+        )
         candidate = _make_parse_candidate(df, parse_type, label, parser_id, bonus)
         if candidate:
             candidates.append(candidate)
@@ -4470,6 +4526,7 @@ async def reconcile(
                 )
                 expert_result = run_independent_expert_analysis(
                     expert_cand1['df'], expert_cand2['df'], client, MODEL_MAIN,
+                    cfg,
                 )
                 audit_consumed = client is not None
                 audit_meta = {

@@ -164,6 +164,7 @@ class RegressionReconcileTests(unittest.TestCase):
             self.assertAlmostEqual(df.iloc[0]['debit'], 50.0, places=2)
             self.assertAlmostEqual(df.iloc[1]['credit'], 20.0, places=2)
             self.assertAlmostEqual(df['signed_amount'].sum(), 30.0, places=2)
+            self.assertEqual(df.attrs['display_name'], 'ООО «М Партс»')
 
     def test_ai_profile_skipped_for_confident_structured_parse(self):
         pd = self.main.pd
@@ -448,6 +449,33 @@ class RegressionReconcileTests(unittest.TestCase):
 
         self.assertEqual(cfg['date_window_payment'], 0)
         self.assertEqual(cfg['date_window_delivery'], 120)
+
+    def test_party_display_name_is_extracted_for_selected_table_column(self):
+        pd = self.main.pd
+        raw = pd.DataFrame([[None] * 15 for _ in range(8)])
+        raw.iloc[4, 1] = 'состояние взаимных расчетов по данным учета следующее:'
+        raw.iloc[6, 1] = 'По данным ООО "ПРООПТ", руб.'
+        raw.iloc[6, 9] = (
+            'По данным Общество с ограниченной ответственностью '
+            '"Автомир-Трейд", руб.'
+        )
+
+        self.assertEqual(
+            self.main._extract_party_display_name(raw, 1, 'first.xlsx'),
+            'ООО «ПРООПТ»',
+        )
+        self.assertEqual(
+            self.main._extract_party_display_name(raw, 9, 'second.xls'),
+            'ООО «Автомир-Трейд»',
+        )
+
+    def test_party_display_name_falls_back_to_filename(self):
+        raw = self.main.pd.DataFrame([['Акт сверки']])
+
+        self.assertEqual(
+            self.main._extract_party_display_name(raw, None, 'source.xlsx'),
+            'source.xlsx',
+        )
 
     def test_single_unique_adjustment_pair_suggests_37_day_window(self):
         pd = self.main.pd
