@@ -448,6 +448,7 @@
   .disc-table td { padding: 8px 13px; border-bottom: 1px solid #eee; border-right: 1px solid #f0f0f0;
                    overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 0; }
   .disc-table tr:nth-child(even) td { background: #fbfcfb; }
+  .source-warning { display: block; margin-top: 3px; color: var(--yellow); font-size: 11px; font-weight: 700; }
   .disc-table tr:hover td { background: rgba(31,122,67,.045); }
   .disc-table tr.disc-clickable td { cursor: pointer; }
   .disc-table tr.disc-clickable:hover td { background: rgba(31,122,67,.08); }
@@ -989,13 +990,13 @@
       <div class="balance-analysis" id="balance-analysis-card" style="display:none">
         <div class="balance-analysis-head">
           <div>
-            <div class="balance-analysis-title">Анализ причин расхождения сальдо</div>
-            <div class="balance-analysis-sub">Для сложной сверки каждая отсутствующая операция показана отдельно, а техническая детализация оставлена ниже.</div>
+            <div class="balance-analysis-title" id="balance-analysis-title">Анализ причин расхождения сальдо</div>
+            <div class="balance-analysis-sub" id="balance-analysis-sub">Для сложной сверки каждая отсутствующая операция показана отдельно, а техническая детализация оставлена ниже.</div>
           </div>
         </div>
         <div class="balance-formula" id="balance-formula"></div>
         <div class="balance-explain" id="balance-explain"></div>
-        <div class="balance-section-title">Операции, влияющие на конечное сальдо</div>
+        <div class="balance-section-title" id="balance-reasons-title">Операции, влияющие на конечное сальдо</div>
         <div class="balance-reason-list" id="balance-reasons"></div>
         <div class="balance-section-title" id="balance-neutral-title" style="display:none">Не влияет на итог / техническая детализация</div>
         <div class="balance-reason-list" id="balance-neutral"></div>
@@ -2073,9 +2074,6 @@ async function runReconcile(extraSettings={}){
     const noHist=data.history_saved===false&&!isLoggedIn();
     setProgress(100,noHist?'Сверка завершена (гостевой режим — история не сохраняется)':'Сверка завершена');
     displayResults(data);
-    if(forceExpert&&data.summary?.result_mode!=='balance_reason_analysis'){
-      showToast('Экспертный режим недоступен: не удалось собрать основу по сальдо','warn');
-    }
   }catch(err){
     if(err.name==='AbortError'){return;}// уже обработано в cancelReconcile
     showToast('Ошибка: '+err.message,'error');setProgress(0,'Ошибка');
@@ -2097,8 +2095,8 @@ async function applySuggestedWindows(payDays, delDays){
 
 async function forceExpertAnalysis(){
   if(!file1||!file2){showToast('Для экспертного режима заново загрузите оба файла','warn');return;}
-  showToast('Запускаю экспертный анализ причин сальдо','warn');
-  await runReconcile({force_balance_reason_analysis:true, ai_comment:true});
+  showToast('Запускаю независимый экспертный анализ Claude','warn');
+  await runReconcile({force_balance_reason_analysis:true, ai_comment:false});
 }
 
 function pluralRu(n,one,few,many){
@@ -2200,17 +2198,69 @@ function buildExpertHighlight(summary){
   return h;
 }
 
+function isIndependentExpertSummary(summary){
+  return summary?.result_mode==='independent_expert'&&!!summary?.expert_report;
+}
+
+function buildIndependentExpertDiscrepancies(summary){
+  const report=summary?.expert_report||{};
+  return (report.discrepancies||[]).map(item=>{
+    const rows=(item.resolved_evidence||[]).map(evidence=>({
+      side:evidence.side,
+      raw_row:evidence.raw_row,
+      row_id:evidence.row_id,
+    }));
+    const doc1=[item.doc1_document,item.doc1_date].filter(Boolean).join(' · ');
+    const doc2=[item.doc2_document,item.doc2_date].filter(Boolean).join(' · ');
+    return {
+      type:item.category||'ambiguous',
+      severity:item.confidence||'low',
+      date:[item.doc1_date,item.doc2_date].filter(Boolean).join(' ↔ '),
+      document_number:item.title||'Вывод экспертного анализа',
+      description:item.reason||'',
+      company_value:item.doc1_value===null||item.doc1_value===undefined?(doc1||'-'):`${doc1?`${doc1}: `:''}${fmtMoney(item.doc1_value)}`,
+      supplier_value:item.doc2_value===null||item.doc2_value===undefined?(doc2||'-'):`${doc2?`${doc2}: `:''}${fmtMoney(item.doc2_value)}`,
+      difference:fmtSignedMoney(item.influence),
+      confidence:item.confidence||'low',
+      action:item.action||'',
+      rows,
+      clickable:item.clickable!==false&&rows.length>0,
+      evidence_warning:item.evidence_warning||(item.clickable===false?'Источник не найден':''),
+    };
+  });
+}
+
+function buildIndependentExpertHighlight(summary){
+  const h={missing1:[],missing2:[],amt_diff1:[],amt_diff2:[],sign1:[],sign2:[],date1:[],date2:[],technical1:[],technical2:[]};
+  (summary?.expert_report?.discrepancies||[]).forEach(item=>{
+    const target=item.category==='likely_date_pair'?'date':item.category==='sign_difference'?'sign':item.category==='amount_difference'?'amt_diff':'missing';
+    (item.resolved_evidence||[]).forEach(evidence=>{
+      if(evidence?.raw_row===undefined||evidence?.raw_row===null)return;
+      const suffix=evidence.side==='doc1'?'1':evidence.side==='doc2'?'2':'';
+      if(suffix)h[`${target}${suffix}`].push(evidence.raw_row);
+    });
+  });
+  Object.keys(h).forEach(key=>{h[key]=[...new Set(h[key])];});
+  return h;
+}
+
 function displayResults(data){
-  const expertMode=data.summary?.result_mode==='balance_reason_analysis';
+  const independentMode=isIndependentExpertSummary(data.summary);
+  const legacyExpertMode=data.summary?.result_mode==='balance_reason_analysis';
+  const expertMode=independentMode||legacyExpertMode;
   const visibleDiscrepancies=(data.discrepancies||[]).filter(d=>d.type!=='technical_mirror');
   if(visibleDiscrepancies.length!==(data.discrepancies||[]).length){
     data={...data,discrepancies:visibleDiscrepancies,summary:{...(data.summary||{}),total_discrepancies:visibleDiscrepancies.length}};
   }
   setExpertModeTabs(expertMode);
   if(expertMode)resetDiscFilters();
-  const expertDiscrepancies=expertMode?buildExpertDiscrepancies(data.summary):[];
+  const expertDiscrepancies=independentMode
+    ?buildIndependentExpertDiscrepancies(data.summary)
+    :legacyExpertMode?buildExpertDiscrepancies(data.summary):[];
   lastResult=data;allDisc=expertMode?expertDiscrepancies:visibleDiscrepancies;
-  const highlight=expertMode?buildExpertHighlight(data.summary):data.highlight;
+  const highlight=independentMode
+    ?buildIndependentExpertHighlight(data.summary)
+    :legacyExpertMode?buildExpertHighlight(data.summary):data.highlight;
   renderTable(1,data.table1,highlight);renderTable(2,data.table2,highlight);
   renderDiscrepancies(allDisc,data.file1_name,data.file2_name,expertMode);
   renderSummary(data.summary,data.file1_name,data.file2_name);
@@ -2218,7 +2268,10 @@ function displayResults(data){
   updateAccessActions();
   const cnt=expertMode?expertDiscrepancies.length:data.summary.total_discrepancies;
   const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
-  if(expertMode)showToast('Сформирована сводка причин расхождения сальдо','warn');
+  if(independentMode&&data.summary?.expert_analysis_status==='complete_with_warnings')showToast('Экспертный анализ завершён с предупреждениями','warn');
+  else if(independentMode)showToast('Независимый экспертный анализ выполнен','success');
+  else if(data.summary?.expert_analysis_status==='failed')showToast('Экспертный анализ не выполнен','error');
+  else if(legacyExpertMode)showToast('Сформирована сводка причин расхождения сальдо','warn');
   else if(cnt===0)showToast('Расхождений не обнаружено','success');
   else if(data.summary.window_suggestion?.candidate_pairs)showToast('Найдены вероятные совпадения с разницей по датам. Можно расширить окна и пересчитать.','warn');
   else showToast(`Найдено расхождений: ${cnt}, критических: ${data.summary.critical_count}`,'error');
@@ -2248,7 +2301,7 @@ const TYPE_ICONS={
   sign:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h8.6m0 0L9.7 3.3m1.9 1.9L9.7 7.1M13 10.8H4.4m0 0 1.9-1.9m-1.9 1.9 1.9 1.9" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   ok:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.2 8.2 3.1 3.1 6.5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
-const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok']};
+const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok'],confirmed_missing:['Подтверждённое отсутствие','badge-red','missing'],likely_date_pair:['Вероятная пара по датам','badge-blue','date'],opening_balance_bridge:['Связь с начальным сальдо','badge-green','amount'],amount_difference:['Разница в суммах','badge-yellow','amount'],sign_difference:['Разница направления','badge-yellow','sign'],ambiguous:['Требуется проверка','badge-gray','amount']};
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray'],review:['К проверке','badge-gray'],info:['Справочно','badge-gray']};
 function typeIcon(name){return TYPE_ICONS[name]||'';}
 function decorateTypeButtons(){
@@ -2286,8 +2339,17 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
   body.innerHTML=discs.map((d,i)=>{
     const[tl,tb,ti]=TYPE_MAP[d.type]||[d.type,'badge-gray',''];
     const[sl,sb]=SEV_MAP[d.severity]||[d.severity,'badge-gray'];
-    const tc=d.type==='expert_neutral'?'type-technical':d.type==='sign_mismatch'?'type-sign':(d.type==='missing_in_counterparty'||d.type==='missing_in_company')?'sev-high':d.type==='amount_diff'?'sev-medium':d.type==='date_diff'?'sev-low':`sev-${d.severity}`;
-    return`<tr class="${tc} disc-clickable" data-type="${d.type}" data-disc-index="${i}" title="Показать строку на вкладке «Сравнение»"><td>${i+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.document_number||'')}">${esc(trunc(d.document_number||'',60))}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
+    const tc=d.type==='expert_neutral'?'type-technical'
+      :d.type==='opening_balance_bridge'?'type-expert'
+      :(d.type==='sign_mismatch'||d.type==='sign_difference')?'type-sign'
+      :(d.type==='missing_in_counterparty'||d.type==='missing_in_company'||d.type==='confirmed_missing')?'sev-high'
+      :(d.type==='amount_diff'||d.type==='amount_difference')?'sev-medium'
+      :(d.type==='date_diff'||d.type==='likely_date_pair'||d.type==='ambiguous')?'sev-low'
+      :`sev-${d.severity}`;
+    const canNavigate=d.clickable!==false&&targetRowsForDiscrepancy(d).length>0;
+    const warning=d.evidence_warning?`<span class="source-warning">${esc(d.evidence_warning)}</span>`:'';
+    const rowTitle=canNavigate?'Показать строку на вкладке «Сравнение»':(d.evidence_warning||d.description||'');
+    return`<tr class="${tc}${canNavigate?' disc-clickable':''}" data-type="${d.type}" ${canNavigate?`data-disc-index="${i}"`:''} title="${esc(rowTitle)}"><td>${i+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.description||d.document_number||'')}">${esc(trunc(d.document_number||'',60))}${warning}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-disc-index]').forEach(row=>{
     row.addEventListener('click',()=>goToDiscrepancy(Number(row.dataset.discIndex)));
@@ -2371,13 +2433,22 @@ function goToDiscrepancy(idx){
 }
 
 // ── Summary ───────────────────────────────────────────────────────
-function isExpertSummary(s){return s?.result_mode==='balance_reason_analysis'&&s?.balance_reason_analysis?.enabled;}
+function isLegacyExpertSummary(s){return s?.result_mode==='balance_reason_analysis'&&s?.balance_reason_analysis?.enabled;}
+function isExpertSummary(s){return isIndependentExpertSummary(s)||isLegacyExpertSummary(s);}
 
 function renderSummary(s,file1Name='',file2Name=''){
-  const expert=isExpertSummary(s);
+  const independent=isIndependentExpertSummary(s);
+  const expert=isLegacyExpertSummary(s);
+  const report=s.expert_report||{};
+  const balances=report.balances||{};
+  const totals=report.totals||{};
   const analysis=s.balance_reason_analysis||{};
   const critical=s.critical_count||0;
-  document.getElementById('summary-cards').innerHTML=expert?`
+  document.getElementById('summary-cards').innerHTML=independent?`
+    <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(balances.opening_difference)}">${fmtSignedMoney(balances.opening_difference)}</div></div>
+    <div class="stat-card"><div class="label">Движение периода</div><div class="value dark ${diffClass(balances.period_movement)}">${fmtSignedMoney(balances.period_movement)}</div></div>
+    <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(balances.closing_difference)}">${fmtSignedMoney(balances.closing_difference)}</div></div>
+    <div class="stat-card"><div class="label">Подтверждено / к проверке</div><div class="value dark">${totals.confirmed_count||0} / ${totals.review_count||0}</div></div>`:expert?`
     <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
     <div class="stat-card"><div class="label">Влияние движений периода</div><div class="value dark ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
     <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(analysis.closing_balance_difference)}">${fmtSignedMoney(analysis.closing_balance_difference)}</div></div>
@@ -2392,9 +2463,10 @@ function renderSummary(s,file1Name='',file2Name=''){
   renderWindowSuggestion(s);
   renderExpertSuggestion(s);
   renderSummaryDetails(s,file1Name,file2Name);
-  renderBalanceAnalysis(s);
+  if(independent)renderIndependentExpertAnalysis(s);
+  else renderBalanceAnalysis(s);
   const ac=document.getElementById('ai-card');
-  if(!expert&&s.ai_comment){ac.style.display='block';document.getElementById('ai-text').innerHTML=md(s.ai_comment);}
+  if(!independent&&!expert&&s.ai_comment){ac.style.display='block';document.getElementById('ai-text').innerHTML=md(s.ai_comment);}
   else ac.style.display='none';
 }
 
@@ -2463,6 +2535,9 @@ function renderBalanceAnalysis(s){
   const card=document.getElementById('balance-analysis-card');
   if(!analysis||!analysis.enabled){card.style.display='none';return;}
   card.style.display='block';
+  document.getElementById('balance-analysis-title').textContent='Анализ причин расхождения сальдо';
+  document.getElementById('balance-analysis-sub').textContent='Для сложной сверки каждая отсутствующая операция показана отдельно, а техническая детализация оставлена ниже.';
+  document.getElementById('balance-reasons-title').textContent='Операции, влияющие на конечное сальдо';
   document.getElementById('balance-formula').innerHTML=`
     <div class="balance-formula-item"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>
     <div class="balance-formula-item"><div class="k">Влияние движений периода</div><div class="v ${diffClass(analysis.period_movement_difference)}">${fmtSignedMoney(analysis.period_movement_difference)}</div></div>
@@ -2471,7 +2546,41 @@ function renderBalanceAnalysis(s){
   document.getElementById('balance-reasons').innerHTML=renderBalanceReasonRows(analysis.reasons||[],{expandRows:true});
   const neutral=analysis.neutral_groups||[];
   document.getElementById('balance-neutral-title').style.display=neutral.length?'block':'none';
+  document.getElementById('balance-neutral-title').textContent='Не влияет на итог / техническая детализация';
   document.getElementById('balance-neutral').innerHTML=neutral.length?renderBalanceReasonRows(neutral,{emptyText:'Нет технической детализации для показа.'}):'';
+}
+
+function renderIndependentExpertAnalysis(s){
+  const report=s.expert_report||{};
+  const balances=report.balances||{};
+  const card=document.getElementById('balance-analysis-card');
+  card.style.display='block';
+  document.getElementById('balance-analysis-title').textContent='Независимый экспертный анализ Claude';
+  document.getElementById('balance-analysis-sub').textContent='Сводка и расхождения сформированы одним независимым анализом всех извлечённых операций.';
+  document.getElementById('balance-reasons-title').textContent='Выводы и операции к проверке';
+  document.getElementById('balance-formula').innerHTML=`
+    <div class="balance-formula-item"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(balances.opening_difference)}">${fmtSignedMoney(balances.opening_difference)}</div></div>
+    <div class="balance-formula-item"><div class="k">Движение периода</div><div class="v ${diffClass(balances.period_movement)}">${fmtSignedMoney(balances.period_movement)}</div></div>
+    <div class="balance-formula-item"><div class="k">Разница конечного сальдо</div><div class="v ${diffClass(balances.closing_difference)}">${fmtSignedMoney(balances.closing_difference)}</div></div>`;
+  const confidence={high:'высокая',medium:'средняя',low:'низкая'}[report.confidence]||'не указана';
+  document.getElementById('balance-explain').innerHTML=`<p>${esc(report.conclusion||'')}</p><p><strong>Формула:</strong> ${esc(balances.formula||'—')}. <strong>Уверенность:</strong> ${esc(confidence)}.</p>`;
+  const rows=(report.discrepancies||[]).map(item=>({
+    title:item.title,
+    influence:item.influence,
+    check:item.action,
+    examples:[item.reason,item.evidence_warning].filter(Boolean),
+  }));
+  document.getElementById('balance-reasons').innerHTML=renderBalanceReasonRows(rows,{emptyText:'Claude не выделил отдельных расхождений.'});
+  const notes=[
+    ...(report.actions||[]).map(text=>`Действие: ${text}`),
+    ...(report.limitations||[]).map(text=>`Ограничение: ${text}`),
+  ];
+  const neutralTitle=document.getElementById('balance-neutral-title');
+  neutralTitle.style.display=notes.length?'block':'none';
+  neutralTitle.textContent='Рекомендации и ограничения';
+  document.getElementById('balance-neutral').innerHTML=notes.length
+    ?`<div class="balance-reason-check">${notes.map(text=>esc(text)).join('<br>')}</div>`
+    :'';
 }
 
 function getWindowSuggestionView(hint){
@@ -2554,12 +2663,8 @@ function renderExpertSuggestion(s){
     btn.onclick=null;
     return;
   }
-  const hasBasis=['opening_balance_difference','transaction_net_difference','closing_balance_difference']
-    .every(key=>Number.isFinite(Number(s[key])));
-  text.textContent='Не согласны с результатами обычной сверки? Можно переключить текущие файлы в экспертный режим и посмотреть причины через влияние на конечное сальдо.';
-  meta.textContent=hasBasis
-    ? 'Суммы и формула будут пересчитаны программно; при доступном AI-ключе объяснение сформируется расширенно.'
-    : 'Если сальдо не найдено обычным парсером, программа сначала попробует восстановить его через AI и проверит формулу.';
+  text.textContent='Не согласны с обычной сверкой? Claude может независимо проверить все извлечённые операции и сформировать единую сводку с расхождениями.';
+  meta.textContent='Выводы обычного алгоритма не передаются Claude. Если AI-анализ не выполнится, текущий стандартный результат останется на экране.';
   btn.textContent='Воспользоваться экспертным режимом';
   btn.onclick=forceExpertAnalysis;
   card.style.display='block';
@@ -2567,8 +2672,16 @@ function renderExpertSuggestion(s){
 
 function renderSummaryDetails(s,file1Name='',file2Name=''){
   const wrap=document.getElementById('summary-detail-grid');
-  const expert=isExpertSummary(s);
-  const analysis=s.balance_reason_analysis||{};
+  const independent=isIndependentExpertSummary(s);
+  const legacyExpert=isLegacyExpertSummary(s);
+  const expert=independent||legacyExpert;
+  const reportBalances=s.expert_report?.balances||{};
+  const analysis=independent?{
+    opening_balance_difference:reportBalances.opening_difference,
+    period_movement_difference:reportBalances.period_movement,
+    closing_balance_difference:reportBalances.closing_difference,
+    formula:reportBalances.formula,
+  }:(s.balance_reason_analysis||{});
   const cmpOpening=expert?analysis.opening_balance_difference:s.opening_balance_difference;
   const cmpMovement=expert?analysis.period_movement_difference:s.transaction_net_difference;
   const cmpClosing=expert?analysis.closing_balance_difference:s.closing_balance_difference;
@@ -2601,7 +2714,7 @@ function renderSummaryDetails(s,file1Name='',file2Name=''){
     <div class="summary-detail-card">
       <div class="summary-detail-head">
         <div class="summary-detail-title">${expert?'Формула сальдо':'Сравнение'}</div>
-        <div class="summary-detail-name">${expert?'Экспертная сводка':(s.period_mismatch?'Разный период':'Период совпадает')}</div>
+        <div class="summary-detail-name">${independent?'Независимая сводка Claude':expert?'Экспертная сводка':(s.period_mismatch?'Разный период':'Период совпадает')}</div>
       </div>
       <div class="summary-detail-row"><div class="k">Разница начального сальдо</div><div class="v ${diffClass(cmpOpening)}">${fmtSignedMoney(cmpOpening)}</div></div>
       <div class="summary-detail-row"><div class="k">${expert?'Влияние движений периода':'Разница по операциям'}</div><div class="v ${diffClass(cmpMovement)}">${fmtSignedMoney(cmpMovement)}</div></div>
@@ -2676,9 +2789,10 @@ function openExportModal(){
     return;
   }
   const expertMode=isExpertSummary(lastResult.summary);
+  const independentMode=isIndependentExpertSummary(lastResult.summary);
   document.getElementById('exp-title').textContent=expertMode?'Экспорт экспертного анализа':'Экспорт — выбор типов';
   document.getElementById('exp-hint').textContent=expertMode
-    ?'В отчёт будут включены сводка и причины сальдо из экспертного анализа. Обычные технические расхождения не экспортируются.'
+    ?(independentMode?'В отчёт будут включены независимая сводка Claude, расхождения, рекомендации и ограничения.':'В отчёт будут включены сводка и причины сальдо из экспертного анализа. Обычные технические расхождения не экспортируются.')
     :'Выберите типы расхождений для включения в отчёт:';
   document.getElementById('exp-list').style.display=expertMode?'none':'flex';
   document.getElementById('exp-overlay').style.display='flex';
@@ -2688,8 +2802,11 @@ async function doExport(){
   if(!lastResult)return;closeExportModal();
   if(!isLoggedIn()){showToast('Excel-экспорт доступен с выданным тестовым доступом','warn');return;}
   const expertMode=isExpertSummary(lastResult.summary);
+  const independentMode=isIndependentExpertSummary(lastResult.summary);
   const allowed=new Set(['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff'].filter(t=>document.getElementById(`ex-${t}`)?.checked));
-  const filtered=expertMode?buildExpertDiscrepancies(lastResult.summary):(lastResult.discrepancies||[]).filter(d=>allowed.has(d.type));
+  const filtered=independentMode
+    ?buildIndependentExpertDiscrepancies(lastResult.summary)
+    :expertMode?buildExpertDiscrepancies(lastResult.summary):(lastResult.discrepancies||[]).filter(d=>allowed.has(d.type));
   try{
     const resp=await fetch('/api/export',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},
       body:JSON.stringify({discrepancies:filtered,summary:lastResult.summary,file1_name:lastResult.file1_name,file2_name:lastResult.file2_name})});
@@ -2729,8 +2846,11 @@ async function loadHistory(){
       const hasResult=!!(h.result?.discrepancies);
       const summary=h.result?.summary||{};
       const analysis=summary.balance_reason_analysis||{};
-      const expert=h.mode==='balance_reason_analysis'||isExpertSummary(summary);
-      const reasonCount=expert?(balanceReasonOperationCount(analysis.reasons||[])+(analysis.neutral_groups||[]).length):0;
+      const independent=isIndependentExpertSummary(summary)||h.mode==='independent_expert';
+      const expert=independent||h.mode==='balance_reason_analysis'||isExpertSummary(summary);
+      const reasonCount=independent
+        ?(summary.expert_report?.discrepancies||[]).length
+        :expert?(balanceReasonOperationCount(analysis.reasons||[])+(analysis.neutral_groups||[]).length):0;
       const displayReasonCount=reasonCount||h.total||0;
       const totalCell=expert?`${displayReasonCount} ${pluralRu(displayReasonCount,'операция','операции','операций')}`:(h.total||0);
       const criticalCell=expert?'—':(h.critical||0);
