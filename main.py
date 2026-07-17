@@ -4348,9 +4348,6 @@ async def app_page():
 @app.get("/")
 @app.head("/")
 async def root():
-    landing_path = _static / "landing.html"
-    if landing_path.exists():
-        return FileResponse(str(landing_path))
     return FileResponse(str(_static / "index.html"))
 
 @app.head("/api/health")

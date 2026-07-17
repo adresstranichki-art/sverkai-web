@@ -1,7 +1,17 @@
 __pycache__/
 *.py[cod]
 Ключ API*.txt
+*Ключ API*.txt
+.env
+.env.*
+*.xls
+*.xlsx
+*.pdf
+tmp_*
+.playwright-mcp/
+Админка/
 data/history*.json
 data/guest_usage.json
+data/allowed_keys.json
 local_cases/
 .worktrees/

@@ -3,1182 +3,1930 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SverkAI — автоматическая сверка актов взаиморасчетов</title>
+<title>SverkAI - автоматическая сверка актов взаиморасчетов</title>
 <meta name="description" content="SverkAI помогает быстрее находить расхождения в актах взаиморасчетов: отсутствующие документы, суммы, даты, направление операций и сальдо.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,500..1000&display=swap&subset=cyrillic" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@500;600;700;800&display=swap&subset=cyrillic" rel="stylesheet">
 <link rel="icon" href="/static/favicon.svg?v=5" type="image/svg+xml">
 <link rel="alternate icon" href="/static/favicon.ico?v=5" type="image/x-icon">
 <link rel="shortcut icon" href="/favicon.ico?v=5" type="image/x-icon">
 <style>
   :root {
-    --green: #20864b;
-    --green-dk: #14592f;
-    --green-soft: #eaf7ef;
-    --mint: #77d9a2;
-    --mint-pale: #f0fbf4;
-    --ink: #122016;
-    --text: #1f262d;
-    --muted: #68737d;
-    --line: #d6ddd6;
-    --panel: #fffdf9;
-    --paper: #f6f7f3;
-    --amber: #b26a12;
-    --blue: #3f6c8d;
-    --shadow: 0 18px 44px rgba(18, 28, 22, .14);
-    --font-display: "Nunito Sans", "Manrope", "Inter", "Aptos", "Segoe UI", system-ui, sans-serif;
-    --font-text: "Nunito Sans", "Manrope", "Inter", "Aptos", "Segoe UI", system-ui, sans-serif;
+    --bg: #f4fbf6;
+    --bg-soft: #fbfffc;
+    --panel: rgba(255, 255, 255, 0.88);
+    --panel-strong: #ffffff;
+    --stroke: rgba(12, 58, 34, 0.12);
+    --stroke-strong: rgba(12, 58, 34, 0.18);
+    --ink: #0e1a13;
+    --text: #1d2c24;
+    --muted: #5e6e64;
+    --green: #0fa35b;
+    --green-strong: #0a6d3c;
+    --green-soft: #dbf7e5;
+    --green-deep: #052919;
+    --forest: #062d1b;
+    --forest-2: #0a4128;
+    --mint: #9ce5b7;
+    --mint-soft: rgba(173, 247, 200, 0.22);
+    --cream: #f8f4e8;
+    --warn: #d4972c;
+    --radius-xl: 32px;
+    --radius-lg: 24px;
+    --radius-md: 18px;
+    --radius-sm: 14px;
+    --shadow-soft: 0 18px 48px rgba(6, 32, 18, 0.10);
+    --shadow-strong: 0 24px 64px rgba(6, 32, 18, 0.18);
+    --font-display: "Manrope", "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-text: "Inter", "Segoe UI", system-ui, sans-serif;
   }
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; }
+
   html { scroll-behavior: smooth; }
+
   body {
+    margin: 0;
     font-family: var(--font-text);
     color: var(--text);
-    background: var(--paper);
-    font-size: 16px;
-    line-height: 1.55;
+    background:
+      radial-gradient(circle at top center, rgba(156, 229, 183, 0.20), transparent 28%),
+      linear-gradient(180deg, #f9fffb 0%, #f5fbf7 50%, #eff7f2 100%);
     letter-spacing: 0;
-    font-weight: 650;
   }
+
   a { color: inherit; }
+
+  img { max-width: 100%; display: block; }
+
+  main { overflow: hidden; }
 
   .site-header {
     position: sticky;
     top: 0;
-    z-index: 50;
-    height: 68px;
+    z-index: 60;
+    backdrop-filter: blur(18px);
+    background: rgba(249, 255, 251, 0.86);
+    border-bottom: 1px solid rgba(12, 58, 34, 0.08);
+  }
+
+  .header-inner,
+  .section-shell {
+    width: min(1180px, calc(100% - 48px));
+    margin: 0 auto;
+  }
+
+  .header-inner {
+    min-height: 76px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 28px;
-    background: rgba(22, 32, 25, .96);
-    border-bottom: 1px solid rgba(255,255,255,.08);
-    box-shadow: 0 10px 26px rgba(10, 14, 18, .22);
-    backdrop-filter: blur(10px);
+    gap: 20px;
   }
+
   .logo {
     display: inline-flex;
-    min-height: 38px;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     text-decoration: none;
+    min-height: 42px;
   }
-  .logo-icon { width: 32px; height: 32px; flex: 0 0 auto; }
-  .logo-text { font-family: var(--font-display); font-size: 22px; font-weight: 1000; color: #fffaf3; }
-  .logo-text em { color: var(--green); font-style: normal; }
-  .nav { display: flex; align-items: center; gap: 18px; color: rgba(255,255,255,.78); font-size: 14px; font-weight: 900; }
+
+  .logo-icon { width: 34px; height: 34px; flex: 0 0 auto; }
+
+  .logo-text {
+    font-family: var(--font-display);
+    font-size: 24px;
+    line-height: 1;
+    font-weight: 800;
+    color: var(--ink);
+  }
+
+  .logo-text em {
+    color: var(--green);
+    font-style: normal;
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+  }
+
   .nav a {
-    display: inline-flex;
-    min-height: 38px;
-    align-items: center;
     text-decoration: none;
-    white-space: nowrap;
+    font-size: 14px;
+    line-height: 1;
+    color: rgba(14, 26, 19, 0.70);
+    font-weight: 600;
+    transition: color 0.2s ease, transform 0.2s ease;
   }
-  .nav a:hover { color: #fffaf3; }
+
+  .nav a:hover {
+    color: var(--ink);
+    transform: translateY(-1px);
+  }
+
   .nav-cta {
     display: inline-flex;
     align-items: center;
-    min-height: 38px;
-    padding: 8px 14px;
-    border-radius: 8px;
-    background: linear-gradient(180deg, #2e8a50, var(--green));
-    color: white;
-    box-shadow: 0 8px 16px rgba(31,122,67,.24);
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 18px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #15b465, var(--green));
+    color: #ffffff;
+    box-shadow: 0 14px 28px rgba(15, 163, 91, 0.20);
   }
 
   .hero {
     position: relative;
-    min-height: min(620px, calc(100svh - 112px));
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    background: #f7fbf4;
-    border-bottom: 1px solid rgba(32,134,75,.12);
+    padding: 48px 0 20px;
   }
-  .hero-visual {
+
+  .hero::before {
+    content: "";
     position: absolute;
-    inset: 0;
-    overflow: hidden;
+    inset: 20px 0 auto;
+    height: 420px;
+    background:
+      radial-gradient(circle at 50% 28%, rgba(173, 247, 200, 0.38), transparent 36%),
+      radial-gradient(circle at 50% 52%, rgba(15, 163, 91, 0.10), transparent 46%);
     pointer-events: none;
   }
-  .hero-sheet,
-  .hero-result,
-  .hero-chip {
-    position: absolute;
-    border-radius: 8px;
-    border: 1px solid rgba(32,134,75,.18);
-    background: rgba(255,253,249,.90);
-    box-shadow: 0 22px 46px rgba(18, 32, 22, .10);
-  }
-  .hero-sheet {
-    width: clamp(230px, 24vw, 330px);
-    min-height: 210px;
-    padding: 18px;
-  }
-  .hero-sheet.one {
-    right: max(40px, calc((100vw - 1180px) / 2));
-    top: 72px;
-    transform: rotate(2deg);
-  }
-  .hero-sheet.two {
-    right: max(210px, calc((100vw - 900px) / 2));
-    bottom: 46px;
-    transform: rotate(-3deg);
-  }
-  .hero-sheet-title {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    color: var(--green-dk);
-    font-size: 13px;
-    font-weight: 1000;
-    margin-bottom: 16px;
-  }
-  .hero-sheet-title::before {
-    content: "";
-    width: 11px;
-    height: 11px;
-    border-radius: 3px;
-    background: var(--mint);
-    box-shadow: inset 0 0 0 2px rgba(20,89,47,.20);
-  }
-  .sheet-row {
-    display: grid;
-    grid-template-columns: 1.5fr .8fr .7fr;
-    gap: 8px;
-    align-items: center;
-    min-height: 28px;
-    border-top: 1px solid rgba(32,134,75,.10);
-    color: rgba(31,38,45,.58);
-    font-size: 11px;
-    font-weight: 800;
-  }
-  .sheet-row:first-of-type { border-top: 0; }
-  .sheet-row strong { color: var(--ink); font-weight: 1000; }
-  .hero-result {
-    right: max(90px, calc((100vw - 1040px) / 2));
-    top: 246px;
-    width: clamp(250px, 28vw, 390px);
-    padding: 18px;
-    background: rgba(20, 89, 47, .96);
-    color: rgba(255,250,243,.82);
-  }
-  .hero-result strong {
-    display: block;
-    color: #fffaf3;
-    font-size: 22px;
-    line-height: 1.08;
-    font-weight: 1000;
-    margin-bottom: 12px;
-  }
-  .result-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 30px;
-    border-top: 1px solid rgba(255,255,255,.14);
-    font-size: 12px;
-    font-weight: 900;
-  }
-  .result-row:first-of-type { border-top: 0; }
-  .result-row span:last-child {
-    color: #d8ffd8;
-    font-weight: 1000;
-  }
-  .hero-chip {
-    right: max(420px, calc((100vw - 560px) / 2));
-    top: 116px;
-    padding: 11px 14px;
-    color: var(--green-dk);
-    font-size: 13px;
-    font-weight: 1000;
-    background: #e9f8ef;
-  }
-  .hero::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background:
-      linear-gradient(90deg, rgba(247,251,244,.98) 0%, rgba(247,251,244,.94) 44%, rgba(247,251,244,.74) 68%, rgba(247,251,244,.18) 100%),
-      linear-gradient(180deg, rgba(247,251,244,.40) 0%, rgba(247,251,244,.82) 100%);
-  }
-  .hero-inner {
+
+  .hero-copy {
     position: relative;
     z-index: 2;
-    width: min(1180px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 42px 0 50px;
-    color: var(--ink);
+    max-width: 780px;
+    margin: 0 auto 42px;
+    text-align: center;
   }
-  .eyebrow {
+
+  .eyebrow,
+  .section-kicker {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    color: var(--green-dk);
-    font-size: 14px;
-    font-weight: 1000;
-    letter-spacing: 0;
-    margin-bottom: 18px;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--green-strong);
+    text-transform: uppercase;
   }
-  .eyebrow::before {
+
+  .eyebrow::before,
+  .section-kicker::before {
     content: "";
     width: 9px;
     height: 9px;
     border-radius: 50%;
-    background: #51c17d;
-    box-shadow: 0 0 14px rgba(81,193,125,.65);
+    background: linear-gradient(180deg, #7cf4ad, var(--green));
+    box-shadow: 0 0 18px rgba(15, 163, 91, 0.45);
   }
-  h1 {
-    max-width: 760px;
+
+  .display {
+    margin: 18px auto 18px;
+    max-width: 880px;
     font-family: var(--font-display);
-    font-size: 62px;
-    line-height: .98;
+    font-size: clamp(42px, 6vw, 72px);
+    line-height: 0.96;
+    font-weight: 800;
     letter-spacing: 0;
-    color: var(--green-dk);
-    margin-bottom: 18px;
-    font-weight: 1000;
+    color: var(--ink);
   }
+
+  .display .accent { color: var(--green); }
+
   .lead {
-    max-width: 650px;
-    color: #405046;
-    font-size: 21px;
-    line-height: 1.42;
-    margin-bottom: 28px;
-    font-weight: 750;
+    max-width: 700px;
+    margin: 0 auto;
+    font-size: clamp(17px, 2vw, 21px);
+    line-height: 1.5;
+    color: #4f6157;
+    font-weight: 500;
   }
-  .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
-  .btn {
-    font-family: var(--font-display);
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin: 28px 0 18px;
+  }
+
+  .button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 46px;
-    padding: 12px 18px;
-    border-radius: 8px;
+    min-height: 52px;
+    padding: 0 22px;
+    border-radius: 999px;
     text-decoration: none;
     border: 1px solid transparent;
-    font-weight: 1000;
-    transition: transform .16s, box-shadow .16s, background .16s, border-color .16s;
-    white-space: nowrap;
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 1;
+    font-weight: 700;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
   }
-  .btn:hover { transform: translateY(-1px); }
-  .btn-primary {
-    background: linear-gradient(180deg, #2d8b50, var(--green));
-    color: white;
-    box-shadow: 0 12px 24px rgba(18, 124, 66, .34);
+
+  .button:hover { transform: translateY(-1px); }
+
+  .button-primary {
+    background: linear-gradient(180deg, #15b465, var(--green));
+    color: #ffffff;
+    box-shadow: 0 18px 32px rgba(15, 163, 91, 0.18);
   }
-  .btn-secondary {
-    color: var(--green-dk);
-    background: rgba(255,253,249,.86);
-    border-color: rgba(32,134,75,.22);
+
+  .button-secondary {
+    background: rgba(255, 255, 255, 0.78);
+    border-color: rgba(12, 58, 34, 0.12);
+    color: var(--ink);
   }
-  .btn-light {
-    color: var(--green-dk);
-    background: #fff;
-    border-color: var(--line);
-  }
-  .hero-points {
+
+  .hero-notes {
     display: flex;
     flex-wrap: wrap;
+    justify-content: center;
     gap: 10px;
-    max-width: 760px;
   }
-  .hero-point {
-    padding: 8px 11px;
-    border: 1px solid rgba(255,255,255,.16);
-    border-radius: 8px;
-    background: rgba(255,253,249,.72);
-    color: var(--green-dk);
+
+  .note-pill {
+    padding: 10px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(12, 58, 34, 0.10);
+    color: #355143;
     font-size: 13px;
-    font-weight: 950;
+    line-height: 1.2;
+    font-weight: 600;
+    backdrop-filter: blur(12px);
+  }
+
+  .hero-stage {
+    position: relative;
+    min-height: 430px;
+    margin-bottom: 28px;
+  }
+
+  .hero-rails {
+    position: absolute;
+    inset: 84px 0 24px;
+    display: grid;
+    gap: 34px;
+    pointer-events: none;
+  }
+
+  .rail {
+    position: relative;
+    height: 30px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: linear-gradient(90deg, rgba(6, 48, 29, 0.96), rgba(9, 102, 58, 0.92));
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  }
+
+  .rail:nth-child(odd) {
+    width: calc(50% - 28px);
+  }
+
+  .rail:nth-child(even) {
+    width: calc(50% - 28px);
+    margin-left: auto;
+  }
+
+  .rail::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.14) 32%, rgba(255, 255, 255, 0.88) 50%, rgba(255, 255, 255, 0.14) 68%, transparent 100%);
+    transform: translateX(-140%);
+    animation: rail-glow 6s linear infinite;
+  }
+
+  .rail:nth-child(2)::before { animation-delay: 1.4s; }
+  .rail:nth-child(3)::before { animation-delay: 2.6s; }
+  .rail:nth-child(4)::before { animation-delay: 3.8s; }
+
+  .stage-grid {
+    position: relative;
+    z-index: 2;
+    width: min(1040px, calc(100% - 20px));
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 18px;
+    align-items: start;
+  }
+
+  .doc-card,
+  .report-card {
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(12, 58, 34, 0.10);
+    backdrop-filter: blur(14px);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .doc-card {
+    border-radius: 26px;
+    padding: 18px;
+    min-height: 220px;
+  }
+
+  .doc-left {
+    grid-column: 1 / span 3;
+    transform-origin: center;
+    animation: float-card 6s ease-in-out infinite;
+  }
+
+  .doc-right {
+    grid-column: 10 / span 3;
+    animation: float-card 6.8s ease-in-out infinite;
+    animation-delay: 0.6s;
+  }
+
+  .doc-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .doc-label {
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--green-strong);
+  }
+
+  .doc-chip {
+    padding: 7px 10px;
+    border-radius: 999px;
+    background: rgba(15, 163, 91, 0.08);
+    color: var(--green-strong);
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .doc-row {
+    display: grid;
+    grid-template-columns: 1.6fr 0.8fr 0.8fr;
+    gap: 8px;
+    align-items: center;
+    min-height: 34px;
+    border-top: 1px solid rgba(12, 58, 34, 0.08);
+    color: rgba(29, 44, 36, 0.70);
+    font-size: 12px;
+    line-height: 1.2;
+    font-weight: 600;
+  }
+
+  .doc-row:first-of-type { border-top: 0; }
+
+  .doc-row strong {
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .stage-core {
+    position: relative;
+    grid-column: 4 / span 6;
+    border-radius: 32px;
+    padding: 28px 28px 32px;
+    margin-top: 46px;
+    text-align: center;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(124, 244, 173, 0.22), transparent 42%),
+      linear-gradient(180deg, #0a4428 0%, #062b1a 100%);
+    color: rgba(244, 255, 248, 0.84);
+    box-shadow: var(--shadow-strong);
+  }
+
+  .stage-core::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.06) 48%, transparent 100%);
+    transform: translateX(-150%);
+    animation: scan 5.2s linear infinite;
+  }
+
+  .stage-core h2 {
+    margin: 0 0 8px;
+    font-family: var(--font-display);
+    font-size: clamp(28px, 4vw, 38px);
+    line-height: 1;
+    font-weight: 800;
+    color: #ffffff;
+  }
+
+  .stage-core p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.5;
+    font-weight: 500;
+  }
+
+  .stage-track {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 22px;
+  }
+
+  .stage-chip {
+    padding: 11px 12px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 12px;
+    line-height: 1.2;
+    font-weight: 700;
+    color: rgba(244, 255, 248, 0.82);
+  }
+
+  .report-card {
+    grid-column: 4 / span 6;
+    border-radius: 28px;
+    padding: 20px;
+    margin-top: -24px;
+    background: linear-gradient(180deg, rgba(252, 255, 253, 0.96), rgba(244, 251, 247, 0.92));
+    animation: float-card 5.6s ease-in-out infinite;
+    animation-delay: 1s;
+  }
+
+  .report-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .report-top strong {
+    font-family: var(--font-display);
+    font-size: 22px;
+    line-height: 1;
+    font-weight: 800;
+    color: var(--ink);
+  }
+
+  .report-top span {
+    padding: 8px 11px;
+    border-radius: 999px;
+    background: rgba(15, 163, 91, 0.10);
+    color: var(--green-strong);
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .report-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .report-item {
+    display: grid;
+    grid-template-columns: 12px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    min-height: 42px;
+    padding: 10px 12px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.66);
+    border: 1px solid rgba(12, 58, 34, 0.08);
+  }
+
+  .report-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #7cf4ad, var(--green));
+    box-shadow: 0 0 14px rgba(15, 163, 91, 0.35);
+  }
+
+  .report-item b {
+    font-size: 14px;
+    line-height: 1.2;
+    color: var(--text);
+    font-weight: 700;
+  }
+
+  .report-item span {
+    font-size: 12px;
+    line-height: 1.2;
+    color: var(--green-strong);
+    font-weight: 700;
+  }
+
+  .signal-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .signal-card {
+    padding: 22px 24px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(12, 58, 34, 0.08);
+    box-shadow: 0 14px 38px rgba(6, 32, 18, 0.07);
+    backdrop-filter: blur(14px);
+  }
+
+  .signal-card strong {
+    display: block;
+    margin-bottom: 6px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    line-height: 1;
+    font-weight: 800;
+    color: var(--ink);
+  }
+
+  .signal-card span {
+    display: block;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--muted);
+    font-weight: 500;
   }
 
   .section {
-    width: min(1180px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 58px 0;
-    scroll-margin-top: 88px;
-  }
-  .section.compact { padding-top: 36px; }
-  .section-head {
-    max-width: 760px;
-    margin-bottom: 24px;
-  }
-  .kicker {
-    color: var(--green-dk);
-    font-family: var(--font-display);
-    font-size: 13px;
-    font-weight: 1000;
-    letter-spacing: 0;
-    margin-bottom: 8px;
-  }
-  h2 {
-    color: var(--ink);
-    font-family: var(--font-display);
-    font-size: 40px;
-    line-height: 1.03;
-    letter-spacing: 0;
-    margin-bottom: 10px;
-    font-weight: 1000;
-  }
-  .muted { color: var(--muted); }
-
-  .proof-strip {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
-  }
-  .proof-item {
     position: relative;
-    overflow: hidden;
-    display: grid;
-    grid-template-columns: 58px 1fr;
-    gap: 14px;
-    align-items: center;
-    background:
-      linear-gradient(180deg, rgba(240,251,244,.94), rgba(255,253,249,.98));
-    border: 1px solid rgba(32,134,75,.18);
-    border-radius: 8px;
-    padding: 18px;
-    box-shadow: 0 12px 24px rgba(18, 32, 22, .07);
-  }
-  .proof-item strong {
-    display: block;
-    color: var(--ink);
-    font-size: 20px;
-    line-height: 1.1;
-    font-weight: 1000;
-    margin-bottom: 5px;
   }
 
-  .check-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 14px;
+  .section-shell {
+    padding: 88px 0;
+    scroll-margin-top: 92px;
   }
-  .check-card,
+
+  .section-title {
+    max-width: 760px;
+    margin-bottom: 34px;
+  }
+
+  .section-display {
+    margin: 16px 0 12px;
+    font-family: var(--font-display);
+    font-size: clamp(34px, 4.4vw, 54px);
+    line-height: 0.98;
+    font-weight: 800;
+    letter-spacing: 0;
+    color: var(--ink);
+  }
+
+  .section-copy {
+    margin: 0;
+    font-size: 17px;
+    line-height: 1.7;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .section-dark {
+    background:
+      radial-gradient(circle at 24% 72%, rgba(21, 180, 101, 0.08), transparent 30%),
+      linear-gradient(180deg, #052a19 0%, #031c11 100%);
+    color: #edf8f0;
+  }
+
+  .section-dark::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 80px;
+    width: 132px;
+    height: 240px;
+    background:
+      linear-gradient(180deg, rgba(142, 245, 182, 0.75), rgba(142, 245, 182, 0.08)),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent);
+    mask:
+      linear-gradient(90deg, transparent 0 18%, #000 18% 34%, transparent 34% 48%, #000 48% 64%, transparent 64% 78%, #000 78% 94%, transparent 94% 100%);
+    opacity: 0.48;
+    pointer-events: none;
+  }
+
+  .section-dark .section-kicker,
+  .section-dark .section-display {
+    color: #f6fff8;
+  }
+
+  .section-dark .section-kicker::before {
+    background: linear-gradient(180deg, #a2f1c0, #47d986);
+  }
+
+  .section-dark .section-copy {
+    color: rgba(237, 248, 240, 0.70);
+  }
+
+  .feature-board {
+    display: grid;
+    grid-template-columns: 1.04fr 0.96fr;
+    gap: 18px;
+  }
+
+  .feature-intro,
+  .feature-card,
+  .workflow-panel,
   .format-card,
   .access-card,
-  .note-card {
+  .safety-card,
+  .contact-card,
+  .form-card {
+    border-radius: 28px;
+    overflow: hidden;
+  }
+
+  .feature-intro {
+    position: relative;
+    min-height: 100%;
+    padding: 30px;
     background:
-      linear-gradient(180deg, rgba(255,253,249,.98), rgba(247,253,249,.96));
-    border: 1px solid rgba(32,134,75,.16);
-    border-radius: 8px;
-    box-shadow: 0 14px 30px rgba(18, 32, 22, .07);
-    transition: transform .18s, box-shadow .18s, border-color .18s;
+      radial-gradient(circle at 18% 18%, rgba(123, 244, 173, 0.18), transparent 26%),
+      rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
-  .check-card:hover,
-  .format-card:hover,
-  .access-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(32,134,75,.34);
-    box-shadow: 0 18px 38px rgba(18, 32, 22, .10);
-  }
-  .check-card { padding: 20px; }
-  .sverk-icon {
-    width: 76px;
-    height: 68px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-    margin-bottom: 14px;
-    background:
-      linear-gradient(180deg, #f8fffa, var(--green-soft));
-    color: var(--green-dk);
-    box-shadow: inset 0 0 0 1px rgba(32,134,75,.16);
-  }
-  .sverk-icon svg {
-    width: 58px;
-    height: 58px;
-    display: block;
-  }
-  .sverk-icon.small {
-    width: 58px;
-    height: 54px;
-    margin-bottom: 0;
-  }
-  .sverk-icon.small svg {
-    width: 46px;
-    height: 46px;
-  }
-  .sverk-icon .fill-mint { fill: #90e7b2; }
-  .sverk-icon .fill-pale { fill: #dff7e8; }
-  .sverk-icon .fill-cream { fill: #fff7e8; }
-  .sverk-icon .fill-blue { fill: #dcecf5; }
-  .sverk-icon .fill-amber { fill: #ffe6b8; }
-  .sverk-icon .stroke-main {
-    stroke: currentColor;
-    stroke-width: 2.3;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .sverk-icon .stroke-soft {
-    stroke: rgba(20,89,47,.52);
-    stroke-width: 1.8;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .check-card h3,
+
+  .feature-intro h3,
+  .workflow-aside h3,
   .format-card h3,
   .access-card h3,
-  .note-card h3 {
-    color: var(--ink);
+  .safety-card h3,
+  .contact-card h3,
+  .form-card h3 {
+    margin: 0 0 12px;
     font-family: var(--font-display);
-    font-size: 22px;
-    line-height: 1.12;
-    margin-bottom: 7px;
-    font-weight: 1000;
+    font-size: 28px;
+    line-height: 1.08;
+    font-weight: 800;
   }
 
-  .work-band {
-    background: #ffffff;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-  }
-  .steps {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 12px;
-  }
-  .step {
-    min-height: 150px;
-    padding: 18px;
-    border: 1px solid rgba(32,134,75,.16);
-    border-radius: 8px;
-    background: linear-gradient(180deg, #fffdf9, #f0fbf4);
-    box-shadow: 0 12px 24px rgba(18, 32, 22, .05);
-  }
-  .step-num {
-    display: inline-flex;
-    width: 30px;
-    height: 30px;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-    background: var(--ink);
-    color: #fffaf3;
-    font-weight: 1000;
-    margin-bottom: 12px;
-  }
-  .step strong {
-    display: block;
-    color: var(--ink);
-    font-family: var(--font-display);
-    font-size: 18px;
-    line-height: 1.1;
-    font-weight: 1000;
-    margin-bottom: 8px;
+  .feature-intro p,
+  .workflow-aside p,
+  .format-card p,
+  .access-card p,
+  .safety-card p,
+  .contact-card p,
+  .form-card p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.65;
+    color: inherit;
   }
 
-  .two-col {
+  .feature-quote {
+    margin-top: 22px;
+    padding: 18px 20px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(237, 248, 240, 0.80);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+
+  .feature-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
   }
-  .format-card,
-  .access-card,
-  .note-card {
+
+  .feature-card {
     padding: 22px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: transform 0.24s ease, border-color 0.24s ease, background 0.24s ease;
   }
-  .format-card.primary {
-    border-color: rgba(31,122,67,.32);
-    background: linear-gradient(180deg, #f7fff8, #fffdf9);
+
+  .feature-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(162, 241, 192, 0.28);
+    background: rgba(255, 255, 255, 0.07);
   }
-  .tag {
+
+  .icon-token {
+    width: 52px;
+    height: 52px;
     display: inline-flex;
-    min-height: 28px;
     align-items: center;
-    padding: 5px 9px;
-    border-radius: 8px;
-    background: #eef3f6;
-    color: var(--blue);
-    font-size: 12px;
-    font-weight: 1000;
-    margin-bottom: 14px;
+    justify-content: center;
+    border-radius: 18px;
+    margin-bottom: 18px;
+    background: rgba(255, 255, 255, 0.10);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: #baf3d0;
   }
-  .tag.green { background: var(--green-soft); color: var(--green-dk); }
-  .tag.amber { background: #fff4da; color: #80500f; }
-  .format-card .sverk-icon,
-  .access-card .sverk-icon,
-  .request-copy .sverk-icon {
-    margin-bottom: 16px;
+
+  .icon-token svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
-  .format-list,
-  .access-list {
-    list-style: none;
+
+  .feature-card h3 {
+    margin: 0 0 8px;
+    font-family: var(--font-display);
+    font-size: 19px;
+    line-height: 1.12;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  .feature-card p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.65;
+    color: rgba(237, 248, 240, 0.72);
+  }
+
+  .workflow-grid {
     display: grid;
-    gap: 9px;
-    color: var(--muted);
+    grid-template-columns: 1.06fr 0.94fr;
+    gap: 18px;
   }
-  .format-list li,
-  .access-list li {
+
+  .workflow-panel {
+    position: relative;
+    padding: 28px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 252, 248, 0.92));
+    border: 1px solid var(--stroke);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .workflow-panel::before {
+    content: "";
+    position: absolute;
+    left: 40px;
+    right: 40px;
+    top: 110px;
+    height: 2px;
+    background: linear-gradient(90deg, rgba(15, 163, 91, 0.18), rgba(15, 163, 91, 0.55), rgba(15, 163, 91, 0.18));
+  }
+
+  .workflow-panel::after {
+    content: "";
+    position: absolute;
+    top: 103px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #7cf4ad, var(--green));
+    box-shadow: 0 0 18px rgba(15, 163, 91, 0.28);
+    animation: dot-run 7.2s ease-in-out infinite;
+  }
+
+  .workflow-steps {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .workflow-step {
+    position: relative;
+    padding-top: 36px;
+  }
+
+  .workflow-step::before {
+    content: "";
+    position: absolute;
+    top: 94px;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(180deg, #7cf4ad, var(--green));
+    box-shadow: 0 0 12px rgba(15, 163, 91, 0.26);
+  }
+
+  .step-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(15, 163, 91, 0.10);
+    color: var(--green-strong);
+    font-size: 14px;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .step-card {
+    margin-top: 74px;
+    padding: 18px;
+    min-height: 170px;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.94);
+    border: 1px solid rgba(12, 58, 34, 0.10);
+    box-shadow: 0 12px 28px rgba(6, 32, 18, 0.06);
+  }
+
+  .step-card strong {
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--font-display);
+    font-size: 17px;
+    line-height: 1.16;
+    color: var(--ink);
+    font-weight: 700;
+  }
+
+  .step-card span {
+    display: block;
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .workflow-aside {
+    display: grid;
+    gap: 16px;
+  }
+
+  .workflow-note {
+    padding: 28px;
+    border-radius: 28px;
+    background: linear-gradient(180deg, rgba(219, 247, 229, 0.62), rgba(255, 255, 255, 0.92));
+    border: 1px solid rgba(12, 58, 34, 0.10);
+    box-shadow: 0 12px 28px rgba(6, 32, 18, 0.06);
+  }
+
+  .workflow-note small {
+    display: inline-block;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.78);
+    color: var(--green-strong);
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .workflow-list {
+    list-style: none;
+    margin: 18px 0 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+  }
+
+  .workflow-list li {
     position: relative;
     padding-left: 18px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--muted);
+    font-weight: 500;
   }
-  .format-list li::before,
-  .access-list li::before {
+
+  .workflow-list li::before {
     content: "";
     position: absolute;
     left: 0;
-    top: .68em;
-    width: 7px;
-    height: 7px;
+    top: 0.7em;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: var(--green);
+    background: linear-gradient(180deg, #7cf4ad, var(--green));
   }
-  .format-card.caution .format-list li::before { background: var(--amber); }
 
-  .access-band {
-    background:
-      linear-gradient(180deg, rgba(31,122,67,.06), rgba(63,108,141,.07)),
-      #f8faf8;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-  }
-  .note-card {
+  .formats-grid,
+  .access-grid,
+  .request-grid {
     display: grid;
-    grid-template-columns: 1.1fr .9fr;
-    gap: 24px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+  }
+
+  .format-card,
+  .access-card,
+  .safety-card,
+  .contact-card,
+  .form-card {
+    padding: 28px;
+  }
+
+  .format-card,
+  .access-card {
+    position: relative;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .format-card::after {
+    content: "";
+    position: absolute;
+    right: -40px;
+    bottom: -40px;
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(124, 244, 173, 0.14), transparent 66%);
+    pointer-events: none;
+  }
+
+  .pill {
+    display: inline-flex;
     align-items: center;
-    background: var(--ink);
-    color: rgba(255,250,243,.82);
-    border-color: rgba(22,32,25,.35);
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
+    margin-bottom: 16px;
   }
-  .note-card h2,
-  .note-card h3 { color: #fffaf3; }
-  .note-card .muted { color: rgba(255,250,243,.74); }
-  .note-list {
+
+  .pill-green {
+    background: rgba(124, 244, 173, 0.12);
+    color: #baf3d0;
+  }
+
+  .pill-amber {
+    background: rgba(212, 151, 44, 0.16);
+    color: #ffd98f;
+  }
+
+  .section-dark .format-card p,
+  .section-dark .access-card p {
+    color: rgba(237, 248, 240, 0.72);
+  }
+
+  .list-clean {
     list-style: none;
+    margin: 18px 0 0;
+    padding: 0;
     display: grid;
-    gap: 11px;
+    gap: 10px;
   }
-  .note-list li {
-    border-left: 3px solid #51c17d;
-    padding-left: 12px;
+
+  .list-clean li {
+    position: relative;
+    padding-left: 18px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: inherit;
+    font-weight: 500;
+  }
+
+  .list-clean li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.7em;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #7cf4ad, var(--green));
+  }
+
+  .section-dark .access-grid { margin-top: 18px; }
+
+  .access-card {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .access-card strong {
+    display: block;
+    margin-bottom: 8px;
+    font-family: var(--font-display);
+    font-size: 24px;
+    line-height: 1.08;
+    font-weight: 800;
+    color: #ffffff;
+  }
+
+  .split-note {
+    margin-top: 18px;
+    padding: 16px 18px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 14px;
+    line-height: 1.65;
+    color: rgba(237, 248, 240, 0.74);
   }
 
   .request-grid {
-    display: grid;
-    grid-template-columns: .92fr 1.08fr;
-    gap: 16px;
-    align-items: stretch;
-  }
-  .request-copy,
-  .lead-form {
-    background:
-      linear-gradient(180deg, rgba(255,253,249,.98), rgba(247,253,249,.96));
-    border: 1px solid rgba(32,134,75,.16);
-    border-radius: 8px;
-    box-shadow: 0 14px 30px rgba(18, 32, 22, .07);
-    padding: 24px;
-  }
-  .request-copy h3 {
-    color: var(--ink);
-    font-family: var(--font-display);
-    font-size: 28px;
-    line-height: 1.04;
-    margin-bottom: 10px;
-    font-weight: 1000;
-  }
-  .request-steps {
-    list-style: none;
-    display: grid;
-    gap: 10px;
-    margin: 18px 0;
-  }
-  .request-steps li {
-    display: grid;
-    grid-template-columns: 30px 1fr;
-    gap: 10px;
     align-items: start;
-    color: var(--muted);
   }
-  .request-steps span {
+
+  .safety-card,
+  .contact-card,
+  .form-card {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(246, 252, 248, 0.94));
+    border: 1px solid rgba(12, 58, 34, 0.10);
+    box-shadow: 0 16px 40px rgba(6, 32, 18, 0.08);
+  }
+
+  .stack {
+    display: grid;
+    gap: 18px;
+  }
+
+  .tagline {
     display: inline-flex;
-    width: 30px;
-    height: 30px;
     align-items: center;
-    justify-content: center;
-    border-radius: 8px;
-    background: var(--green-soft);
-    color: var(--green-dk);
-    font-weight: 1000;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: rgba(15, 163, 91, 0.10);
+    color: var(--green-strong);
+    font-size: 12px;
     line-height: 1;
+    font-weight: 700;
+    margin-bottom: 16px;
   }
-  .contact-actions {
+
+  .contact-links {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     margin-top: 18px;
   }
+
   .contact-link {
     display: inline-flex;
-    min-height: 42px;
     align-items: center;
     justify-content: center;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: #fff;
-    color: var(--text);
+    min-height: 46px;
+    padding: 0 16px;
+    border-radius: 16px;
     text-decoration: none;
-    font-family: var(--font-display);
-    font-weight: 1000;
-    text-align: center;
+    border: 1px solid rgba(12, 58, 34, 0.10);
+    background: rgba(255, 255, 255, 0.82);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1;
+    font-weight: 700;
+    transition: transform 0.2s ease, border-color 0.2s ease;
   }
+
+  .contact-link:hover {
+    transform: translateY(-1px);
+    border-color: rgba(15, 163, 91, 0.28);
+  }
+
   .contact-link.primary {
-    background: linear-gradient(180deg, #2d8b50, var(--green));
-    border-color: rgba(31,122,67,.45);
-    color: white;
+    background: linear-gradient(180deg, #15b465, var(--green));
+    color: #ffffff;
+    border-color: transparent;
   }
-  .lead-form {
+
+  .safety-card ul,
+  .contact-card ul {
+    list-style: none;
+    margin: 18px 0 0;
+    padding: 0;
     display: grid;
-    gap: 13px;
+    gap: 12px;
   }
-  .lead-form h3 {
-    color: var(--ink);
-    font-family: var(--font-display);
-    font-size: 28px;
-    line-height: 1.04;
-    font-weight: 1000;
+
+  .safety-card li,
+  .contact-card li {
+    position: relative;
+    padding-left: 18px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--muted);
+    font-weight: 500;
   }
+
+  .safety-card li::before,
+  .contact-card li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.7em;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #7cf4ad, var(--green));
+  }
+
+  .form-card form {
+    display: grid;
+    gap: 14px;
+  }
+
   .form-row {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
-  .lead-form label {
+
+  .form-card label {
     display: grid;
-    gap: 6px;
-    color: var(--muted);
+    gap: 7px;
     font-size: 13px;
-    font-weight: 900;
+    line-height: 1.4;
+    color: #5b6c61;
+    font-weight: 600;
   }
-  .lead-form input,
-  .lead-form select,
-  .lead-form textarea {
+
+  .form-card input,
+  .form-card select,
+  .form-card textarea {
     width: 100%;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
+    padding: 13px 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(12, 58, 34, 0.12);
+    background: rgba(255, 255, 255, 0.92);
     color: var(--text);
     font: inherit;
     font-size: 15px;
+    line-height: 1.45;
     font-weight: 500;
-    padding: 11px 12px;
     outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
-  .lead-form textarea { min-height: 100px; resize: vertical; }
-  .lead-form input:focus,
-  .lead-form select:focus,
-  .lead-form textarea:focus {
-    border-color: rgba(31,122,67,.65);
-    box-shadow: 0 0 0 3px rgba(31,122,67,.10);
+
+  .form-card textarea {
+    min-height: 116px;
+    resize: vertical;
   }
+
+  .form-card input:focus,
+  .form-card select:focus,
+  .form-card textarea:focus {
+    border-color: rgba(15, 163, 91, 0.40);
+    box-shadow: 0 0 0 4px rgba(15, 163, 91, 0.10);
+  }
+
   .form-hint,
   .form-status {
-    color: var(--muted);
+    margin: 0;
     font-size: 13px;
+    line-height: 1.6;
+    color: var(--muted);
   }
-  .form-status { min-height: 20px; color: var(--green-dk); font-weight: 900; }
 
-  .final-cta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    padding: 28px;
-    border-radius: 8px;
+  .form-status {
+    min-height: 22px;
+    color: var(--green-strong);
+    font-weight: 600;
+  }
+
+  .final-band {
+    padding: 0 0 92px;
+  }
+
+  .final-card {
+    position: relative;
+    padding: 34px;
+    border-radius: 32px;
+    overflow: hidden;
     background:
-      linear-gradient(135deg, rgba(234,247,239,.96), rgba(255,253,249,.98) 58%, rgba(220,236,245,.58));
-    border: 1px solid rgba(32,134,75,.18);
-    box-shadow: var(--shadow);
-  }
-  .final-cta h2 { margin-bottom: 6px; }
-  .site-footer {
-    padding: 24px;
-    border-top: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 13px;
-    text-align: center;
+      radial-gradient(circle at 16% 16%, rgba(124, 244, 173, 0.16), transparent 24%),
+      linear-gradient(135deg, #0a4528 0%, #062819 66%, #0a6d3c 100%);
+    color: #f7fff9;
+    box-shadow: var(--shadow-strong);
   }
 
-  @media (max-width: 980px) {
-    .nav a:not(.nav-cta) { display: none; }
-    .hero-sheet.one { right: -96px; top: 92px; }
-    .hero-sheet.two { right: 32px; bottom: 34px; opacity: .72; }
-    .hero-result { right: -126px; top: 308px; opacity: .46; }
-    .hero-chip { right: 210px; top: 132px; }
-    .hero::after {
-      background:
-        linear-gradient(90deg, rgba(247,251,244,.98), rgba(247,251,244,.86)),
-        linear-gradient(180deg, rgba(247,251,244,.30), rgba(247,251,244,.86));
-    }
-    h1 { font-size: 46px; max-width: 650px; }
-    h2 { font-size: 34px; }
-    .lead { font-size: 18px; }
-    .proof-strip,
-    .check-grid,
-    .steps,
-    .two-col,
-    .note-card,
+  .final-card::after {
+    content: "";
+    position: absolute;
+    right: -26px;
+    top: 22px;
+    width: 140px;
+    height: 220px;
+    background:
+      linear-gradient(180deg, rgba(162, 241, 192, 0.86), rgba(162, 241, 192, 0.06));
+    mask:
+      linear-gradient(90deg, transparent 0 18%, #000 18% 34%, transparent 34% 48%, #000 48% 64%, transparent 64% 78%, #000 78% 94%, transparent 94% 100%);
+    opacity: 0.42;
+    pointer-events: none;
+  }
+
+  .final-card h2 {
+    margin: 0 0 10px;
+    max-width: 700px;
+    font-family: var(--font-display);
+    font-size: clamp(32px, 4vw, 50px);
+    line-height: 0.98;
+    font-weight: 800;
+  }
+
+  .final-card p {
+    margin: 0;
+    max-width: 640px;
+    font-size: 17px;
+    line-height: 1.7;
+    color: rgba(247, 255, 249, 0.78);
+    font-weight: 500;
+  }
+
+  .final-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+  }
+
+  .final-actions .button-secondary {
+    background: rgba(255, 255, 255, 0.10);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+  }
+
+  .site-footer {
+    padding: 0 24px 28px;
+    text-align: center;
+    color: rgba(29, 44, 36, 0.62);
+    font-size: 13px;
+    line-height: 1.6;
+    font-weight: 500;
+  }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity 0.7s cubic-bezier(.2, .72, .19, 1), transform 0.7s cubic-bezier(.2, .72, .19, 1);
+  }
+
+  .reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .reveal[data-delay="1"] { transition-delay: 0.08s; }
+  .reveal[data-delay="2"] { transition-delay: 0.16s; }
+  .reveal[data-delay="3"] { transition-delay: 0.24s; }
+  .reveal[data-delay="4"] { transition-delay: 0.32s; }
+
+  @keyframes rail-glow {
+    0% { transform: translateX(-140%); }
+    100% { transform: translateX(150%); }
+  }
+
+  @keyframes float-card {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+
+  @keyframes scan {
+    0% { transform: translateX(-150%); }
+    100% { transform: translateX(150%); }
+  }
+
+  @keyframes dot-run {
+    0% { left: 34px; }
+    50% { left: calc(100% - 52px); }
+    100% { left: 34px; }
+  }
+
+  @media (max-width: 1080px) {
+    .feature-board,
+    .workflow-grid,
+    .formats-grid,
+    .access-grid,
     .request-grid {
       grid-template-columns: 1fr;
     }
-    .contact-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .steps { gap: 10px; }
-    .step { min-height: auto; }
-    .final-cta { align-items: flex-start; flex-direction: column; }
+
+    .stage-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .doc-left,
+    .doc-right,
+    .stage-core,
+    .report-card {
+      grid-column: auto;
+      margin-top: 0;
+    }
+
+    .hero-stage {
+      min-height: auto;
+      padding-bottom: 12px;
+    }
+
+    .hero-rails {
+      inset: 74px 0 60px;
+      gap: 24px;
+    }
+
+    .rail:nth-child(odd),
+    .rail:nth-child(even) {
+      width: 76%;
+    }
+
+    .workflow-panel::before,
+    .workflow-panel::after {
+      display: none;
+    }
+
+    .workflow-steps {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .workflow-step {
+      padding-top: 0;
+    }
+
+    .workflow-step::before {
+      top: 25px;
+      left: 16px;
+      transform: none;
+    }
+
+    .step-card {
+      margin-top: 12px;
+      min-height: auto;
+      padding-left: 34px;
+    }
+  }
+
+  @media (max-width: 860px) {
+    .nav a:not(.nav-cta) { display: none; }
+
+    .signal-strip {
+      grid-template-columns: 1fr;
+    }
+
+    .contact-links,
+    .form-row {
+      grid-template-columns: 1fr;
+    }
   }
 
   @media (max-width: 640px) {
-    .site-header { height: 62px; padding: 0 16px; }
-    .logo-icon { width: 28px; height: 28px; }
-    .logo-text { font-size: 20px; }
-    .nav-cta { min-height: 34px; padding: 7px 10px; font-size: 13px; }
-    .hero { min-height: min(560px, calc(100svh - 112px)); }
-    .hero-visual { display: none; }
-    .hero::after {
-      background:
-        linear-gradient(180deg, rgba(247,251,244,.98), rgba(247,251,244,.92));
+    .header-inner,
+    .section-shell {
+      width: min(100% - 28px, 1180px);
     }
-    .hero-inner,
-    .section { width: min(100% - 28px, 1180px); }
-    .hero-inner { padding: 34px 0 34px; }
-    .eyebrow { font-size: 12px; }
-    h1 { font-size: 38px; line-height: 1.02; }
-    h2 { font-size: 28px; line-height: 1.08; }
-    .lead { font-size: 16px; }
-    .btn { width: 100%; white-space: normal; text-align: center; }
-    .hero-point { width: 100%; }
-    .proof-item { grid-template-columns: 54px 1fr; }
-    .form-row,
-    .contact-actions { grid-template-columns: 1fr; }
-    .section { padding: 42px 0; }
-    .section.compact { padding-top: 28px; }
-    .final-cta { padding: 22px; }
+
+    .header-inner {
+      min-height: 68px;
+    }
+
+    .logo-icon { width: 30px; height: 30px; }
+    .logo-text { font-size: 21px; }
+    .nav-cta { min-height: 38px; padding: 0 14px; }
+
+    .hero {
+      padding-top: 30px;
+    }
+
+    .hero-copy {
+      margin-bottom: 28px;
+    }
+
+    .hero-stage {
+      margin-bottom: 18px;
+    }
+
+    .display { font-size: 34px; }
+    .section-display { font-size: 30px; }
+    .final-card h2 { font-size: 30px; }
+
+    .hero-rails {
+      inset: 144px 0 0;
+      gap: 20px;
+    }
+
+    .rail {
+      height: 22px;
+    }
+
+    .rail:nth-child(odd),
+    .rail:nth-child(even) {
+      width: calc(50% - 10px);
+    }
+
+    .stage-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .doc-card,
+    .report-card,
+    .stage-core,
+    .feature-intro,
+    .feature-card,
+    .workflow-panel,
+    .workflow-note,
+    .format-card,
+    .access-card,
+    .safety-card,
+    .contact-card,
+    .form-card,
+    .final-card {
+      border-radius: 24px;
+    }
+
+    .stage-core {
+      padding: 24px 20px 26px;
+    }
+
+    .stage-track {
+      grid-template-columns: 1fr;
+    }
+
+    .section-shell {
+      padding: 62px 0;
+    }
+
+    .signal-card,
+    .format-card,
+    .access-card,
+    .safety-card,
+    .contact-card,
+    .form-card,
+    .feature-intro,
+    .feature-card,
+    .workflow-panel,
+    .workflow-note,
+    .final-card {
+      padding: 22px;
+    }
+
+    .button {
+      width: 100%;
+    }
+
+    .hero-notes {
+      gap: 8px;
+    }
+
+    .note-pill {
+      width: 100%;
+      text-align: center;
+    }
+
+    .site-footer {
+      padding: 0 18px 24px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .rail::before,
+    .doc-left,
+    .doc-right,
+    .stage-core::before,
+    .report-card,
+    .workflow-panel::after {
+      animation: none;
+    }
+    .reveal {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
   }
 </style>
 </head>
 <body>
 <header class="site-header">
-  <a class="logo" href="/" aria-label="SverkAI">
-    <svg class="logo-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <rect x="47" y="8" width="6" height="16" rx="3" fill="white"/>
-      <rect x="10" y="22" width="80" height="7" rx="3.5" fill="white"/>
-      <rect x="48" y="86" width="4" height="6" rx="2" fill="white"/>
-      <rect x="36" y="88" width="28" height="5" rx="2.5" fill="white"/>
-      <path d="M20 29 L5 58 Q5 68 20 68 Q35 68 35 58 Z" fill="white" opacity=".9"/>
-      <path d="M80 29 L65 58 Q65 68 80 68 Q95 68 95 58 Z" fill="white" opacity=".9"/>
-      <line x1="20" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
-      <line x1="80" y1="29" x2="50" y2="25" stroke="white" stroke-width="3" stroke-linecap="round"/>
-      <line x1="50" y1="25" x2="50" y2="86" stroke="white" stroke-width="4" stroke-linecap="round"/>
-    </svg>
-    <span class="logo-text">Sverk<em>AI</em></span>
-  </a>
-  <nav class="nav" aria-label="Навигация">
-    <a href="#checks">Что проверяет</a>
-    <a href="#formats">Форматы</a>
-    <a href="#access">Доступ</a>
-    <a class="nav-cta" href="#request">Тест-доступ</a>
-  </nav>
+  <div class="header-inner">
+    <a class="logo" href="/" aria-label="SverkAI">
+      <svg class="logo-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="47" y="8" width="6" height="16" rx="3" fill="#0E1A13"/>
+        <rect x="10" y="22" width="80" height="7" rx="3.5" fill="#0E1A13"/>
+        <rect x="48" y="86" width="4" height="6" rx="2" fill="#0E1A13"/>
+        <rect x="36" y="88" width="28" height="5" rx="2.5" fill="#0E1A13"/>
+        <path d="M20 29 L5 58 Q5 68 20 68 Q35 68 35 58 Z" fill="#0E1A13" opacity=".92"/>
+        <path d="M80 29 L65 58 Q65 68 80 68 Q95 68 95 58 Z" fill="#0E1A13" opacity=".92"/>
+        <line x1="20" y1="29" x2="50" y2="25" stroke="#0E1A13" stroke-width="3" stroke-linecap="round"/>
+        <line x1="80" y1="29" x2="50" y2="25" stroke="#0E1A13" stroke-width="3" stroke-linecap="round"/>
+        <line x1="50" y1="25" x2="50" y2="86" stroke="#0E1A13" stroke-width="4" stroke-linecap="round"/>
+      </svg>
+      <span class="logo-text">Sverk<em>AI</em></span>
+    </a>
+    <nav class="nav" aria-label="Навигация">
+      <a href="#checks">Что проверяет</a>
+      <a href="#how">Как это работает</a>
+      <a href="#formats">Форматы</a>
+      <a href="#request">Тест-доступ</a>
+      <a class="nav-cta" href="/app">Попробовать</a>
+    </nav>
+  </div>
 </header>
 
 <main>
   <section class="hero">
-    <div class="hero-visual" aria-hidden="true">
-      <div class="hero-sheet one">
-        <div class="hero-sheet-title">акт организации</div>
-        <div class="sheet-row"><strong>Реализация 184</strong><span>12.04</span><span>48 600</span></div>
-        <div class="sheet-row"><strong>Оплата 721</strong><span>15.04</span><span>48 600</span></div>
-        <div class="sheet-row"><strong>Возврат 12</strong><span>18.04</span><span>7 200</span></div>
-        <div class="sheet-row"><strong>Сальдо</strong><span></span><span>0</span></div>
-      </div>
-      <div class="hero-sheet two">
-        <div class="hero-sheet-title">акт контрагента</div>
-        <div class="sheet-row"><strong>Реализация 184</strong><span>12.04</span><span>48 600</span></div>
-        <div class="sheet-row"><strong>Оплата 721</strong><span>16.04</span><span>48 600</span></div>
-        <div class="sheet-row"><strong>Корректировка</strong><span>18.04</span><span>7 200</span></div>
-        <div class="sheet-row"><strong>Сальдо</strong><span></span><span>7 200</span></div>
-      </div>
-      <div class="hero-result">
-        <strong>3 расхождения</strong>
-        <div class="result-row"><span>дата оплаты</span><span>проверить</span></div>
-        <div class="result-row"><span>направление операции</span><span>важно</span></div>
-        <div class="result-row"><span>сальдо</span><span>7 200 ₽</span></div>
-      </div>
-      <div class="hero-chip">Excel → разбор → отчет</div>
-    </div>
-    <div class="hero-inner">
-      <div class="eyebrow">MVP для сверки актов взаиморасчетов</div>
-      <h1>автоматическая сверка актов за несколько минут</h1>
-      <p class="lead">
-        Загрузите два акта сверки, получите список документов, сумм, дат и сальдо, которые нужно проверить специалисту.
-      </p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="/app">Попробовать Excel-сверку</a>
-        <a class="btn btn-secondary" href="#request">Получить тестовый доступ</a>
-      </div>
-      <div class="hero-points" aria-label="Ключевые возможности">
-        <span class="hero-point">Excel .xlsx и .xls — основной формат</span>
-        <span class="hero-point">PDF доступен после входа</span>
-        <span class="hero-point">История и Excel-экспорт с тестовым доступом</span>
-      </div>
-    </div>
-  </section>
-
-  <section class="section compact" aria-label="Кратко о сервисе">
-    <div class="proof-strip">
-      <div class="proof-item">
-        <div class="sverk-icon small" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M18 17h25l7 7v31H18V17Z"/>
-            <path class="fill-mint" d="M28 25h24l6 6v28H28V25Z"/>
-            <path class="stroke-main" d="M18 17h25l7 7v31H18V17ZM28 25h24l6 6v28H28V25Z"/>
-            <path class="stroke-soft" d="M43 17v8h7M52 25v7h6M26 35h15M26 42h12"/>
-          </svg>
+    <div class="section-shell">
+      <div class="hero-copy reveal is-visible">
+        <div class="eyebrow">MVP для сверки актов взаиморасчетов</div>
+        <h1 class="display">Автоматическая сверка актов взаиморасчетов <span class="accent">за несколько минут</span></h1>
+        <p class="lead">Загрузите два акта сверки и получите список мест, где нужно проверить документы, суммы, даты, направление операций и сальдо. SverkAI не заменяет специалиста, а помогает быстрее найти расхождения.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="/app">Попробовать Excel-сверку</a>
+          <a class="button button-secondary" href="#request">Получить тестовый доступ</a>
         </div>
-        <div>
+        <div class="hero-notes" aria-label="Ограничения и доступ">
+          <span class="note-pill">Excel .xlsx и .xls - основной и самый надежный формат</span>
+          <span class="note-pill">PDF доступен после входа с тестовым доступом</span>
+          <span class="note-pill">Качество разбора PDF зависит от выгрузки и текстового слоя</span>
+        </div>
+      </div>
+
+      <div class="hero-stage reveal is-visible" data-delay="1" aria-hidden="true">
+        <div class="hero-rails">
+          <div class="rail"></div>
+          <div class="rail"></div>
+          <div class="rail"></div>
+          <div class="rail"></div>
+        </div>
+        <div class="stage-grid">
+          <article class="doc-card doc-left">
+            <div class="doc-top">
+              <span class="doc-label">Акт организации</span>
+              <span class="doc-chip">Excel</span>
+            </div>
+            <div class="doc-row"><strong>Реализация 184</strong><span>12.04</span><span>48 600</span></div>
+            <div class="doc-row"><strong>Оплата 721</strong><span>15.04</span><span>48 600</span></div>
+            <div class="doc-row"><strong>Возврат 12</strong><span>18.04</span><span>7 200</span></div>
+            <div class="doc-row"><strong>Сальдо</strong><span></span><span>0</span></div>
+          </article>
+
+          <div class="stage-core">
+            <h2>Сверка</h2>
+            <p>Нормализация дат, сумм и номеров. Сопоставление операций и вывод проверяемых расхождений.</p>
+            <div class="stage-track">
+              <div class="stage-chip">Даты</div>
+              <div class="stage-chip">Суммы</div>
+              <div class="stage-chip">Документы</div>
+            </div>
+          </div>
+
+          <article class="doc-card doc-right">
+            <div class="doc-top">
+              <span class="doc-label">Акт контрагента</span>
+              <span class="doc-chip">Excel / PDF</span>
+            </div>
+            <div class="doc-row"><strong>Реализация 184</strong><span>12.04</span><span>48 600</span></div>
+            <div class="doc-row"><strong>Оплата 721</strong><span>16.04</span><span>48 600</span></div>
+            <div class="doc-row"><strong>Корректировка</strong><span>18.04</span><span>7 200</span></div>
+            <div class="doc-row"><strong>Сальдо</strong><span></span><span>7 200</span></div>
+          </article>
+
+          <article class="report-card">
+            <div class="report-top">
+              <strong>Найдено 3 расхождения</strong>
+              <span>Нужно проверить</span>
+            </div>
+            <div class="report-list">
+              <div class="report-item">
+                <i class="report-dot"></i>
+                <b>Дата оплаты отличается на 1 день</b>
+                <span>Проверить</span>
+              </div>
+              <div class="report-item">
+                <i class="report-dot"></i>
+                <b>Зеркальное направление операции</b>
+                <span>Важно</span>
+              </div>
+              <div class="report-item">
+                <i class="report-dot"></i>
+                <b>Расхождение сальдо на 7 200</b>
+                <span>Итог</span>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <div class="signal-strip">
+        <article class="signal-card reveal" data-delay="1">
           <strong>2 файла</strong>
-          <span class="muted">акт организации и акт контрагента</span>
-        </div>
+          <span>Акт организации и акт контрагента на входе в сверку.</span>
+        </article>
+        <article class="signal-card reveal" data-delay="2">
+          <strong>5 типов проверок</strong>
+          <span>Документы, суммы, даты, направление операций и сальдо.</span>
+        </article>
+        <article class="signal-card reveal" data-delay="3">
+          <strong>Гостевой режим</strong>
+          <span>Можно начать без входа с Excel, а затем запросить тестовый доступ.</span>
+        </article>
       </div>
-      <div class="proof-item">
-        <div class="sverk-icon small" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <rect class="fill-pale" x="18" y="14" width="36" height="44" rx="7"/>
-            <path class="fill-mint" d="M25 22h22v7H25z"/>
-            <rect class="stroke-main" x="18" y="14" width="36" height="44" rx="7"/>
-            <path class="stroke-main" d="M26 37l4 4 8-9"/>
-            <path class="stroke-soft" d="M28 49h17M25 26h22"/>
-          </svg>
-        </div>
-        <div>
-          <strong>1 список</strong>
-          <span class="muted">проверяемые расхождения вместо ручной сверки строк</span>
-        </div>
+    </div>
+  </section>
+
+  <section class="section section-dark" id="checks">
+    <div class="section-shell">
+      <div class="section-title reveal">
+        <div class="section-kicker">Что проверяет SverkAI</div>
+        <h2 class="section-display">Сервис быстро показывает, почему акт не сходится</h2>
+        <p class="section-copy">Это короткий рабочий слой между загрузкой файлов и ручной проверкой специалистом. Он помогает сразу увидеть, куда смотреть в первую очередь.</p>
       </div>
-      <div class="proof-item">
-        <div class="sverk-icon small" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M36 13l23 9v15c0 13-9 22-23 26-14-4-23-13-23-26V22l23-9Z"/>
-            <path class="fill-mint" d="M36 21l14 6v10c0 8-5 14-14 17-9-3-14-9-14-17V27l14-6Z"/>
-            <path class="stroke-main" d="M36 13l23 9v15c0 13-9 22-23 26-14-4-23-13-23-26V22l23-9Z"/>
-            <path class="stroke-main" d="M27 37l6 6 13-15"/>
-          </svg>
-        </div>
-        <div>
-          <strong>Честный MVP</strong>
-          <span class="muted">Excel надежнее PDF, результат требует проверки</span>
+
+      <div class="feature-board">
+        <article class="feature-intro reveal">
+          <h3>Вместо ручного поиска по длинной таблице вы сразу видите список проблемных мест</h3>
+          <p>Если расхождения разбросаны по нескольким договорам или у каждого контрагента свой формат акта, SverkAI сокращает время на первичный просмотр и группирует результат по понятным категориям.</p>
+          <div class="feature-quote">Лучший первый тест сейчас - два обезличенных Excel-файла. Так быстрее видно, где сервис уже помогает, а где еще нужен ручной разбор.</div>
+        </article>
+
+        <div class="feature-grid">
+          <article class="feature-card reveal" data-delay="1">
+            <div class="icon-token" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M8 14h8"/></svg>
+            </div>
+            <h3>Отсутствующие документы</h3>
+            <p>Документ есть у одной стороны, но не найден у другой.</p>
+          </article>
+          <article class="feature-card reveal" data-delay="2">
+            <div class="icon-token" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="6.5" ry="2.5"/><path d="M5.5 6v7c0 1.4 2.9 2.5 6.5 2.5s6.5-1.1 6.5-2.5V6"/><path d="M9 11h6"/></svg>
+            </div>
+            <h3>Отличия в суммах</h3>
+            <p>Похожая операция найдена, но сумма, дебет или кредит не совпадают.</p>
+          </article>
+          <article class="feature-card reveal" data-delay="3">
+            <div class="icon-token" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 9.5h17"/><path d="M8 3.5v3"/><path d="M16 3.5v3"/></svg>
+            </div>
+            <h3>Отличия в датах</h3>
+            <p>Операция похожа по смыслу, но проведена другой датой.</p>
+          </article>
+          <article class="feature-card reveal" data-delay="4">
+            <div class="icon-token" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 8h11l3 3-3 3H4"/><path d="M20 16H9l-3-3 3-3h11"/></svg>
+            </div>
+            <h3>Направление операций</h3>
+            <p>Зеркальные или неправильно направленные операции выносятся отдельно.</p>
+          </article>
+          <article class="feature-card reveal" data-delay="1">
+            <div class="icon-token" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 4v16"/><path d="M5 8h14"/><path d="M7 8 4 14h6z"/><path d="M17 8l-3 6h6z"/></svg>
+            </div>
+            <h3>Сальдо и обороты</h3>
+            <p>Сверка подсвечивает расхождение итогов и помогает понять его источник.</p>
+          </article>
+          <article class="feature-card reveal" data-delay="2">
+            <div class="icon-token" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 10h8"/><path d="M8 14h5"/><path d="M8 6.5h8"/></svg>
+            </div>
+            <h3>Приоритет проверки</h3>
+            <p>Результат собран в список проверяемых расхождений, а не в сырой поток строк.</p>
+          </article>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="section" id="checks">
-    <div class="section-head">
-      <div class="kicker">Что проверяет SverkAI</div>
-      <h2>Сервис подсвечивает типовые причины, почему акт не сходится</h2>
-      <p class="muted">Он не заменяет бухгалтера, а помогает быстрее найти места, где стоит сосредоточить внимание.</p>
-    </div>
-    <div class="check-grid">
-      <article class="check-card">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M18 18h27l8 8v27H18V18Z"/>
-            <path class="fill-mint" d="M27 27h29v27H27V27Z"/>
-            <path class="stroke-main" d="M18 18h27l8 8v27H18V18Z"/>
-            <path class="stroke-soft" d="M45 18v9h8M25 36h17M25 43h12"/>
-            <path class="stroke-main" d="M44 48l5 5 10-12"/>
-          </svg>
-        </div>
-        <h3>Отсутствующие документы</h3>
-        <p class="muted">Документ есть у одной стороны, но не найден у другой.</p>
-      </article>
-      <article class="check-card">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <ellipse class="fill-amber" cx="36" cy="22" rx="19" ry="8"/>
-            <path class="fill-pale" d="M17 22v21c0 4.5 8.5 8 19 8s19-3.5 19-8V22"/>
-            <ellipse class="stroke-main" cx="36" cy="22" rx="19" ry="8"/>
-            <path class="stroke-main" d="M17 22v21c0 4.5 8.5 8 19 8s19-3.5 19-8V22"/>
-            <path class="stroke-soft" d="M17 33c0 4.5 8.5 8 19 8s19-3.5 19-8M30 20h12M33 29h6"/>
-          </svg>
-        </div>
-        <h3>Отличия в суммах</h3>
-        <p class="muted">Похожий документ найден, но дебет, кредит или итоговая сумма отличаются.</p>
-      </article>
-      <article class="check-card">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <rect class="fill-blue" x="15" y="19" width="42" height="37" rx="7"/>
-            <path class="fill-mint" d="M15 29h42v8H15z"/>
-            <rect class="stroke-main" x="15" y="19" width="42" height="37" rx="7"/>
-            <path class="stroke-main" d="M15 30h42M26 15v8M46 15v8"/>
-            <path class="stroke-soft" d="M25 42h6M38 42h6M25 49h6M38 49h6"/>
-          </svg>
-        </div>
-        <h3>Отличия в датах</h3>
-        <p class="muted">Операция похожа по смыслу, но проведена другой датой.</p>
-      </article>
-      <article class="check-card">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M36 15v42M24 57h24"/>
-            <path class="stroke-main" d="M36 15v42M24 57h24M18 25h36"/>
-            <path class="stroke-main" d="M22 25l-9 18h18l-9-18ZM50 25l-9 18h18l-9-18Z"/>
-            <path class="fill-mint" d="M13 43h18c-1 5-4 8-9 8s-8-3-9-8ZM41 43h18c-1 5-4 8-9 8s-8-3-9-8Z"/>
-            <path class="stroke-soft" d="M22 25l14-4 14 4"/>
-          </svg>
-        </div>
-        <h3>Сальдо и обороты</h3>
-        <p class="muted">Сверка показывает расхождение итогов и помогает понять его источник.</p>
-      </article>
-      <article class="check-card">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M17 25h31l7 7-7 7H17V25Z"/>
-            <path class="fill-mint" d="M55 47H24l-7-7 7-7h31v14Z"/>
-            <path class="stroke-main" d="M17 25h31l7 7-7 7H17M55 47H24l-7-7 7-7h31"/>
-            <path class="stroke-soft" d="M27 32h14M31 40h14"/>
-          </svg>
-        </div>
-        <h3>Направление операций</h3>
-        <p class="muted">Зеркальные и неправильно направленные операции выносятся отдельно.</p>
-      </article>
-      <article class="check-card">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M20 17h32v39H20z"/>
-            <path class="fill-mint" d="M27 13h18v9H27z"/>
-            <path class="stroke-main" d="M20 17h32v39H20zM27 13h18v9H27z"/>
-            <path class="stroke-main" d="M28 33l4 4 8-9"/>
-            <path class="stroke-soft" d="M28 45h17M28 50h12"/>
-          </svg>
-        </div>
-        <h3>Приоритет проверки</h3>
-        <p class="muted">Расхождения группируются, чтобы сначала смотреть критичные позиции.</p>
-      </article>
-    </div>
-  </section>
-
-  <div class="work-band">
-    <section class="section" id="how">
-      <div class="section-head">
-        <div class="kicker">Как это работает</div>
-        <h2>От двух Excel-файлов до списка проверяемых расхождений</h2>
-        <p class="muted">Алгоритм читает структуру актов, приводит данные к единому виду и сопоставляет операции.</p>
+  <section class="section" id="how">
+    <div class="section-shell">
+      <div class="section-title reveal">
+        <div class="section-kicker">Как это работает</div>
+        <h2 class="section-display">Как машина читает акт сверки</h2>
+        <p class="section-copy">От двух Excel-файлов до списка проверяемых расхождений. Алгоритм читает структуру, приводит данные к сопоставимому виду и только потом ищет несовпадения.</p>
       </div>
-      <div class="steps">
-        <div class="step"><span class="step-num">1</span><strong>Загрузка</strong><span class="muted">Пользователь добавляет два акта сверки.</span></div>
-        <div class="step"><span class="step-num">2</span><strong>Разбор</strong><span class="muted">SverkAI ищет даты, номера, документы и суммы.</span></div>
-        <div class="step"><span class="step-num">3</span><strong>Нормализация</strong><span class="muted">Даты, суммы и номера приводятся к сопоставимому виду.</span></div>
-        <div class="step"><span class="step-num">4</span><strong>Сопоставление</strong><span class="muted">Операции сравниваются с учетом допусков по датам.</span></div>
-        <div class="step"><span class="step-num">5</span><strong>Отчет</strong><span class="muted">На экране появляется список расхождений и сводка.</span></div>
-      </div>
-    </section>
-  </div>
 
-  <section class="section" id="formats">
-    <div class="section-head">
-      <div class="kicker">Форматы</div>
-      <h2>Лучший результат сейчас дает Excel</h2>
-      <p class="muted">PDF поддерживается, но его качество сильно зависит от того, как файл был выгружен.</p>
-    </div>
-    <div class="two-col">
-      <article class="format-card primary">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M18 14h29l8 8v36H18V14Z"/>
-            <path class="fill-mint" d="M24 30h25v20H24V30Z"/>
-            <path class="stroke-main" d="M18 14h29l8 8v36H18V14Z"/>
-            <path class="stroke-soft" d="M47 14v9h8M24 36h25M24 43h25M32 30v20M41 30v20"/>
-            <path class="stroke-main" d="M24 30h25v20H24V30Z"/>
-          </svg>
-        </div>
-        <span class="tag green">Основной формат</span>
-        <h3>Excel .xlsx и .xls</h3>
-        <ul class="format-list">
-          <li>доступен в гостевом режиме без входа;</li>
-          <li>обычно сохраняет структуру таблицы лучше PDF;</li>
-          <li>подходит для первого теста продукта.</li>
-        </ul>
-      </article>
-      <article class="format-card caution">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-cream" d="M18 14h29l8 8v36H18V14Z"/>
-            <path class="fill-amber" d="M24 38h29v12H24z"/>
-            <path class="stroke-main" d="M18 14h29l8 8v36H18V14Z"/>
-            <path class="stroke-soft" d="M47 14v9h8M25 28h17"/>
-            <path class="stroke-main" d="M28 46h3M36 46h4M45 46h3"/>
-          </svg>
-        </div>
-        <span class="tag amber">После входа</span>
-        <h3>PDF-файлы</h3>
-        <ul class="format-list">
-          <li>доступны пользователям с выданным тестовым доступом;</li>
-          <li>зависят от качества выгрузки и текстового слоя;</li>
-          <li>если есть исходный Excel, лучше загрузить Excel.</li>
-        </ul>
-      </article>
-    </div>
-  </section>
-
-  <div class="access-band">
-    <section class="section" id="access">
-      <div class="section-head">
-        <div class="kicker">Гостевой режим и тестовый доступ</div>
-        <h2>Можно начать без входа, а расширенные функции открыть по тестовому доступу</h2>
-      </div>
-      <div class="two-col">
-        <article class="access-card">
-          <div class="sverk-icon" aria-hidden="true">
-            <svg viewBox="0 0 72 72" fill="none">
-              <path class="fill-pale" d="M17 42h38v15H17V42Z"/>
-              <path class="fill-mint" d="M26 16h20v24H26V16Z"/>
-              <path class="stroke-main" d="M17 42h38v15H17V42ZM26 16h20v24H26V16Z"/>
-              <path class="stroke-main" d="M36 25v18M28 35l8 8 8-8"/>
-              <path class="stroke-soft" d="M25 50h22"/>
-            </svg>
+      <div class="workflow-grid">
+        <article class="workflow-panel reveal">
+          <div class="workflow-steps">
+            <div class="workflow-step">
+              <span class="step-tag">1</span>
+              <div class="step-card">
+                <strong>Загрузка двух файлов</strong>
+                <span>Пользователь добавляет акт организации и акт контрагента.</span>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <span class="step-tag">2</span>
+              <div class="step-card">
+                <strong>Разбор структуры</strong>
+                <span>Сервис находит строки, даты, номера документов и суммы.</span>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <span class="step-tag">3</span>
+              <div class="step-card">
+                <strong>Нормализация</strong>
+                <span>Даты, суммы и номера приводятся к одному формату для сравнения.</span>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <span class="step-tag">4</span>
+              <div class="step-card">
+                <strong>Сопоставление операций</strong>
+                <span>Похожие строки сопоставляются с учетом допусков и направлений.</span>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <span class="step-tag">5</span>
+              <div class="step-card">
+                <strong>Отчет по расхождениям</strong>
+                <span>На экране появляется рабочий список того, что стоит проверить специалисту.</span>
+              </div>
+            </div>
           </div>
-          <span class="tag green">Гостевой режим</span>
-          <h3>Попробовать Excel-сверку</h3>
-          <ul class="access-list">
-            <li>можно загрузить два Excel-файла;</li>
-            <li>результат виден на сайте;</li>
-            <li>PDF, история и Excel-экспорт недоступны.</li>
+        </article>
+
+        <div class="workflow-aside">
+          <article class="workflow-note reveal" data-delay="1">
+            <small>Честное ограничение</small>
+            <h3>Excel сейчас работает надежнее PDF</h3>
+            <p>Если у вас есть исходный Excel, начинать стоит именно с него. PDF полезен как дополнительный сценарий для тестового доступа, но итог зависит от качества выгрузки и наличия корректного текстового слоя.</p>
+          </article>
+          <article class="workflow-note reveal" data-delay="2">
+            <small>Для первого теста</small>
+            <h3>Лучше взять обезличенные документы</h3>
+            <ul class="workflow-list">
+              <li>Сначала прогоните одну реальную, но обезличенную сверку.</li>
+              <li>Сравните скорость первичного разбора с текущим процессом.</li>
+              <li>Отметьте, какие типы актов встречаются у вас чаще всего.</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-dark" id="formats">
+    <div class="section-shell">
+      <div class="section-title reveal">
+        <div class="section-kicker">Форматы и доступ</div>
+        <h2 class="section-display">Начинать лучше с Excel, а расширенный режим открывать через тестовый доступ</h2>
+        <p class="section-copy">Лендинг честно объясняет текущий MVP: Excel - базовый рабочий сценарий, PDF - дополнительный и зависит от качества исходного файла.</p>
+      </div>
+
+      <div class="formats-grid">
+        <article class="format-card reveal">
+          <span class="pill pill-green">Основной формат</span>
+          <h3>Excel .xlsx и .xls</h3>
+          <p>Это лучший путь для первого знакомства с продуктом. Табличная структура обычно сохраняется корректнее, поэтому поиск расхождений получается стабильнее.</p>
+          <ul class="list-clean">
+            <li>Доступен в гостевом режиме без входа.</li>
+            <li>Лучше подходит для первой проверки кейса.</li>
+            <li>Обычно дает наиболее предсказуемый результат.</li>
           </ul>
         </article>
-        <article class="access-card">
-          <div class="sverk-icon" aria-hidden="true">
-            <svg viewBox="0 0 72 72" fill="none">
-              <rect class="fill-pale" x="18" y="31" width="36" height="26" rx="7"/>
-              <path class="fill-mint" d="M26 31v-7c0-7 4-12 10-12s10 5 10 12v7"/>
-              <rect class="stroke-main" x="18" y="31" width="36" height="26" rx="7"/>
-              <path class="stroke-main" d="M26 31v-7c0-7 4-12 10-12s10 5 10 12v7M36 42v6"/>
-              <path class="stroke-soft" d="M30 50h12"/>
-            </svg>
-          </div>
-          <span class="tag">Тестовый доступ</span>
-          <h3>Войти с выданным ключом</h3>
-          <ul class="access-list">
-            <li>доступна загрузка PDF-файлов;</li>
-            <li>сохраняется история сверок;</li>
-            <li>можно скачать результат в Excel.</li>
+
+        <article class="format-card reveal" data-delay="1">
+          <span class="pill pill-amber">После входа</span>
+          <h3>PDF-файлы</h3>
+          <p>Поддержка PDF доступна авторизованным пользователям с тестовым доступом. Это не режим “любой PDF без ошибок”, а рабочий сценарий, качество которого зависит от выгрузки.</p>
+          <ul class="list-clean">
+            <li>Нужен тестовый доступ для загрузки PDF.</li>
+            <li>Итог зависит от качества документа и текстового слоя.</li>
+            <li>Если исходный Excel есть, лучше загружать именно его.</li>
           </ul>
         </article>
       </div>
-    </section>
-  </div>
+
+      <div class="access-grid">
+        <article class="access-card reveal">
+          <strong>Гостевой режим</strong>
+          <p>Без входа можно попробовать сверку на двух Excel-файлах и посмотреть результат прямо на сайте.</p>
+          <div class="split-note">В гостевом режиме PDF, история сверок и Excel-экспорт недоступны.</div>
+        </article>
+        <article class="access-card reveal" data-delay="1">
+          <strong>Тестовый доступ</strong>
+          <p>После входа открываются PDF, история сверок и Excel-экспорт результата. Это удобный режим для более глубокого теста на ваших сценариях.</p>
+          <div class="split-note">Если вы хотите прогнать реальный кейс, лучше начать с обезличенных актов и короткой обратной связи по результату.</div>
+        </article>
+      </div>
+    </div>
+  </section>
 
   <section class="section" id="request">
-    <div class="section-head">
-      <div class="kicker">Для первых тестировщиков</div>
-      <h2>Бесплатно поможем проверить первые обезличенные акты</h2>
-      <p class="muted">Если вы регулярно сверяете взаиморасчеты, оставьте контакт или напишите напрямую. Важно протестировать сервис на реальных, но обезличенных Excel-файлах.</p>
-    </div>
-    <div class="request-grid">
-      <article class="request-copy">
-        <div class="sverk-icon" aria-hidden="true">
-          <svg viewBox="0 0 72 72" fill="none">
-            <path class="fill-pale" d="M20 16h32v42H20V16Z"/>
-            <path class="fill-mint" d="M27 12h18v10H27V12Z"/>
-            <circle class="fill-amber" cx="50" cy="48" r="9"/>
-            <path class="stroke-main" d="M20 16h32v42H20V16ZM27 12h18v10H27V12Z"/>
-            <path class="stroke-main" d="M29 34h14M29 41h10M45 48l3 3 7-8"/>
-            <path class="stroke-soft" d="M29 29h14"/>
-          </svg>
+    <div class="section-shell">
+      <div class="section-title reveal">
+        <div class="section-kicker">Гостевой режим и тестовый доступ</div>
+        <h2 class="section-display">Можно начать сразу в приложении, а для PDF и истории запросить доступ напрямую</h2>
+        <p class="section-copy">Если у вас есть одна-две реальные сверки, мы можем быстро пройти путь от первого теста до обратной связи без лишних созвонов и длинного онбординга.</p>
+      </div>
+
+      <div class="request-grid">
+        <div class="stack">
+          <article class="safety-card reveal">
+            <span class="tagline">Безопасность и дисклеймер</span>
+            <h3>Для первого теста лучше использовать обезличенные документы</h3>
+            <p>SverkAI помогает быстрее найти вероятные расхождения, но итоговый вывод по акту все равно должен проверять специалист.</p>
+            <ul>
+              <li>Не загружайте лишние персональные или коммерчески чувствительные данные для первого теста.</li>
+              <li>Сверяйте результат перед отправкой контрагенту или внутренним согласованием.</li>
+              <li>Если нужно, сначала прогоните один кейс в гостевом Excel-режиме.</li>
+            </ul>
+          </article>
+
+          <article class="contact-card reveal" data-delay="1">
+            <span class="tagline">Контакты для теста</span>
+            <h3>Если хотите проверить свой кейс, можно написать напрямую</h3>
+            <p>Быстрее всего помогает короткое сообщение: чем вы сверяете акты сейчас, какой формат документов встречается чаще и что именно неудобно в текущем процессе.</p>
+            <ul>
+              <li>Для первого теста достаточно двух обезличенных Excel-актов.</li>
+              <li>Если нужен PDF, откроем тестовый доступ и договоримся о формате проверки.</li>
+            </ul>
+            <div class="contact-links" aria-label="Контакты SverkAI">
+              <a class="contact-link primary" href="https://t.me/epohamm" target="_blank" rel="noopener">Telegram</a>
+              <a class="contact-link" href="mailto:alexander.anti.99@gmail.com">Email</a>
+              <a class="contact-link" href="https://max.ru/u/f9LHodD0cOI4hGLCegY-bGp2WPVjXJYxG8-wzly_UZ4pBDyXEgtUwY0toUU" target="_blank" rel="noopener">MAX</a>
+              <a class="contact-link" href="https://vk.com/adresstranichkii" target="_blank" rel="noopener">VK</a>
+            </div>
+          </article>
         </div>
-        <span class="tag green">Как протестировать</span>
-        <h3>Нужны два акта сверки и 10 минут обратной связи</h3>
-        <p class="muted">Лучше начать с Excel: так проще понять, где SverkAI уже экономит время, а где нужен ручной разбор.</p>
-        <ol class="request-steps">
-          <li><span>1</span><div>Подготовьте два обезличенных Excel-акта: от организации и контрагента.</div></li>
-          <li><span>2</span><div>Попробуйте гостевую сверку или запросите тестовый доступ для PDF, истории и экспорта.</div></li>
-          <li><span>3</span><div>Напишите, что нашлось, что было непонятно и какой формат актов встречается чаще всего.</div></li>
-        </ol>
-        <div class="contact-actions" aria-label="Контакты для тестового доступа">
-          <a class="contact-link primary" href="https://t.me/epohamm" target="_blank" rel="noopener">Telegram</a>
-          <a class="contact-link" href="mailto:alexander.anti.99@gmail.com">Email</a>
-          <a class="contact-link" href="https://max.ru/u/f9LHodD0cOI4hGLCegY-bGp2WPVjXJYxG8-wzly_UZ4pBDyXEgtUwY0toUU" target="_blank" rel="noopener">MAX</a>
-          <a class="contact-link" href="https://vk.com/adresstranichkii" target="_blank" rel="noopener">VK</a>
+
+        <article class="form-card reveal" data-delay="2">
+          <span class="tagline">Заявка на тест</span>
+          <h3>Оставьте контакт и опишите ваш сценарий сверки</h3>
+          <p class="form-hint">Форма соберет письмо на alexander.anti.99@gmail.com. Файлы прикладывать не нужно: сначала договоримся о безопасном тесте.</p>
+          <form id="lead-form">
+            <div class="form-row">
+              <label>Имя
+                <input type="text" name="name" autocomplete="name" placeholder="Как к вам обращаться" required>
+              </label>
+              <label>Роль
+                <input type="text" name="role" placeholder="Бухгалтер, финдиректор, 1С..." required>
+              </label>
+            </div>
+            <div class="form-row">
+              <label>Контакт
+                <input type="text" name="contact" autocomplete="email" placeholder="Email или Telegram" required>
+              </label>
+              <label>Формат актов
+                <select name="format">
+                  <option value="Excel">Excel .xlsx/.xls</option>
+                  <option value="Excel и PDF">Excel и PDF</option>
+                  <option value="PDF">В основном PDF</option>
+                  <option value="Пока не знаю">Пока не знаю</option>
+                </select>
+              </label>
+            </div>
+            <label>Что хотите проверить
+              <textarea name="details" placeholder="Например: сверяем несколько договоров, часто расходятся суммы и сальдо, у контрагентов разные формы актов"></textarea>
+            </label>
+            <button class="button button-primary" type="submit">Сформировать заявку</button>
+            <p class="form-status" id="lead-status" aria-live="polite"></p>
+          </form>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="final-band">
+    <div class="section-shell">
+      <article class="final-card reveal">
+        <h2>Готовы проверить два акта и быстро увидеть, где расходятся данные?</h2>
+        <p>Начните с Excel-файлов в гостевом режиме или запросите тестовый доступ для PDF, истории и Excel-экспорта результата.</p>
+        <div class="final-actions">
+          <a class="button button-primary" href="/app">Открыть SverkAI</a>
+          <a class="button button-secondary" href="https://t.me/epohamm" target="_blank" rel="noopener">Написать в Telegram</a>
         </div>
       </article>
-      <form class="lead-form" id="lead-form">
-        <h3>Заявка на тест</h3>
-        <p class="form-hint">Форма сформирует письмо на alexander.anti.99@gmail.com. Файлы прикладывать не нужно: сначала договоримся о безопасном тесте.</p>
-        <div class="form-row">
-          <label>Имя
-            <input type="text" name="name" autocomplete="name" placeholder="Как к вам обращаться" required>
-          </label>
-          <label>Роль
-            <input type="text" name="role" placeholder="Бухгалтер, финдиректор, 1С..." required>
-          </label>
-        </div>
-        <div class="form-row">
-          <label>Контакт
-            <input type="text" name="contact" autocomplete="email" placeholder="Email или Telegram" required>
-          </label>
-          <label>Формат актов
-            <select name="format">
-              <option value="Excel">Excel .xlsx/.xls</option>
-              <option value="Excel и PDF">Excel и PDF</option>
-              <option value="PDF">В основном PDF</option>
-              <option value="Не знаю">Пока не знаю</option>
-            </select>
-          </label>
-        </div>
-        <label>Что хотите проверить
-          <textarea name="details" placeholder="Например: сверяем 10-20 актов в месяц, часто не сходятся суммы и сальдо"></textarea>
-        </label>
-        <button class="btn btn-primary" type="submit">Сформировать заявку</button>
-        <div class="form-status" id="lead-status" aria-live="polite"></div>
-      </form>
-    </div>
-  </section>
-
-  <section class="section" id="safety">
-    <article class="note-card">
-      <div>
-        <div class="kicker">Безопасность и проверка</div>
-        <h2>Для первого теста лучше использовать обезличенные документы</h2>
-        <p class="muted">SverkAI помогает быстрее найти вероятные расхождения, но итоговый вывод по акту должен проверять ответственный специалист.</p>
-      </div>
-      <ul class="note-list">
-        <li>Не загружайте лишние персональные или коммерчески чувствительные данные для первого знакомства.</li>
-        <li>Проверяйте итоговый отчет перед отправкой контрагенту или внутренним согласованием.</li>
-      </ul>
-    </article>
-  </section>
-
-  <section class="section">
-    <div class="final-cta">
-      <div>
-        <h2>Готовы проверить два акта?</h2>
-        <p class="muted">Начните с Excel-файлов в гостевом режиме или войдите с тестовым доступом для PDF, истории и экспорта.</p>
-      </div>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="/app">Открыть SverkAI</a>
-        <a class="btn btn-light" href="https://t.me/epohamm" target="_blank" rel="noopener">Написать в Telegram</a>
-      </div>
     </div>
   </section>
 </main>
 
 <footer class="site-footer">
-  SverkAI — сервис для ускорения сверки актов взаиморасчетов. Результаты требуют профессиональной проверки.
+  SverkAI - сервис для ускорения сверки актов взаиморасчетов. Результаты требуют профессиональной проверки специалистом.
 </footer>
+
 <script>
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const revealNodes = document.querySelectorAll('.reveal:not(.is-visible)');
+  const revealAll = () => revealNodes.forEach((node) => node.classList.add('is-visible'));
+
+  if (!prefersReducedMotion && 'IntersectionObserver' in window && revealNodes.length) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('is-visible');
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.14 });
+
+    revealNodes.forEach((node) => observer.observe(node));
+    window.setTimeout(revealAll, 1200);
+  } else {
+    revealAll();
+  }
+
   const leadForm = document.getElementById('lead-form');
   const leadStatus = document.getElementById('lead-status');
-  if (leadForm) {
+
+  if (leadForm && leadStatus) {
     leadForm.addEventListener('submit', async (event) => {
       event.preventDefault();
+
       const data = Object.fromEntries(new FormData(leadForm).entries());
       const subject = 'Заявка на тестовый доступ SverkAI';
       const body = [
@@ -1194,14 +1942,17 @@
       ].join('\n');
 
       try {
-        await navigator.clipboard?.writeText(body);
-        leadStatus.textContent = 'Текст заявки скопирован. Сейчас откроется письмо.';
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(body);
+          leadStatus.textContent = 'Текст заявки скопирован. Сейчас откроется письмо.';
+        } else {
+          leadStatus.textContent = 'Сейчас откроется письмо с заявкой.';
+        }
       } catch (_) {
         leadStatus.textContent = 'Сейчас откроется письмо с заявкой.';
       }
 
-      const mailto = `mailto:alexander.anti.99@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      window.location.href = mailto;
+      window.location.href = `mailto:alexander.anti.99@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     });
   }
 </script>
