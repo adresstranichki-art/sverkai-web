@@ -222,6 +222,14 @@ class ExpertReconciliationTests(unittest.TestCase):
 
     def test_report_totals_are_derived_from_discrepancies(self):
         df1, df2 = self._frames()
+        df1.loc[len(df1)] = {
+            'date': pd.Timestamp('2026-02-09'),
+            'date_str': '09.02.2026',
+            'document': 'Adjustment 88',
+            'debit': 11845.0,
+            'credit': None,
+            'raw_row': 33,
+        }
         report = _valid_report()
         report.pop('totals')
         report['discrepancies'].append({
@@ -230,7 +238,7 @@ class ExpertReconciliationTests(unittest.TestCase):
             'influence': -11845.0,
             'reason': 'Нет зеркальной операции.',
             'confidence': 'high',
-            'evidence': [{'side': 'doc1', 'row_id': 'd1:r11'}],
+            'evidence': [{'side': 'doc1', 'row_id': 'd1:r33'}],
         })
 
         result = run_independent_expert_analysis(
@@ -263,6 +271,36 @@ class ExpertReconciliationTests(unittest.TestCase):
             'period_movement': -29045.0,
             'closing_difference': -32588.0,
             'formula': '-3 543,00 + -29 045,00 = -32 588,00',
+        })
+
+    def test_confirmed_missing_with_mirror_row_is_downgraded_to_date_pair(self):
+        df1, df2 = self._frames()
+        report = _valid_report([{'side': 'doc1', 'row_id': 'd1:r11'}])
+        report.pop('balances')
+        report.pop('totals')
+        report['discrepancies'][0].update({
+            'category': 'confirmed_missing',
+            'influence': 7070.0,
+            'reason': 'AI ошибочно решил, что пары нет.',
+        })
+
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+        )
+
+        item = result['report']['discrepancies'][0]
+        self.assertEqual(item['category'], 'likely_date_pair')
+        self.assertEqual(item['influence'], 0.0)
+        self.assertEqual(
+            {source['side'] for source in item['resolved_evidence']},
+            {'doc1', 'doc2'},
+        )
+        self.assertEqual(result['report']['totals'], {
+            'confirmed_count': 0,
+            'confirmed_amount': 0.0,
+            'review_count': 1,
         })
 
     def test_token_limit_returns_a_specific_failure(self):

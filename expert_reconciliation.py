@@ -381,6 +381,92 @@ def _derive_report_totals(report: dict) -> dict:
     }
 
 
+def _document_family(value: Any) -> str:
+    text = _normalized_document(value)
+    if 'корректиров' in text and ('приход' in text or 'продаж' in text):
+        return 'adjustment'
+    if 'оплат' in text or 'платеж' in text:
+        return 'payment'
+    if 'приход' in text or 'продаж' in text or 'поставк' in text:
+        return 'delivery'
+    return text
+
+
+def _date_distance_days(left: Any, right: Any) -> int | None:
+    try:
+        if not left or not right:
+            return None
+        return abs((pd.to_datetime(left, dayfirst=True) - pd.to_datetime(right, dayfirst=True)).days)
+    except Exception:
+        return None
+
+
+def _mirror_row(source: dict, row_index: dict[tuple[str, str], dict]) -> dict | None:
+    source_amount = _number(source.get('amount'))
+    if source_amount is None:
+        return None
+    source_side = source.get('side')
+    opposite = 'doc2' if source_side == 'doc1' else 'doc1'
+    family = _document_family(source.get('document'))
+    candidates = []
+    for (side, _), row in row_index.items():
+        if side != opposite:
+            continue
+        amount = _number(row.get('amount'))
+        if amount is None or abs(abs(amount) - abs(source_amount)) > 0.01:
+            continue
+        if family and _document_family(row.get('document')) != family:
+            continue
+        distance = _date_distance_days(source.get('date'), row.get('date'))
+        if distance is not None and distance > 120:
+            continue
+        candidates.append((distance if distance is not None else 10_000, row))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], str(item[1].get('row_id'))))
+    return candidates[0][1]
+
+
+def _downgrade_false_confirmed_missing(
+    report: dict,
+    row_index: dict[tuple[str, str], dict],
+) -> None:
+    for item in report.get('discrepancies') or []:
+        if item.get('category') != 'confirmed_missing':
+            continue
+        sources = item.get('resolved_evidence') or []
+        if not sources:
+            continue
+        mirrors = []
+        for source in sources:
+            mirror = _mirror_row(source, row_index)
+            if mirror is None:
+                mirrors = []
+                break
+            mirrors.append(mirror)
+        if not mirrors:
+            continue
+        existing = {(row.get('side'), row.get('row_id')) for row in sources}
+        for mirror in mirrors:
+            key = (mirror.get('side'), mirror.get('row_id'))
+            if key in existing:
+                continue
+            sources.append({
+                'side': mirror['side'],
+                'row_id': mirror['row_id'],
+                'raw_row': mirror['raw_row'],
+                'date': mirror.get('date'),
+                'document': mirror.get('document'),
+                'amount': mirror.get('amount'),
+            })
+            existing.add(key)
+        item['category'] = 'likely_date_pair'
+        item['influence'] = 0.0
+        item['reason'] = 'Найдена зеркальная строка с той же суммой в другом документе.'
+        item['resolved_evidence'] = sources
+        item['clickable'] = True
+
+
 def run_independent_expert_analysis(
     df1: pd.DataFrame,
     df2: pd.DataFrame,
@@ -432,6 +518,8 @@ def run_independent_expert_analysis(
         if not _validate_report_shape(report):
             return {'status': 'failed', 'error': 'invalid_report_schema'}
         resolved, _ = resolve_expert_evidence(report, row_index)
+        _downgrade_false_confirmed_missing(resolved['report'], row_index)
+        resolved['report']['totals'] = _derive_report_totals(resolved['report'])
         resolved['usage'] = usage_payload
         return resolved
     except Exception as exc:
