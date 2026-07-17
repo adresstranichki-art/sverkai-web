@@ -4,3 +4,4 @@ __pycache__/
 data/history*.json
 data/guest_usage.json
 local_cases/
+.worktrees/
