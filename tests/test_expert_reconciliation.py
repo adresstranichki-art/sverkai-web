@@ -239,6 +239,8 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertIn('doc1', system)
         self.assertIn('если find_date_diff=false', system)
         self.assertIn('любые выводы о разнице дат запрещены', system)
+        self.assertIn('conclusion — до 450 знаков', system)
+        self.assertIn('title — до 90, reason — до 140 знаков', system)
         ordered_categories = (
             'confirmed_missing', 'sign_difference', 'amount_difference',
             'opening_balance_bridge', 'likely_date_pair', 'ambiguous',
@@ -257,6 +259,10 @@ class ExpertReconciliationTests(unittest.TestCase):
         )
 
         system = messages.calls[0]['system'].lower()
+        self.assertIn(
+            'разрешены=confirmed_missing,sign_difference,opening_balance_bridge,ambiguous',
+            system,
+        )
         self.assertIn('запрещены=amount_difference,likely_date_pair', system)
         self.assertIn('запрещённые категории и их темы не упоминай ни в одном поле', system)
 

@@ -126,21 +126,29 @@ EXPERT_SYSTEM_PROMPT = (
     'opening_balance_bridge, likely_date_pair, ambiguous. В группе сортируй по убыванию модуля influence. '
     'Сначала перечисли все confirmed_missing; при лимите убирай ambiguous и likely_date_pair первыми. '
     'Дай не более 8 расхождений: confirmed_missing не группируй, остальные группируй. '
-    'Не выдумывай row_id: evidence содержит только id из входа. Пиши кратко, без Markdown.'
+    'Не выдумывай row_id: evidence содержит только id из входа. Без Markdown и повторов: '
+    'conclusion — до 450 знаков; title — до 90, reason — до 140 знаков.'
 )
 
 _SCOPE_CATEGORY_FLAGS = (
     ('confirmed_missing', 'find_missing'),
     ('sign_difference', 'find_sign_mismatch'),
     ('amount_difference', 'find_amount_diff'),
+    ('opening_balance_bridge', None),
     ('likely_date_pair', 'find_date_diff'),
+    ('ambiguous', None),
 )
 
 
 def _expert_scope_instruction(scope: dict) -> str:
-    enabled = [category for category, flag in _SCOPE_CATEGORY_FLAGS if scope.get(flag)]
-    disabled = [category for category, flag in _SCOPE_CATEGORY_FLAGS if not scope.get(flag)]
-    enabled.extend(['opening_balance_bridge', 'ambiguous'])
+    enabled = [
+        category for category, flag in _SCOPE_CATEGORY_FLAGS
+        if flag is None or scope.get(flag)
+    ]
+    disabled = [
+        category for category, flag in _SCOPE_CATEGORY_FLAGS
+        if flag is not None and not scope.get(flag)
+    ]
     return (
         f" Запуск: разрешены={','.join(enabled)}; запрещены={','.join(disabled) or 'нет'}. "
         'Запрещённые категории и их темы не упоминай ни в одном поле.'
