@@ -246,6 +246,20 @@ class ExpertReconciliationTests(unittest.TestCase):
         positions = [system.index(category) for category in ordered_categories]
         self.assertEqual(positions, sorted(positions))
 
+    def test_disabled_categories_are_repeated_in_the_run_instruction(self):
+        df1, df2 = self._frames()
+        messages = _FakeMessages(_valid_report())
+
+        run_independent_expert_analysis(
+            df1, df2, types.SimpleNamespace(messages=messages),
+            'claude-sonnet-test',
+            {'find_date_diff': False, 'find_amount_diff': False},
+        )
+
+        system = messages.calls[0]['system'].lower()
+        self.assertIn('запрещены=amount_difference,likely_date_pair', system)
+        self.assertIn('запрещённые категории и их темы не упоминай ни в одном поле', system)
+
     def test_report_is_sorted_by_category_then_absolute_influence(self):
         df1, df2 = self._frames()
         report = _valid_report()

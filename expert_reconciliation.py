@@ -129,6 +129,23 @@ EXPERT_SYSTEM_PROMPT = (
     'Не выдумывай row_id: evidence содержит только id из входа. Пиши кратко, без Markdown.'
 )
 
+_SCOPE_CATEGORY_FLAGS = (
+    ('confirmed_missing', 'find_missing'),
+    ('sign_difference', 'find_sign_mismatch'),
+    ('amount_difference', 'find_amount_diff'),
+    ('likely_date_pair', 'find_date_diff'),
+)
+
+
+def _expert_scope_instruction(scope: dict) -> str:
+    enabled = [category for category, flag in _SCOPE_CATEGORY_FLAGS if scope.get(flag)]
+    disabled = [category for category, flag in _SCOPE_CATEGORY_FLAGS if not scope.get(flag)]
+    enabled.extend(['opening_balance_bridge', 'ambiguous'])
+    return (
+        f" Запуск: разрешены={','.join(enabled)}; запрещены={','.join(disabled) or 'нет'}. "
+        'Запрещённые категории и их темы не упоминай ни в одном поле.'
+    )
+
 
 def _number(value: Any) -> float | None:
     try:
@@ -536,7 +553,7 @@ def run_independent_expert_analysis(
             model=model,
             max_tokens=2800,
             temperature=0,
-            system=EXPERT_SYSTEM_PROMPT,
+            system=EXPERT_SYSTEM_PROMPT + _expert_scope_instruction(scope),
             messages=[{
                 'role': 'user',
                 'content': json.dumps(
