@@ -266,6 +266,29 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertIn('запрещены=amount_difference,likely_date_pair', system)
         self.assertIn('запрещённые категории и их темы не упоминай ни в одном поле', system)
 
+    def test_prompt_uses_standard_user_facing_terms(self):
+        df1, df2 = self._frames()
+        messages = _FakeMessages(_valid_report())
+
+        run_independent_expert_analysis(
+            df1, df2, types.SimpleNamespace(messages=messages),
+            'claude-sonnet-test',
+        )
+
+        system = messages.calls[0]['system'].lower()
+        for term in (
+            'нет у контрагента',
+            'нет у организации',
+            'разница в суммах',
+            'разница в датах',
+            'зеркальный ксф',
+            'связь с начальным сальдо',
+            'требуется проверка',
+        ):
+            self.assertIn(term, system)
+        self.assertIn('conclusion, title и reason', system)
+        self.assertIn('не используй альтернативные названия типов', system)
+
     def test_report_is_sorted_by_category_then_absolute_influence(self):
         df1, df2 = self._frames()
         report = _valid_report()

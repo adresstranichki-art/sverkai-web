@@ -57,6 +57,38 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("result_mode==='balance_reason_analysis'", self.html)
         self.assertIn('balance_reason_analysis', self.html)
 
+    def test_discrepancy_table_has_no_document_column(self):
+        header = re.search(
+            r'<tr id="disc-thead-row">(?P<cells>.*?)</tr>',
+            self.html,
+            re.S,
+        )
+        self.assertIsNotNone(header)
+        self.assertEqual(header.group('cells').count('<th'), 7)
+        self.assertNotIn('>Документ</th>', header.group('cells'))
+        self.assertIn('colspan="7"', self.html)
+        self.assertNotIn('colspan="8"', self.html)
+
+    def test_expert_categories_are_normalized_to_programmatic_types(self):
+        self.assertIn('function standardTypeForExpertItem', self.html)
+        self.assertIn("sign_difference:'sign_mismatch'", self.html)
+        self.assertIn("amount_difference:'amount_diff'", self.html)
+        self.assertIn("likely_date_pair:'date_diff'", self.html)
+        self.assertIn("expert_category:item.category", self.html)
+        self.assertIn("return sides.has('doc2')?'missing_in_company':'missing_in_counterparty'", self.html)
+
+    def test_expert_discrepancy_filters_use_normalized_types(self):
+        self.assertIn('id="fb-opening_balance_bridge"', self.html)
+        self.assertIn('id="fb-ambiguous"', self.html)
+        self.assertIn('function syncExpertFilterButtons', self.html)
+        self.assertIn('activeFilters.has(r.dataset.type)', self.html)
+
+    def test_sign_label_and_opening_balance_highlight_are_standardized(self):
+        self.assertNotIn('Зеркальная КСФ', self.html)
+        self.assertIn('Зеркальный КСФ', self.html)
+        self.assertIn('Связь с начальным сальдо', self.html)
+        self.assertIn("item.category==='opening_balance_bridge'?'expert'", self.html)
+
 
 if __name__ == '__main__':
     unittest.main()

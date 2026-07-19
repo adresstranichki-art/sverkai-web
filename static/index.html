@@ -943,8 +943,9 @@
     <div class="legend">
       <span class="legend-item"><span class="legend-box" style="background:#ffc9c9"></span> Отсутствует</span>
       <span class="legend-item"><span class="legend-box" style="background:#ffe09a"></span> Разница в суммах</span>
-      <span class="legend-item"><span class="legend-box" style="background:#a8d4ff"></span> Зеркальная КСФ</span>
+      <span class="legend-item"><span class="legend-box" style="background:#a8d4ff"></span> Зеркальный КСФ</span>
       <span class="legend-item"><span class="legend-box" style="background:#e0e0e0"></span> Разница в датах</span>
+      <span class="legend-item"><span class="legend-box" style="background:#b9e2c5"></span> Связь с начальным сальдо</span>
     </div>
     <div class="compare-grid">
       <div class="table-panel">
@@ -971,8 +972,10 @@
       <button class="filter-btn" id="fb-missing_in_counterparty" onclick="toggleFilter('missing_in_counterparty',this)">Нет у контрагента</button>
       <button class="filter-btn" id="fb-missing_in_company"      onclick="toggleFilter('missing_in_company',this)">Нет у организации</button>
       <button class="filter-btn" id="fb-amount_diff"             onclick="toggleFilter('amount_diff',this)">Разница в суммах</button>
-      <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">Зеркальные КСФ</button>
+      <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">Зеркальный КСФ</button>
       <button class="filter-btn" id="fb-date_diff"               onclick="toggleFilter('date_diff',this)">Разница в датах</button>
+      <button class="filter-btn expert-filter" id="fb-opening_balance_bridge" onclick="toggleFilter('opening_balance_bridge',this)" hidden>Связь с начальным сальдо</button>
+      <button class="filter-btn expert-filter" id="fb-ambiguous" onclick="toggleFilter('ambiguous',this)" hidden>Требуется проверка</button>
     </div>
     <div class="disc-suggest-banner" id="disc-window-suggest" style="display:none">
       <div class="disc-suggest-head">Рекомендуем расширить окна допусков</div>
@@ -988,13 +991,12 @@
           <th style="width:44px">№</th>
           <th style="width:190px">Тип</th>
           <th style="width:95px">Дата</th>
-          <th style="width:280px">Документ</th>
           <th style="width:180px" id="disc-col-org">У организации</th>
           <th style="width:180px" id="disc-col-ctr">У контрагента</th>
           <th style="width:110px">Разница</th>
           <th style="width:90px">Уровень</th>
         </tr></thead>
-        <tbody id="disc-body"><tr><td colspan="8" class="empty-state">Выполните сверку для просмотра расхождений</td></tr></tbody>
+        <tbody id="disc-body"><tr><td colspan="7" class="empty-state">Выполните сверку для просмотра расхождений</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1069,7 +1071,7 @@
             <li><strong>Нет у контрагента</strong> — документ есть в акте организации, но не найден у второй стороны.</li>
             <li><strong>Нет у организации</strong> — документ есть у контрагента, но не найден в вашем акте.</li>
             <li><strong>Разница в суммах</strong> — документ похож на один и тот же, но сумма отличается.</li>
-            <li><strong>Зеркальная КСФ</strong> — операция отражена противоположным знаком и влияет на сальдо.</li>
+            <li><strong>Зеркальный КСФ</strong> — операция отражена противоположным знаком и влияет на сальдо.</li>
             <li><strong>Разница в датах</strong> — документ совпал по смыслу, но проведен другой датой.</li>
           </ul>
         </div>
@@ -2264,6 +2266,23 @@ function isIndependentExpertSummary(summary){
   return summary?.result_mode==='independent_expert'&&!!summary?.expert_report;
 }
 
+const EXPERT_TO_STANDARD_TYPE={
+  sign_difference:'sign_mismatch',
+  amount_difference:'amount_diff',
+  likely_date_pair:'date_diff',
+  opening_balance_bridge:'opening_balance_bridge',
+  ambiguous:'ambiguous',
+};
+
+function standardTypeForExpertItem(item,resolved=[]){
+  if(item?.category==='confirmed_missing'){
+    const sides=new Set(resolved.map(evidence=>evidence.side).filter(Boolean));
+    if(sides.size===1)return sides.has('doc2')?'missing_in_company':'missing_in_counterparty';
+    return 'ambiguous';
+  }
+  return EXPERT_TO_STANDARD_TYPE[item?.category]||'ambiguous';
+}
+
 function buildIndependentExpertDiscrepancies(summary){
   const report=summary?.expert_report||{};
   return (report.discrepancies||[]).map(item=>{
@@ -2282,8 +2301,12 @@ function buildIndependentExpertDiscrepancies(summary){
     const doc2=[item.doc2_document,item.doc2_date].filter(Boolean).join(' · ');
     const sourceDates=[...new Set(resolved.map(evidence=>evidence.date).filter(Boolean))];
     return {
-      type:item.category||'ambiguous',
+      type:standardTypeForExpertItem(item,resolved),
+      expert_category:item.category,
       severity:item.confidence||'low',
+      title:item.title||'Вывод экспертного анализа',
+      reason:item.reason||'',
+      influence:Number(item.influence||0),
       date:sourceDates.join(' ↔ ')||[item.doc1_date,item.doc2_date].filter(Boolean).join(' ↔ '),
       document_number:item.title||'Вывод экспертного анализа',
       description:item.reason||'',
@@ -2300,9 +2323,9 @@ function buildIndependentExpertDiscrepancies(summary){
 }
 
 function buildIndependentExpertHighlight(summary){
-  const h={missing1:[],missing2:[],amt_diff1:[],amt_diff2:[],sign1:[],sign2:[],date1:[],date2:[],technical1:[],technical2:[]};
+  const h={missing1:[],missing2:[],amt_diff1:[],amt_diff2:[],sign1:[],sign2:[],date1:[],date2:[],expert1:[],expert2:[],technical1:[],technical2:[]};
   (summary?.expert_report?.discrepancies||[]).forEach(item=>{
-    const target=item.category==='likely_date_pair'?'date':item.category==='sign_difference'?'sign':item.category==='amount_difference'?'amt_diff':'missing';
+    const target=item.category==='opening_balance_bridge'?'expert':item.category==='likely_date_pair'?'date':item.category==='sign_difference'?'sign':item.category==='amount_difference'?'amt_diff':'missing';
     (item.resolved_evidence||[]).forEach(evidence=>{
       if(evidence?.raw_row===undefined||evidence?.raw_row===null)return;
       const suffix=evidence.side==='doc1'?'1':evidence.side==='doc2'?'2':'';
@@ -2370,14 +2393,15 @@ const TYPE_ICONS={
   sign:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h8.6m0 0L9.7 3.3m1.9 1.9L9.7 7.1M13 10.8H4.4m0 0 1.9-1.9m-1.9 1.9 1.9 1.9" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   ok:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.2 8.2 3.1 3.1 6.5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
-const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальная КСФ','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok'],confirmed_missing:['Подтверждённое отсутствие','badge-red','missing'],likely_date_pair:['Вероятная пара по датам','badge-blue','date'],opening_balance_bridge:['Связь с начальным сальдо','badge-green','amount'],amount_difference:['Разница в суммах','badge-yellow','amount'],sign_difference:['Разница направления','badge-yellow','sign'],ambiguous:['Требуется проверка','badge-gray','amount']};
+const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальный КСФ','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok'],confirmed_missing:['Нет у контрагента / Нет у организации','badge-red','missing'],likely_date_pair:['Разница в датах','badge-blue','date'],opening_balance_bridge:['Связь с начальным сальдо','badge-green','amount'],amount_difference:['Разница в суммах','badge-yellow','amount'],sign_difference:['Зеркальный КСФ','badge-blue','sign'],ambiguous:['Требуется проверка','badge-gray','amount']};
 const EXPERT_CATEGORY_ORDER=['confirmed_missing','sign_difference','amount_difference','opening_balance_bridge','likely_date_pair','ambiguous'];
+const EXPERT_DISPLAY_TYPE_ORDER=['missing_in_counterparty','missing_in_company','sign_mismatch','amount_diff','opening_balance_bridge','date_diff','ambiguous'];
 const EXPERT_CATEGORY_LABELS={
-  confirmed_missing:'Подтверждённое отсутствие',
-  sign_difference:'Разница направления',
+  confirmed_missing:'Нет у контрагента / Нет у организации',
+  sign_difference:'Зеркальный КСФ',
   amount_difference:'Разница в суммах',
   opening_balance_bridge:'Связь с начальным сальдо',
-  likely_date_pair:'Вероятная пара по датам',
+  likely_date_pair:'Разница в датах',
   ambiguous:'Требуется проверка',
 };
 const SEV_MAP={high:['Высокий','badge-red'],medium:['Средний','badge-yellow'],low:['Низкий','badge-gray'],review:['К проверке','badge-gray'],info:['Справочно','badge-gray']};
@@ -2385,10 +2409,30 @@ function typeIcon(name){return TYPE_ICONS[name]||'';}
 function sortedExpertEntries(discs){
   const priority=new Map(EXPERT_CATEGORY_ORDER.map((type,index)=>[type,index]));
   return (discs||[]).map((d,index)=>({d,index})).sort((left,right)=>{
-    const category=(priority.get(left.d.type)??EXPERT_CATEGORY_ORDER.length)-(priority.get(right.d.type)??EXPERT_CATEGORY_ORDER.length);
+    const leftCategory=left.d.expert_category||left.d.type;
+    const rightCategory=right.d.expert_category||right.d.type;
+    const category=(priority.get(leftCategory)??EXPERT_CATEGORY_ORDER.length)-(priority.get(rightCategory)??EXPERT_CATEGORY_ORDER.length);
     if(category)return category;
+    const type=String(left.d.type||'').localeCompare(String(right.d.type||''),'ru');
+    if(type)return type;
     return Math.abs(Number(right.d.influence||0))-Math.abs(Number(left.d.influence||0));
   });
+}
+function syncExpertFilterButtons(discs=[]){
+  const available=new Set(discs.map(d=>d.type));
+  ['opening_balance_bridge','ambiguous'].forEach(type=>{
+    const btn=document.getElementById(`fb-${type}`);
+    if(!btn)return;
+    btn.hidden=!available.has(type);
+    if(btn.hidden){
+      btn.classList.remove('active');
+      activeFilters.delete(type);
+    }
+  });
+  if(activeFilters.size===0){
+    activeFilters.add('all');
+    document.getElementById('fb-all')?.classList.add('active');
+  }
 }
 function decorateTypeButtons(){
   Object.entries(TYPE_MAP).forEach(([type,meta])=>{
@@ -2405,8 +2449,9 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
   document.getElementById('disc-col-org').textContent=f1?`У организации (${sn(f1)})`:'У организации';
   document.getElementById('disc-col-ctr').textContent=f2?`У контрагента (${sn(f2)})`:'У контрагента';
   const body=document.getElementById('disc-body');
+  syncExpertFilterButtons(expertMode?(discs||[]):[]);
   if(expertMode&&(!discs||!discs.length)){
-    body.innerHTML=`<tr><td colspan="8" style="padding:32px;text-align:center">
+    body.innerHTML=`<tr><td colspan="7" style="padding:32px;text-align:center">
       <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px">
         <span style="font-size:18px;font-weight:700;color:var(--green)">Экспертные причины не выделены отдельными строками</span>
         <span style="font-size:13px;color:var(--muted)">Используйте вкладку «Сводка»: технический список расхождений свернут в анализ причин сальдо.</span>
@@ -2414,7 +2459,7 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
     return;
   }
   if(!discs||!discs.length){
-    body.innerHTML=`<tr><td colspan="8" style="padding:32px;text-align:center">
+    body.innerHTML=`<tr><td colspan="7" style="padding:32px;text-align:center">
       <div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px">
         <svg class="empty-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.2 8.2 3.1 3.1 6.5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span style="font-size:18px;font-weight:700;color:var(--green)">Расхождений не найдено</span>
@@ -2422,7 +2467,7 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
       </div></td></tr>`;
     return;
   }
-  const grouped=expertMode&&discs.some(d=>EXPERT_CATEGORY_ORDER.includes(d.type));
+  const grouped=expertMode&&discs.some(d=>d.expert_category);
   const entries=grouped?sortedExpertEntries(discs):discs.map((d,index)=>({d,index}));
   let previousType=null;
   body.innerHTML=entries.map(({d,index},rowIndex)=>{
@@ -2439,9 +2484,9 @@ function renderDiscrepancies(discs,f1='',f2='',expertMode=false){
     const warning=d.evidence_warning?`<span class="source-warning">${esc(d.evidence_warning)}</span>`:'';
     const rowTitle=canNavigate?'Показать строку на вкладке «Сравнение»':(d.evidence_warning||d.description||'');
     const heading=grouped&&d.type!==previousType
-      ?`<tr class="expert-group-heading" data-type="${d.type}"><td colspan="8">${esc(EXPERT_CATEGORY_LABELS[d.type]||tl)}</td></tr>`:'';
+      ?`<tr class="expert-group-heading" data-type="${d.type}"><td colspan="7">${esc(tl)}</td></tr>`:'';
     previousType=d.type;
-    return`${heading}<tr class="${tc}${canNavigate?' disc-clickable':''}" data-type="${d.type}" ${canNavigate?`data-disc-index="${index}"`:''} title="${esc(rowTitle)}"><td>${rowIndex+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span></td><td>${esc(d.date||'')}</td><td title="${esc(d.description||d.document_number||'')}">${esc(trunc(d.document_number||'',60))}${warning}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
+    return`${heading}<tr class="${tc}${canNavigate?' disc-clickable':''}" data-type="${d.type}" ${canNavigate?`data-disc-index="${index}"`:''} title="${esc(rowTitle)}"><td>${rowIndex+1}</td><td><span class="badge ${tb}">${typeIcon(ti)}<span>${tl}</span></span>${warning}</td><td>${esc(d.date||'')}</td><td>${esc(d.company_value||'')}</td><td>${esc(d.supplier_value||'')}</td><td>${esc(d.difference||'')}</td><td><span class="badge ${sb}">${sl}</span></td></tr>`;
   }).join('');
   body.querySelectorAll('tr[data-disc-index]').forEach(row=>{
     row.addEventListener('click',()=>openDiscrepancy(Number(row.dataset.discIndex)));
@@ -2635,9 +2680,9 @@ function renderBalanceReasonRows(items,{expandRows=false,emptyText='Нет от�
 
 function renderIndependentExpertGroups(items){
   const entries=sortedExpertEntries(items);
-  const groups=EXPERT_CATEGORY_ORDER.map(category=>({
-    category,
-    items:entries.filter(({d})=>d.type===category).map(({d})=>({
+  const groups=EXPERT_DISPLAY_TYPE_ORDER.map(type=>({
+    type,
+    items:entries.filter(({d})=>d.type===type).map(({d})=>({
       title:d.title,
       influence:d.influence,
       check:'Проверить первичные документы и отражение операции в обоих актах.',
@@ -2646,7 +2691,7 @@ function renderIndependentExpertGroups(items){
   })).filter(group=>group.items.length);
   if(!groups.length)return '<div class="balance-reason-check">Claude не выделил отдельных расхождений.</div>';
   return groups.map(group=>`<section class="expert-group">
-    <div class="expert-group-heading"><span>${esc(EXPERT_CATEGORY_LABELS[group.category]||group.category)}</span><span class="expert-group-count">${group.items.length}</span></div>
+    <div class="expert-group-heading"><span>${esc(TYPE_MAP[group.type]?.[0]||group.type)}</span><span class="expert-group-count">${group.items.length}</span></div>
     ${renderBalanceReasonRows(group.items)}
   </section>`).join('');
 }
@@ -2686,7 +2731,7 @@ function renderIndependentExpertAnalysis(s){
   explain.style.display='none';
   explain.innerHTML='';
   document.getElementById('balance-reasons-title').textContent='Расхождения по критичности';
-  document.getElementById('balance-reasons').innerHTML=renderIndependentExpertGroups(report.discrepancies||[]);
+  document.getElementById('balance-reasons').innerHTML=renderIndependentExpertGroups(buildIndependentExpertDiscrepancies(s));
   const neutralTitle=document.getElementById('balance-neutral-title');
   neutralTitle.style.display='none';
   document.getElementById('balance-neutral').innerHTML='';
