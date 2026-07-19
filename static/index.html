@@ -524,9 +524,6 @@
   .stat-card .value.dark.red { color: var(--red); }
   .stat-card .value.dark.warn { color: var(--yellow); }
   .stat-card .value.dark.green { color: var(--green-dk); }
-  .debt-card { background: linear-gradient(180deg, #edf7ef, #e9f3eb); border: 1px solid rgba(31,122,67,.35); border-radius: 14px; padding: 14px 18px; margin-bottom: 12px; box-shadow: 0 10px 18px rgba(31,122,67,.08); }
-  .debt-card .debt-label { font-size: 15px; font-weight: 700; color: var(--green-dk); }
-  .period-label { font-size: 12px; color: var(--muted); margin-top: 3px; }
   .summary-detail-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 12px; margin-bottom: 12px; }
   .summary-detail-card { background: #fff; border: 1px solid rgba(210,216,209,.9); border-radius: 14px; padding: 14px 16px; box-shadow: 0 8px 16px rgba(20,28,35,.04); }
   .summary-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
@@ -823,7 +820,7 @@
     .auth-area { padding-left: 8px; gap: 6px; }
     .auth-badge { padding: 4px 8px; font-size: 11px; }
     .btn-login, .btn-logout { padding: 7px 10px; }
-    .upload-card, .actions-col, .settings-bar, .table-panel, .tab-content, .summary-detail-card, .summary-suggest-card, .disc-suggest-banner, .debt-card, .ai-card { border-radius: 14px; }
+    .upload-card, .actions-col, .settings-bar, .table-panel, .tab-content, .summary-detail-card, .summary-suggest-card, .disc-suggest-banner, .ai-card { border-radius: 14px; }
     .actions-col { flex-direction: column; }
     .actions-col .btn { flex: 0 0 auto; }
     #btn-run, #btn-export, #btn-cancel { width: 100%; }
@@ -1005,7 +1002,6 @@
   <div class="tab-content" id="tab-summary">
     <div class="summary-pad">
       <div class="summary-grid" id="summary-cards"><div class="stat-card"><div class="label">Ожидание сверки</div><div class="value dark">—</div></div></div>
-      <div class="debt-card" id="debt-card" style="display:none"><div class="debt-label" id="debt-label"></div><div class="period-label" id="period-label"></div></div>
       <div class="summary-suggest-card" id="window-suggest-card" style="display:none">
         <div class="summary-suggest-title">Рекомендация по окнам</div>
         <div class="summary-suggest-text" id="window-suggest-text"></div>
@@ -2567,9 +2563,6 @@ function renderSummary(s,file1Name='',file2Name=''){
     <div class="stat-card"><div class="label">Критических</div><div class="value ${critical>0?'red':''}">${critical}</div></div>
     <div class="stat-card"><div class="label">Точных совпадений</div><div class="value">${s.exact_matches||0}</div></div>
     <div class="stat-card"><div class="label">Нечётких совпадений</div><div class="value">${s.fuzzy_count||0}</div></div>`;
-  const dc=document.getElementById('debt-card');
-  if(s.debt_label){dc.style.display='block';document.getElementById('debt-label').textContent=s.debt_label;document.getElementById('period-label').textContent=s.period?`Период: ${s.period}`:'';}
-  else dc.style.display='none';
   renderWindowSuggestion(s);
   renderExpertSuggestion(s);
   renderSummaryDetails(s,file1Name,file2Name);
