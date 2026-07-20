@@ -679,6 +679,70 @@ def _dedupe_expert_discrepancies(report: dict) -> None:
         ]
 
 
+FOLLOW_UP_LIMIT = 2
+
+FOLLOW_UP_NOTE = (
+    ' Это доанализ: перечисленные строки не были объяснены в первом ответе. '
+    'Проанализируй только переданные строки; прежние выводы не повторяй.'
+)
+
+
+def _follow_up_payload(payload: dict, missed: list[dict]) -> dict:
+    by_side: dict[str, list[dict]] = {'doc1': [], 'doc2': []}
+    for row in missed:
+        compact = {'id': row['row_id']}
+        if row.get('date'):
+            compact['date'] = row['date']
+        if row.get('document'):
+            compact['document'] = row['document']
+        if row.get('debit') is not None:
+            compact['debit'] = row['debit']
+        if row.get('credit') is not None:
+            compact['credit'] = row['credit']
+        by_side[row['side']].append(compact)
+    documents = []
+    for source in payload['documents']:
+        entry = {
+            'side': source['side'],
+            'display_name': source['display_name'],
+            'rows': by_side[source['side']],
+        }
+        for key in ('opening_balance', 'closing_balance', 'period'):
+            if key in source:
+                entry[key] = source[key]
+        documents.append(entry)
+    return {
+        'version': '1',
+        'follow_up': True,
+        'analysis_scope': payload['analysis_scope'],
+        'balance_comparison': payload['balance_comparison'],
+        'documents': documents,
+    }
+
+
+def _unexplained_placeholder(row: dict) -> dict:
+    title_parts = [
+        str(part) for part in (row.get('document'), row.get('date')) if part
+    ]
+    return {
+        'category': 'ambiguous',
+        'title': (' '.join(title_parts) or 'Операция без пары')[:90],
+        'influence': 0.0,
+        'reason': 'Строка не объяснена экспертным анализом.',
+        'confidence': 'low',
+        'evidence': [{'side': row['side'], 'row_id': row['row_id']}],
+        'resolved_evidence': [{
+            'side': row['side'],
+            'row_id': row['row_id'],
+            'raw_row': row['raw_row'],
+            'date': row.get('date'),
+            'document': row.get('document'),
+            'amount': row.get('amount'),
+        }],
+        'clickable': True,
+    }
+
+
 def run_independent_expert_analysis(
     df1: pd.DataFrame,
     df2: pd.DataFrame,
@@ -690,16 +754,18 @@ def run_independent_expert_analysis(
         return {'status': 'failed', 'error': 'api_key_required'}
     payload, row_index = build_expert_payload(df1, df2, settings)
     scope = payload['analysis_scope']
-    try:
+    total_usage = {'input_tokens': 0, 'output_tokens': 0}
+
+    def _request(request_payload: dict, system_suffix: str = '') -> tuple[dict | None, str | None]:
         message = client.messages.create(
             model=model,
             max_tokens=8000,
             temperature=0,
-            system=EXPERT_SYSTEM_PROMPT + _expert_scope_instruction(scope),
+            system=EXPERT_SYSTEM_PROMPT + _expert_scope_instruction(scope) + system_suffix,
             messages=[{
                 'role': 'user',
                 'content': json.dumps(
-                    payload, ensure_ascii=False, separators=(',', ':'),
+                    request_payload, ensure_ascii=False, separators=(',', ':'),
                 ),
             }],
             output_config={
@@ -710,35 +776,75 @@ def run_independent_expert_analysis(
             },
         )
         usage = getattr(message, 'usage', None)
-        usage_payload = {
-            'input_tokens': int(getattr(usage, 'input_tokens', 0) or 0),
-            'output_tokens': int(getattr(usage, 'output_tokens', 0) or 0),
-        }
+        total_usage['input_tokens'] += int(getattr(usage, 'input_tokens', 0) or 0)
+        total_usage['output_tokens'] += int(getattr(usage, 'output_tokens', 0) or 0)
         stop_reason = getattr(message, 'stop_reason', None)
         if stop_reason in ('max_tokens', 'refusal'):
-            return {
-                'status': 'failed',
-                'error': stop_reason,
-                'usage': usage_payload,
-            }
+            return None, stop_reason
         text = ''.join(
             getattr(block, 'text', '')
             for block in getattr(message, 'content', [])
             if getattr(block, 'text', '')
         )
-        report = json.loads(text)
-        report['balances'] = payload['balance_comparison']
-        report['totals'] = _derive_report_totals(report)
-        if not _validate_report_shape(report):
-            return {'status': 'failed', 'error': 'invalid_report_schema'}
+        return json.loads(text), None
+
+    def _postprocess(report: dict) -> dict:
         resolved, _ = resolve_expert_evidence(report, row_index)
         if scope['find_date_diff']:
             _downgrade_false_confirmed_missing(resolved['report'], row_index)
         _apply_expert_guards(resolved['report'], scope)
         _dedupe_expert_discrepancies(resolved['report'])
+        return resolved
+
+    try:
+        report, error = _request(payload)
+        if report is None:
+            return {'status': 'failed', 'error': error, 'usage': dict(total_usage)}
+        report['balances'] = payload['balance_comparison']
+        report['totals'] = _derive_report_totals(report)
+        if not _validate_report_shape(report):
+            return {'status': 'failed', 'error': 'invalid_report_schema'}
+        resolved = _postprocess(report)
+
+        follow_ups = 0
+        while follow_ups < FOLLOW_UP_LIMIT:
+            missed, _, _ = _find_unexplained_rows(row_index, resolved['report'], scope)
+            if not missed:
+                break
+            follow_report, _follow_error = _request(
+                _follow_up_payload(payload, missed), FOLLOW_UP_NOTE,
+            )
+            follow_ups += 1
+            if follow_report is None or not isinstance(
+                follow_report.get('discrepancies'), list,
+            ):
+                break
+            merged = resolved['report']
+            merged['discrepancies'] = (
+                (merged.get('discrepancies') or [])
+                + [
+                    item for item in follow_report['discrepancies']
+                    if isinstance(item, dict)
+                    and item.get('category') in EXPERT_CATEGORIES
+                ]
+            )
+            resolved = _postprocess(merged)
+
+        missed, matched, referenced = _find_unexplained_rows(
+            row_index, resolved['report'], scope,
+        )
+        for row in missed:
+            resolved['report']['discrepancies'].append(_unexplained_placeholder(row))
+            referenced.add((row['side'], row['row_id']))
+        resolved['report']['completeness'] = {
+            'rows_total': len(row_index),
+            'rows_matched': len(matched),
+            'rows_in_findings': len(referenced),
+            'follow_up_requests': follow_ups,
+        }
         _sort_report_discrepancies(resolved['report'])
         resolved['report']['totals'] = _derive_report_totals(resolved['report'])
-        resolved['usage'] = usage_payload
+        resolved['usage'] = dict(total_usage)
         return resolved
     except Exception as exc:
         return {'status': 'failed', 'error': type(exc).__name__}

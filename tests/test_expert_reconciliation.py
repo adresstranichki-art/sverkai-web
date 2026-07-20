@@ -61,6 +61,30 @@ class _FakeMessages:
         )
 
 
+class _SequencedMessages:
+    """Возвращает разные отчёты на последовательные вызовы."""
+
+    def __init__(self, reports):
+        self.reports = list(reports)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.reports:
+            report = self.reports.pop(0)
+        else:
+            report = {
+                'version': '1',
+                'conclusion': '-',
+                'confidence': 'low',
+                'discrepancies': [],
+            }
+        return types.SimpleNamespace(
+            content=[types.SimpleNamespace(text=json.dumps(report, ensure_ascii=False))],
+            usage=types.SimpleNamespace(input_tokens=100, output_tokens=50),
+        )
+
+
 class ExpertReconciliationTests(unittest.TestCase):
     def _frames(self):
         df1 = pd.DataFrame([{
@@ -593,6 +617,100 @@ class ExpertReconciliationTests(unittest.TestCase):
         ]
         missed, _, _ = _find_unexplained_rows(row_index, report, {'min_amount': 100.0})
         self.assertEqual(missed, [])
+
+    def test_missed_rows_trigger_follow_up_request(self):
+        df1, df2 = self._frames()
+        df1.loc[len(df1)] = {
+            'date': pd.Timestamp('2026-02-09'),
+            'date_str': '09.02.2026',
+            'document': 'Поставка 90',
+            'debit': 11845.0,
+            'credit': None,
+            'raw_row': 33,
+        }
+        first = _valid_report()
+        follow_up = {
+            'version': '1',
+            'conclusion': 'Доанализ.',
+            'confidence': 'high',
+            'discrepancies': [{
+                'category': 'confirmed_missing',
+                'title': 'Нет у контрагента',
+                'influence': -11845.0,
+                'reason': 'Операции нет во втором акте.',
+                'confidence': 'high',
+                'evidence': [{'side': 'doc1', 'row_id': 'd1:r33'}],
+            }],
+        }
+        messages = _SequencedMessages([first, follow_up])
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=messages),
+            'claude-sonnet-test',
+            {'date_window_payment': 60, 'date_window_delivery': 60},
+        )
+        self.assertEqual(len(messages.calls), 2)
+        follow_payload = json.loads(messages.calls[1]['messages'][0]['content'])
+        self.assertTrue(follow_payload.get('follow_up'))
+        self.assertEqual(
+            [row['id'] for row in follow_payload['documents'][0]['rows']],
+            ['d1:r33'],
+        )
+        categories = [item['category'] for item in result['report']['discrepancies']]
+        self.assertIn('confirmed_missing', categories)
+        completeness = result['report']['completeness']
+        self.assertEqual(completeness['rows_total'], 3)
+        self.assertEqual(completeness['follow_up_requests'], 1)
+        self.assertEqual(result['usage'], {'input_tokens': 200, 'output_tokens': 100})
+
+    def test_unexplained_rows_become_ambiguous_after_two_follow_ups(self):
+        df1, df2 = self._frames()
+        df1.loc[len(df1)] = {
+            'date': pd.Timestamp('2026-02-09'),
+            'date_str': '09.02.2026',
+            'document': 'Поставка 90',
+            'debit': 11845.0,
+            'credit': None,
+            'raw_row': 33,
+        }
+        # Claude трижды игнорирует строку r33
+        messages = _SequencedMessages([
+            _valid_report(), _valid_report(), _valid_report(),
+        ])
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=messages),
+            'claude-sonnet-test',
+            {'date_window_payment': 60, 'date_window_delivery': 60},
+        )
+        self.assertEqual(len(messages.calls), 3)  # 1 основной + 2 дозапроса
+        placeholders = [
+            item for item in result['report']['discrepancies']
+            if item['category'] == 'ambiguous'
+            and item['reason'] == 'Строка не объяснена экспертным анализом.'
+        ]
+        self.assertEqual(len(placeholders), 1)
+        self.assertEqual(
+            placeholders[0]['resolved_evidence'][0]['row_id'], 'd1:r33',
+        )
+        self.assertEqual(result['report']['completeness']['follow_up_requests'], 2)
+
+    def test_no_follow_up_when_all_rows_are_explained(self):
+        df1, df2 = self._frames()
+        messages = _SequencedMessages([_valid_report()])
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=messages),
+            'claude-sonnet-test',
+            {'date_window_payment': 60, 'date_window_delivery': 60},
+        )
+        self.assertEqual(len(messages.calls), 1)
+        self.assertEqual(result['report']['completeness'], {
+            'rows_total': 2,
+            'rows_matched': 2,
+            'rows_in_findings': 2,
+            'follow_up_requests': 0,
+        })
 
     def test_token_limit_returns_a_specific_failure(self):
         df1, df2 = self._frames()
