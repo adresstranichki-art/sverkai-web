@@ -1,8 +1,12 @@
-"""Independent Claude reconciliation contract without standard-matcher conclusions."""
+"""Expert reconciliation v2: deterministic matching + Claude verdicts.
+
+Программа считает — Claude судит. Сервер сам сопоставляет строки по суммам,
+считает влияния и окна дат; Claude получает только спорные места (пары с разными
+датами и строки без пары) и выносит вердикты по выданным сервером идентификаторам.
+"""
 
 from __future__ import annotations
 
-import copy
 import json
 import math
 import re
@@ -31,46 +35,61 @@ DEFAULT_EXPERT_SCOPE = {
     'min_amount': 0.0,
 }
 
-EXPERT_REPORT_SCHEMA = {
+PAIR_VERDICTS = ('date_pair', 'unrelated', 'needs_review')
+UNMATCHED_VERDICTS = ('missing', 'opening_balance_bridge', 'needs_review')
+CROSS_MATCH_CATEGORIES = ('amount_difference', 'sign_difference', 'date_pair')
+
+EXPERT_REVIEW_SCHEMA = {
     'type': 'object',
     'additionalProperties': False,
     'required': [
         'version', 'conclusion', 'confidence',
-        'discrepancies',
+        'pair_verdicts', 'unmatched_verdicts', 'cross_matches',
     ],
     'properties': {
-        'version': {'type': 'string', 'enum': ['1']},
-        'conclusion': {'type': 'string', 'maxLength': 400},
+        'version': {'type': 'string', 'enum': ['2']},
+        'conclusion': {'type': 'string', 'maxLength': 500},
         'confidence': {'type': 'string', 'enum': list(EXPERT_CONFIDENCE)},
-        'discrepancies': {
+        'pair_verdicts': {
+            'type': 'array',
+            'maxItems': 200,
+            'items': {
+                'type': 'object',
+                'additionalProperties': False,
+                'required': ['id', 'verdict', 'note'],
+                'properties': {
+                    'id': {'type': 'string', 'maxLength': 20},
+                    'verdict': {'type': 'string', 'enum': list(PAIR_VERDICTS)},
+                    'note': {'type': 'string', 'maxLength': 180},
+                },
+            },
+        },
+        'unmatched_verdicts': {
+            'type': 'array',
+            'maxItems': 200,
+            'items': {
+                'type': 'object',
+                'additionalProperties': False,
+                'required': ['id', 'verdict', 'note'],
+                'properties': {
+                    'id': {'type': 'string', 'maxLength': 20},
+                    'verdict': {'type': 'string', 'enum': list(UNMATCHED_VERDICTS)},
+                    'note': {'type': 'string', 'maxLength': 180},
+                },
+            },
+        },
+        'cross_matches': {
             'type': 'array',
             'maxItems': 100,
             'items': {
                 'type': 'object',
                 'additionalProperties': False,
-                'required': [
-                    'category', 'title', 'influence', 'reason',
-                    'confidence', 'evidence',
-                ],
+                'required': ['doc1_id', 'doc2_id', 'category', 'note'],
                 'properties': {
-                    'category': {'type': 'string', 'enum': list(EXPERT_CATEGORIES)},
-                    'title': {'type': 'string', 'maxLength': 120},
-                    'influence': {'type': 'number'},
-                    'reason': {'type': 'string', 'maxLength': 200},
-                    'confidence': {'type': 'string', 'enum': list(EXPERT_CONFIDENCE)},
-                    'evidence': {
-                        'type': 'array',
-                        'maxItems': 20,
-                        'items': {
-                            'type': 'object',
-                            'additionalProperties': False,
-                            'required': ['side', 'row_id'],
-                            'properties': {
-                                'side': {'type': 'string', 'enum': ['doc1', 'doc2']},
-                                'row_id': {'type': 'string', 'maxLength': 80},
-                            },
-                        },
-                    },
+                    'doc1_id': {'type': 'string', 'maxLength': 20},
+                    'doc2_id': {'type': 'string', 'maxLength': 20},
+                    'category': {'type': 'string', 'enum': list(CROSS_MATCH_CATEGORIES)},
+                    'note': {'type': 'string', 'maxLength': 180},
                 },
             },
         },
@@ -97,69 +116,28 @@ def _claude_output_schema(value: Any) -> Any:
     return value
 
 
-CLAUDE_EXPERT_REPORT_SCHEMA = _claude_output_schema(EXPERT_REPORT_SCHEMA)
+CLAUDE_EXPERT_REVIEW_SCHEMA = _claude_output_schema(EXPERT_REVIEW_SCHEMA)
 
 
 EXPERT_SYSTEM_PROMPT = (
-    'Ты бухгалтер-эксперт. Независимо сверь два акта только по переданным строкам. '
-    'balance_comparison уже рассчитан программой из исходных сальдо: используй его без пересчёта. '
-    'Порядок категорий: confirmed_missing, sign_difference, amount_difference, '
-    'opening_balance_bridge, likely_date_pair, ambiguous. '
-    'analysis_scope — обязательные границы анализа. При false не ищи и не возвращай: '
-    'find_missing→confirmed_missing, find_sign_mismatch→sign_difference, '
-    'find_amount_diff→amount_difference, find_date_diff→likely_date_pair. '
-    'Жёсткое правило: если find_date_diff=false, likely_date_pair и любые выводы о разнице дат запрещены '
-    'во всех полях ответа. Для остальных false-флагов так же запрещены их категории и упоминания. '
-    'Для likely_date_pair соблюдай date_window_payment для оплат и date_window_delivery для поставок. '
-    'Не возвращай расхождения меньше min_amount; opening_balance_bridge разрешён всегда. '
-    'В пользовательских conclusion, title и reason называй стороны только по documents[].display_name; '
-    'не пиши doc1, doc2, d1 или d2. Технические side и row_id используй только в evidence. '
-    'В conclusion, title и reason используй стандартные названия типов: '
-    'confirmed_missing с evidence только из doc1 — «Нет у контрагента», только из doc2 — «Нет у организации»; '
-    'sign_difference — «Зеркальный КСФ»; amount_difference — «Разница в суммах»; '
-    'likely_date_pair — «Разница в датах»; opening_balance_bridge — «Связь с начальным сальдо»; '
-    'ambiguous — «Требуется проверка». Не используй альтернативные названия типов в пользовательских полях. '
-    'Одинаковая операция с '
-    'другой датой — likely_date_pair. opening_balance_bridge — только операция, закрывающая '
-    'начальную разницу, а не само сальдо; укажи evidence операции. '
-    'likely_date_pair требует одинаковый модуль суммы и evidence из обоих документов; '
-    'иначе это не пара. '
-    'confirmed_missing ставь только при высокой уверенности. '
-    'Приход и продажа, корректировки прихода и продажи считай зеркальными типами; '
-    'сначала исключи пары по модулю суммы и смыслу документа. '
-    'Перечисли каждое расхождение отдельной записью со своим evidence; не объединяй операции. '
-    'Перечисли все найденные расхождения без ограничения количества. '
-    'Сортируй в порядке: confirmed_missing, sign_difference, amount_difference, '
-    'opening_balance_bridge, likely_date_pair, ambiguous; внутри — по убыванию модуля influence. '
-    'В conclusion не перечисляй отдельные расхождения — только общий вывод: сошлись ли сальдо '
-    'и общий характер расхождений. '
-    'Не выдумывай row_id: evidence содержит только id из входа. Без Markdown и повторов: '
-    'conclusion — до 450 знаков; title — до 90, reason — до 140 знаков.'
+    'Ты бухгалтер-эксперт по актам сверки. Программа уже сопоставила строки двух актов '
+    'по суммам и рассчитала сальдо (balance_comparison); числа не пересчитывай. '
+    'Твоя задача — вынести суждения по спорным местам и дать краткий общий вывод. '
+    'date_pairs — пары строк с равной суммой, но разными датами: verdict date_pair '
+    '(одна и та же операция, отражена разными датами), unrelated (разные операции), '
+    'needs_review (по данным не определить). '
+    'unmatched — строки без пары: verdict missing (операции действительно нет во втором акте), '
+    'opening_balance_bridge (операция закрывает разницу начального сальдо), needs_review. '
+    'cross_matches — укажи, если две строки из unmatched (по одной с каждой стороны) '
+    'на самом деле одна операция: category amount_difference (суммы близки, но различаются), '
+    'sign_difference (зеркальный КСФ: модуль суммы тот же, перепутана сторона), '
+    'date_pair (модули сумм равны). Такие строки не отмечай ещё и как missing. '
+    'Используй только выданные id; влияния и итоги считает программа. '
+    'В note и conclusion называй стороны только по display_name; не пиши doc1, doc2 или id. '
+    'conclusion — общий вывод: сошлись ли сальдо и каков характер расхождений, '
+    'без перечисления отдельных строк, до 450 знаков. Без Markdown. '
+    'note — кратко и по-русски, до 160 знаков.'
 )
-
-_SCOPE_CATEGORY_FLAGS = (
-    ('confirmed_missing', 'find_missing'),
-    ('sign_difference', 'find_sign_mismatch'),
-    ('amount_difference', 'find_amount_diff'),
-    ('opening_balance_bridge', None),
-    ('likely_date_pair', 'find_date_diff'),
-    ('ambiguous', None),
-)
-
-
-def _expert_scope_instruction(scope: dict) -> str:
-    enabled = [
-        category for category, flag in _SCOPE_CATEGORY_FLAGS
-        if flag is None or scope.get(flag)
-    ]
-    disabled = [
-        category for category, flag in _SCOPE_CATEGORY_FLAGS
-        if flag is not None and not scope.get(flag)
-    ]
-    return (
-        f" Запуск: разрешены={','.join(enabled)}; запрещены={','.join(disabled) or 'нет'}. "
-        'Запрещённые категории и их темы не упоминай ни в одном поле.'
-    )
 
 
 def _number(value: Any) -> float | None:
@@ -283,6 +261,7 @@ def build_expert_payload(
     df2: pd.DataFrame,
     settings: dict | None = None,
 ) -> tuple[dict, dict[tuple[str, str], dict]]:
+    """Collect rows of both documents with stable ids plus balance context."""
     documents = []
     row_index: dict[tuple[str, str], dict] = {}
     for side, prefix, df in (
@@ -344,97 +323,277 @@ def build_expert_payload(
             document_payload['source_name'] = source_name
         documents.append(document_payload)
     return {
-        'version': '1',
+        'version': '2',
         'analysis_scope': _normalize_expert_scope(settings),
         'balance_comparison': _balance_comparison(df1, df2),
         'documents': documents,
     }, row_index
 
 
-def _fallback_evidence(
-    discrepancy: dict,
-    side: str,
-    row_index: dict[tuple[str, str], dict],
-) -> dict | None:
-    expected_date = discrepancy.get(f'{side}_date')
-    expected_document = _normalized_document(discrepancy.get(f'{side}_document'))
-    expected_amount = _number(discrepancy.get(f'{side}_value'))
-    if expected_amount is None or not (expected_date or expected_document):
+def _document_family(value: Any) -> str:
+    text = _normalized_document(value)
+    if 'корректиров' in text and ('приход' in text or 'продаж' in text):
+        return 'adjustment'
+    if 'оплат' in text or 'платеж' in text:
+        return 'payment'
+    if 'приход' in text or 'продаж' in text or 'поставк' in text:
+        return 'delivery'
+    return text
+
+
+def _date_distance_days(left: Any, right: Any) -> int | None:
+    try:
+        if not left or not right:
+            return None
+        return abs((pd.to_datetime(left, dayfirst=True) - pd.to_datetime(right, dayfirst=True)).days)
+    except Exception:
         return None
-    candidates = []
-    for (candidate_side, _), row in row_index.items():
-        if candidate_side != side:
-            continue
-        if expected_date and row.get('date') != expected_date:
-            continue
-        amount = _number(row.get('amount'))
-        if amount is None or abs(abs(amount) - abs(expected_amount)) > 0.01:
-            continue
-        if expected_document and row.get('document_norm') != expected_document:
-            continue
-        candidates.append(row)
-    return candidates[0] if len(candidates) == 1 else None
 
 
-def resolve_expert_evidence(
-    report: dict,
+def _pair_window_days(scope: dict, family: str) -> int:
+    key = 'date_window_payment' if family == 'payment' else 'date_window_delivery'
+    try:
+        return max(0, int(scope.get(key, 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _row_influence(row: dict) -> float:
+    """Вклад строки в разницу конечного сальдо (контрагент − организация).
+
+    Формула одинакова для обеих сторон: кредит − дебет. Зеркально совпадающие
+    операции (дебет у одной стороны, кредит у другой) в сумме дают ноль.
+    """
+    credit = _number(row.get('credit')) or 0.0
+    debit = _number(row.get('debit')) or 0.0
+    return round(credit - debit, 2)
+
+
+def _match_rows(
     row_index: dict[tuple[str, str], dict],
-) -> tuple[dict, list[str]]:
-    resolved_report = copy.deepcopy(report)
-    warnings = []
-    for discrepancy in resolved_report.get('discrepancies', []):
-        resolved_rows = []
-        unresolved = 0
-        for evidence in discrepancy.get('evidence', []):
-            side = evidence.get('side')
-            row_id = evidence.get('row_id')
-            row = row_index.get((side, row_id))
-            if row is None and side in ('doc1', 'doc2'):
-                row = _fallback_evidence(discrepancy, side, row_index)
-            if row is None:
-                unresolved += 1
-                continue
-            resolved_rows.append({
-                'side': row['side'],
-                'row_id': row['row_id'],
-                'raw_row': row['raw_row'],
-                'date': row.get('date'),
-                'document': row.get('document'),
-                'amount': row.get('amount'),
-            })
-        discrepancy['resolved_evidence'] = resolved_rows
-        discrepancy['clickable'] = bool(resolved_rows)
-        if unresolved:
-            warnings.append('evidence_not_found')
-            discrepancy['evidence_warning'] = 'Источник не найден'
-    status = 'complete_with_warnings' if warnings else 'complete'
+) -> tuple[list[dict], list[dict]]:
+    """Greedy 1:1 matching by absolute amount; prefers same document family,
+    then minimal date distance. Returns (pairs, unmatched_rows)."""
+    rows: dict[str, list[dict]] = {'doc1': [], 'doc2': []}
+    for (side, _), row in row_index.items():
+        if _number(row.get('amount')) is not None:
+            rows[side].append(row)
+    for side in rows:
+        rows[side].sort(key=lambda row: (str(row.get('date') or ''), str(row['row_id'])))
+    buckets: dict[float, list[dict]] = {}
+    for row in rows['doc2']:
+        key = round(abs(_number(row['amount']) or 0.0), 2)
+        buckets.setdefault(key, []).append(row)
+    pairs: list[dict] = []
+    unmatched: list[dict] = []
+    used_doc2: set[str] = set()
+    for row1 in rows['doc1']:
+        key = round(abs(_number(row1['amount']) or 0.0), 2)
+        candidates = [
+            row for row in buckets.get(key, [])
+            if row['row_id'] not in used_doc2
+        ]
+        if not candidates:
+            unmatched.append(row1)
+            continue
+        family1 = _document_family(row1.get('document'))
+
+        def _rank(row2: dict) -> tuple:
+            distance = _date_distance_days(row1.get('date'), row2.get('date'))
+            return (
+                0 if _document_family(row2.get('document')) == family1 else 1,
+                distance if distance is not None else 10_000,
+                str(row2['row_id']),
+            )
+
+        best = min(candidates, key=_rank)
+        used_doc2.add(best['row_id'])
+        pairs.append({
+            'doc1': row1,
+            'doc2': best,
+            'days': _date_distance_days(row1.get('date'), best.get('date')),
+        })
+    for row2 in rows['doc2']:
+        if row2['row_id'] not in used_doc2:
+            unmatched.append(row2)
+    return pairs, unmatched
+
+
+def build_expert_review_state(
+    df1: pd.DataFrame,
+    df2: pd.DataFrame,
+    settings: dict | None = None,
+) -> dict:
+    """Deterministic matching stage: everything the review request and the final
+    report assembly need."""
+    payload, row_index = build_expert_payload(df1, df2, settings)
+    scope = payload['analysis_scope']
+    pairs, unmatched = _match_rows(row_index)
+    date_pairs = []
+    exact_count = 0
+    for pair in pairs:
+        if pair['days'] and pair['days'] > 0 and scope['find_date_diff']:
+            date_pairs.append(pair)
+        elif pair['days'] and pair['days'] > 0:
+            exact_count += 1  # поиск по датам выключен: пара считается совпавшей
+        else:
+            exact_count += 1
+    min_amount = scope['min_amount']
+    skipped_small = [
+        row for row in unmatched
+        if abs(_number(row.get('amount')) or 0.0) < min_amount
+    ]
+    unmatched = [
+        row for row in unmatched
+        if abs(_number(row.get('amount')) or 0.0) >= min_amount
+    ]
+    pair_items = {}
+    for index, pair in enumerate(date_pairs, start=1):
+        family = _document_family(pair['doc1'].get('document'))
+        window = _pair_window_days(scope, family)
+        pair_items[f'p{index}'] = {
+            **pair,
+            'id': f'p{index}',
+            'family': family,
+            'window': window,
+            'within_window': bool(
+                pair['days'] is not None and pair['days'] <= window
+            ),
+        }
+    unmatched_items = {}
+    for index, row in enumerate(unmatched, start=1):
+        unmatched_items[f'u{index}'] = {**row, 'id': f'u{index}'}
     return {
-        'status': status,
-        'report': resolved_report,
-        'warnings': list(dict.fromkeys(warnings)),
-    }, warnings
-
-
-def _validate_report_shape(report: Any) -> bool:
-    if not isinstance(report, dict):
-        return False
-    required = {
-        'version', 'conclusion', 'confidence', 'balances', 'totals',
-        'discrepancies',
+        'payload': payload,
+        'row_index': row_index,
+        'scope': scope,
+        'pair_items': pair_items,
+        'unmatched_items': unmatched_items,
+        'matched_row_count': 2 * (exact_count + len(date_pairs)),
+        'skipped_small_count': len(skipped_small),
     }
-    if not required.issubset(report):
+
+
+def _compact_row(row: dict) -> dict:
+    compact = {}
+    if row.get('date'):
+        compact['date'] = row['date']
+    if row.get('document'):
+        compact['document'] = row['document']
+    if row.get('debit') is not None:
+        compact['debit'] = row['debit']
+    if row.get('credit') is not None:
+        compact['credit'] = row['credit']
+    return compact
+
+
+def build_expert_review_request(state: dict) -> dict:
+    """Payload for the single Claude call: only questionable items."""
+    payload = state['payload']
+    return {
+        'version': '2',
+        'analysis_scope': state['scope'],
+        'balance_comparison': payload['balance_comparison'],
+        'documents': [
+            {
+                'side': document['side'],
+                'display_name': document['display_name'],
+                **{
+                    key: document[key]
+                    for key in ('opening_balance', 'closing_balance', 'period')
+                    if key in document
+                },
+            }
+            for document in payload['documents']
+        ],
+        'matched_rows': state['matched_row_count'],
+        'date_pairs': [
+            {
+                'id': item['id'],
+                'amount': round(abs(_number(item['doc1'].get('amount')) or 0.0), 2),
+                'days': item['days'],
+                'window': item['window'],
+                'within_window': item['within_window'],
+                'doc1': _compact_row(item['doc1']),
+                'doc2': _compact_row(item['doc2']),
+            }
+            for item in state['pair_items'].values()
+        ],
+        'unmatched': [
+            {'id': item['id'], 'side': item['side'], **_compact_row(item)}
+            for item in state['unmatched_items'].values()
+        ],
+    }
+
+
+def _validate_review(review: Any) -> bool:
+    if not isinstance(review, dict):
         return False
-    if report.get('confidence') not in EXPERT_CONFIDENCE:
+    if review.get('confidence') not in EXPERT_CONFIDENCE:
         return False
-    if not isinstance(report.get('discrepancies'), list):
+    if not isinstance(review.get('conclusion'), str):
         return False
-    return all(
-        isinstance(item, dict)
-        and item.get('category') in EXPERT_CATEGORIES
-        and item.get('confidence') in EXPERT_CONFIDENCE
-        and isinstance(item.get('evidence'), list)
-        for item in report['discrepancies']
-    )
+    for key, allowed, id_keys in (
+        ('pair_verdicts', PAIR_VERDICTS, ('id',)),
+        ('unmatched_verdicts', UNMATCHED_VERDICTS, ('id',)),
+        ('cross_matches', CROSS_MATCH_CATEGORIES, ('doc1_id', 'doc2_id')),
+    ):
+        items = review.get(key)
+        if not isinstance(items, list):
+            return False
+        for item in items:
+            if not isinstance(item, dict):
+                return False
+            value = item.get('verdict') if key != 'cross_matches' else item.get('category')
+            if value not in allowed:
+                return False
+            if not all(isinstance(item.get(id_key), str) for id_key in id_keys):
+                return False
+    return True
+
+
+def _resolved_row(row: dict) -> dict:
+    return {
+        'side': row['side'],
+        'row_id': row['row_id'],
+        'raw_row': row['raw_row'],
+        'date': row.get('date'),
+        'document': row.get('document'),
+        'amount': row.get('amount'),
+    }
+
+
+def _row_title(row: dict) -> str:
+    parts = [part for part in (row.get('document'), row.get('date')) if part]
+    return (' '.join(str(part) for part in parts) or 'Операция')[:120]
+
+
+def _pair_title(pair: dict) -> str:
+    left = _row_title(pair['doc1'])
+    right = _row_title(pair['doc2'])
+    return f'{left} ↔ {right}'[:160]
+
+
+def _make_discrepancy(
+    category: str,
+    title: str,
+    influence: float,
+    reason: str,
+    confidence: str,
+    rows: list[dict],
+) -> dict:
+    return {
+        'category': category,
+        'title': title,
+        'influence': round(influence, 2),
+        'reason': (reason or '')[:200],
+        'confidence': confidence if confidence in EXPERT_CONFIDENCE else 'medium',
+        'evidence': [
+            {'side': row['side'], 'row_id': row['row_id']} for row in rows
+        ],
+        'resolved_evidence': [_resolved_row(row) for row in rows],
+        'clickable': bool(rows),
+    }
 
 
 def _derive_report_totals(report: dict) -> dict:
@@ -466,280 +625,221 @@ def _sort_report_discrepancies(report: dict) -> None:
     ))
 
 
-def _document_family(value: Any) -> str:
-    text = _normalized_document(value)
-    if 'корректиров' in text and ('приход' in text or 'продаж' in text):
-        return 'adjustment'
-    if 'оплат' in text or 'платеж' in text:
-        return 'payment'
-    if 'приход' in text or 'продаж' in text or 'поставк' in text:
-        return 'delivery'
-    return text
+def _category_enabled(category: str, scope: dict) -> bool:
+    flags = {
+        'confirmed_missing': 'find_missing',
+        'amount_difference': 'find_amount_diff',
+        'sign_difference': 'find_sign_mismatch',
+        'likely_date_pair': 'find_date_diff',
+    }
+    flag = flags.get(category)
+    return True if flag is None else bool(scope.get(flag))
 
 
-def _date_distance_days(left: Any, right: Any) -> int | None:
-    try:
-        if not left or not right:
-            return None
-        return abs((pd.to_datetime(left, dayfirst=True) - pd.to_datetime(right, dayfirst=True)).days)
-    except Exception:
-        return None
+def _assemble_expert_report(state: dict, review: dict) -> dict:
+    scope = state['scope']
+    payload = state['payload']
+    guard_log: list[str] = []
+    pair_verdicts = {}
+    for item in review.get('pair_verdicts') or []:
+        if item['id'] in state['pair_items']:
+            pair_verdicts[item['id']] = item
+        else:
+            guard_log.append(f"unknown_pair_id:{item['id']}")
+    unmatched_verdicts = {}
+    for item in review.get('unmatched_verdicts') or []:
+        if item['id'] in state['unmatched_items']:
+            unmatched_verdicts[item['id']] = item
+        else:
+            guard_log.append(f"unknown_unmatched_id:{item['id']}")
 
+    discrepancies: list[dict] = []
+    consumed_unmatched: set[str] = set()
 
-def _pair_window_days(scope: dict, family: str) -> int:
-    key = 'date_window_payment' if family == 'payment' else 'date_window_delivery'
-    try:
-        return max(0, int(scope.get(key, 0)))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _guard_reason(item: dict, note: str) -> str:
-    base = str(item.get('reason') or '').strip()
-    note_text = f'Проверка: {note}.'
-    if not base:
-        return note_text
-    return f"{base[:100].rstrip('.')}. {note_text}"[:200]
-
-
-def _apply_expert_guards(report: dict, scope: dict) -> None:
-    log = report.setdefault('guard_log', [])
-    for item in report.get('discrepancies') or []:
-        rows = item.get('resolved_evidence') or []
-        category = item.get('category')
-        if category == 'likely_date_pair' and scope.get('find_date_diff'):
-            if item.get('server_reclassified'):
-                continue
-            sides = {row.get('side') for row in rows}
-            amounts = [abs(_number(row.get('amount')) or 0.0) for row in rows]
-            if not ({'doc1', 'doc2'} <= sides) or not amounts or max(amounts) - min(amounts) > 0.01:
-                item['category'] = 'ambiguous'
-                item['reason'] = _guard_reason(item, 'пара по датам не подтверждена данными актов')
-                log.append('date_pair_demoted')
-                continue
-            doc1_row = next(row for row in rows if row.get('side') == 'doc1')
-            doc2_row = next(row for row in rows if row.get('side') == 'doc2')
-            distance = _date_distance_days(doc1_row.get('date'), doc2_row.get('date'))
-            window = _pair_window_days(scope, _document_family(doc1_row.get('document')))
-            if distance is not None and window and distance > window:
-                item['influence'] = 0.0
-                item['category'] = 'ambiguous'
-                item['reason'] = _guard_reason(
-                    item, f'разница {distance} дн. превышает допуск {window} дн.',
+    # 1. Cross-matches: две несопоставленные строки — одна операция.
+    for match in review.get('cross_matches') or []:
+        doc1_item = state['unmatched_items'].get(match['doc1_id'])
+        doc2_item = state['unmatched_items'].get(match['doc2_id'])
+        if (
+            doc1_item is None or doc2_item is None
+            or doc1_item['side'] != 'doc1' or doc2_item['side'] != 'doc2'
+            or match['doc1_id'] in consumed_unmatched
+            or match['doc2_id'] in consumed_unmatched
+        ):
+            guard_log.append(
+                f"cross_match_ignored:{match.get('doc1_id')}+{match.get('doc2_id')}"
+            )
+            continue
+        category = match['category']
+        amount1 = abs(_number(doc1_item.get('amount')) or 0.0)
+        amount2 = abs(_number(doc2_item.get('amount')) or 0.0)
+        if category == 'date_pair':
+            if abs(amount1 - amount2) > 0.01:
+                guard_log.append(
+                    f"cross_match_ignored:{match['doc1_id']}+{match['doc2_id']}"
                 )
-                log.append('date_window_exceeded')
                 continue
-            if (_number(item.get('influence')) or 0.0) != 0.0:
-                item['influence'] = 0.0
-                log.append('date_pair_influence_zeroed')
-        elif category == 'confirmed_missing' and rows:
-            expected = round(sum(abs(_number(row.get('amount')) or 0.0) for row in rows), 2)
-            influence = _number(item.get('influence')) or 0.0
-            if expected and abs(abs(influence) - expected) > 0.01:
-                sign = -1.0 if influence < 0 else 1.0
-                item['influence'] = round(sign * expected, 2)
-                log.append('missing_influence_fixed')
-
-
-def _mirror_row(source: dict, row_index: dict[tuple[str, str], dict]) -> dict | None:
-    source_amount = _number(source.get('amount'))
-    if source_amount is None:
-        return None
-    source_side = source.get('side')
-    opposite = 'doc2' if source_side == 'doc1' else 'doc1'
-    family = _document_family(source.get('document'))
-    candidates = []
-    for (side, _), row in row_index.items():
-        if side != opposite:
+            days = _date_distance_days(doc1_item.get('date'), doc2_item.get('date'))
+            window = _pair_window_days(
+                scope, _document_family(doc1_item.get('document')),
+            )
+            if days is not None and days > window:
+                category_final = 'ambiguous'
+                reason = (
+                    f'Суммы равны, но разница дат {days} дн. '
+                    f'превышает допуск {window} дн.'
+                )
+            else:
+                category_final = 'likely_date_pair'
+                reason = match.get('note') or (
+                    f'Одна операция, отражена разными датами '
+                    f'(разница {days if days is not None else "?"} дн., допуск {window} дн.).'
+                )
+            influence = 0.0
+        else:
+            category_final = category
+            influence = _row_influence(doc1_item) + _row_influence(doc2_item)
+            reason = match.get('note') or 'Стороны отразили одну операцию по-разному.'
+        consumed_unmatched.add(match['doc1_id'])
+        consumed_unmatched.add(match['doc2_id'])
+        if not _category_enabled(category_final, scope):
             continue
-        amount = _number(row.get('amount'))
-        if amount is None or abs(abs(amount) - abs(source_amount)) > 0.01:
-            continue
-        if family and _document_family(row.get('document')) != family:
-            continue
-        distance = _date_distance_days(source.get('date'), row.get('date'))
-        if distance is not None and distance > 120:
-            continue
-        candidates.append((distance if distance is not None else 10_000, row))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: (item[0], str(item[1].get('row_id'))))
-    return candidates[0][1]
+        discrepancies.append(_make_discrepancy(
+            category_final,
+            _pair_title({'doc1': doc1_item, 'doc2': doc2_item}),
+            influence,
+            reason,
+            'high',
+            [doc1_item, doc2_item],
+        ))
 
-
-def _downgrade_false_confirmed_missing(
-    report: dict,
-    row_index: dict[tuple[str, str], dict],
-) -> None:
-    for item in report.get('discrepancies') or []:
-        if item.get('category') != 'confirmed_missing':
+    # 2. Пары с разными датами.
+    for pair_id, item in state['pair_items'].items():
+        verdict = (pair_verdicts.get(pair_id) or {}).get('verdict')
+        note = (pair_verdicts.get(pair_id) or {}).get('note') or ''
+        days = item['days']
+        window = item['window']
+        if verdict == 'unrelated':
+            for row in (item['doc1'], item['doc2']):
+                if not _category_enabled('confirmed_missing', scope):
+                    continue
+                discrepancies.append(_make_discrepancy(
+                    'confirmed_missing',
+                    _row_title(row),
+                    _row_influence(row),
+                    note or 'Суммы совпали случайно: это разные операции.',
+                    'medium',
+                    [row],
+                ))
             continue
-        sources = item.get('resolved_evidence') or []
-        if not sources:
+        if not item['within_window']:
+            category = 'ambiguous'
+            reason = (
+                f'Суммы равны, но разница дат {days} дн. '
+                f'превышает допуск {window} дн.'
+            )
+            confidence = 'medium'
+        elif verdict == 'needs_review':
+            category = 'ambiguous'
+            reason = note or 'Требуется проверка пары по первичным документам.'
+            confidence = 'low'
+        else:
+            category = 'likely_date_pair'
+            reason = note or (
+                f'Одна операция, отражена разными датами '
+                f'(разница {days} дн., допуск {window} дн.).'
+            )
+            confidence = 'high' if verdict == 'date_pair' else 'medium'
+        if not _category_enabled(category, scope):
             continue
-        mirrors = []
-        for source in sources:
-            mirror = _mirror_row(source, row_index)
-            if mirror is None:
-                mirrors = []
-                break
-            mirrors.append(mirror)
-        if not mirrors:
+        discrepancies.append(_make_discrepancy(
+            category, _pair_title(item), 0.0, reason, confidence,
+            [item['doc1'], item['doc2']],
+        ))
+
+    # 3. Несопоставленные строки.
+    for item_id, row in state['unmatched_items'].items():
+        if item_id in consumed_unmatched:
             continue
-        existing = {(row.get('side'), row.get('row_id')) for row in sources}
-        for mirror in mirrors:
-            key = (mirror.get('side'), mirror.get('row_id'))
-            if key in existing:
-                continue
-            sources.append({
-                'side': mirror['side'],
-                'row_id': mirror['row_id'],
-                'raw_row': mirror['raw_row'],
-                'date': mirror.get('date'),
-                'document': mirror.get('document'),
-                'amount': mirror.get('amount'),
-            })
-            existing.add(key)
-        item['category'] = 'likely_date_pair'
-        item['server_reclassified'] = True
-        item['influence'] = 0.0
-        item['reason'] = 'Найдена зеркальная строка с той же суммой в другом документе.'
-        item['resolved_evidence'] = sources
-        item['clickable'] = True
+        verdict_item = unmatched_verdicts.get(item_id) or {}
+        verdict = verdict_item.get('verdict')
+        note = verdict_item.get('note') or ''
+        if verdict == 'opening_balance_bridge':
+            category = 'opening_balance_bridge'
+            reason = note or 'Операция закрывает разницу начального сальдо.'
+            confidence = 'high'
+        elif verdict == 'needs_review':
+            category = 'ambiguous'
+            reason = note or 'Строку не удалось однозначно классифицировать.'
+            confidence = 'low'
+        else:
+            category = 'confirmed_missing'
+            reason = note or 'Операция отражена только в одном акте.'
+            confidence = 'high' if verdict == 'missing' else 'medium'
+        if not _category_enabled(category, scope):
+            continue
+        discrepancies.append(_make_discrepancy(
+            category, _row_title(row), _row_influence(row), reason, confidence,
+            [row],
+        ))
 
-
-def _find_unexplained_rows(
-    row_index: dict[tuple[str, str], dict],
-    report: dict,
-    scope: dict,
-) -> tuple[list[dict], set, set]:
-    referenced: set[tuple] = set()
-    for item in report.get('discrepancies') or []:
-        for row in item.get('resolved_evidence') or []:
-            referenced.add((row.get('side'), row.get('row_id')))
-    sides: dict[str, list[dict]] = {'doc1': [], 'doc2': []}
-    for (side, _), row in row_index.items():
-        if _number(row.get('amount')) is not None:
-            sides[side].append(row)
-    for side in sides:
-        sides[side].sort(key=lambda row: str(row['row_id']))
-    matched: set[tuple] = set()
-    used_doc2: set[str] = set()
-    for row1 in sides['doc1']:
-        amount1 = abs(_number(row1['amount']) or 0.0)
-        for row2 in sides['doc2']:
-            if row2['row_id'] in used_doc2:
-                continue
-            amount2 = abs(_number(row2['amount']) or 0.0)
-            if abs(amount1 - amount2) <= 0.01:
-                used_doc2.add(row2['row_id'])
-                matched.add(('doc1', row1['row_id']))
-                matched.add(('doc2', row2['row_id']))
-                break
-    min_amount = _number(scope.get('min_amount')) or 0.0
-    missed = []
-    for side in ('doc1', 'doc2'):
-        for row in sides[side]:
-            key = (side, row['row_id'])
-            if key in matched or key in referenced:
-                continue
-            if abs(_number(row['amount']) or 0.0) < min_amount:
-                continue
-            missed.append(row)
-    return missed, matched, referenced
-
-
-def _dedupe_expert_discrepancies(report: dict) -> None:
-    priority = {
-        category: index
-        for index, category in enumerate(EXPERT_CATEGORY_ORDER)
+    report = {
+        'version': '2',
+        'conclusion': (review.get('conclusion') or '')[:500],
+        'confidence': review.get('confidence') or 'medium',
+        'balances': payload['balance_comparison'],
+        'discrepancies': discrepancies,
+        'guard_log': guard_log,
     }
-    items = report.get('discrepancies') or []
-    order = sorted(
-        range(len(items)),
-        key=lambda index: (
-            priority.get(items[index].get('category'), len(priority)),
-            -abs(_number(items[index].get('influence')) or 0.0),
-        ),
-    )
-    seen: set[tuple] = set()
-    keep: set[int] = set()
-    for index in order:
-        rows = items[index].get('resolved_evidence') or []
-        keys = {(row.get('side'), row.get('row_id')) for row in rows}
-        if keys and keys & seen:
-            continue
-        seen |= keys
-        keep.add(index)
-    removed = len(items) - len(keep)
-    if removed:
-        report.setdefault('guard_log', []).append(f'duplicates_removed:{removed}')
-        report['discrepancies'] = [
-            items[index] for index in range(len(items)) if index in keep
-        ]
+    _sort_report_discrepancies(report)
+    report['totals'] = _derive_report_totals(report)
 
-
-FOLLOW_UP_LIMIT = 2
-
-FOLLOW_UP_NOTE = (
-    ' Это доанализ: перечисленные строки не были объяснены в первом ответе. '
-    'Проанализируй только переданные строки; прежние выводы не повторяй.'
-)
-
-
-def _follow_up_payload(payload: dict, missed: list[dict]) -> dict:
-    by_side: dict[str, list[dict]] = {'doc1': [], 'doc2': []}
-    for row in missed:
-        compact = {'id': row['row_id']}
-        if row.get('date'):
-            compact['date'] = row['date']
-        if row.get('document'):
-            compact['document'] = row['document']
-        if row.get('debit') is not None:
-            compact['debit'] = row['debit']
-        if row.get('credit') is not None:
-            compact['credit'] = row['credit']
-        by_side[row['side']].append(compact)
-    documents = []
-    for source in payload['documents']:
-        entry = {
-            'side': source['side'],
-            'display_name': source['display_name'],
-            'rows': by_side[source['side']],
-        }
-        for key in ('opening_balance', 'closing_balance', 'period'):
-            if key in source:
-                entry[key] = source[key]
-        documents.append(entry)
-    return {
-        'version': '1',
-        'follow_up': True,
-        'analysis_scope': payload['analysis_scope'],
-        'balance_comparison': payload['balance_comparison'],
-        'documents': documents,
+    referenced = {
+        (row['side'], row['row_id'])
+        for item in discrepancies
+        for row in item['resolved_evidence']
+    }
+    report['completeness'] = {
+        'rows_total': len(state['row_index']),
+        'rows_matched': state['matched_row_count'],
+        'rows_in_findings': len(referenced),
     }
 
+    balances = payload['balance_comparison']
+    opening = balances.get('opening_difference')
+    closing = balances.get('closing_difference')
+    if opening is not None and closing is not None:
+        influence_sum = sum(
+            _number(item.get('influence')) or 0.0 for item in discrepancies
+        )
+        if abs(round(opening + influence_sum - closing, 2)) > 0.01:
+            guard_log.append(
+                'balance_mismatch:'
+                f'{round(opening + influence_sum - closing, 2)}'
+            )
+    return report
 
-def _unexplained_placeholder(row: dict) -> dict:
-    title_parts = [
-        str(part) for part in (row.get('document'), row.get('date')) if part
-    ]
+
+def _auto_conclusion(state: dict) -> dict:
+    balances = state['payload']['balance_comparison']
+    closing = balances.get('closing_difference')
+    if closing is not None and abs(closing) <= 0.01:
+        text = (
+            'Все операции сопоставлены по суммам, конечные сальдо сторон совпадают. '
+            'Спорных строк не найдено.'
+        )
+    else:
+        text = (
+            'Все операции сопоставлены по суммам; спорных строк не найдено. '
+            'Разница сальдо объясняется начальным сальдо и составом операций.'
+        )
     return {
-        'category': 'ambiguous',
-        'title': (' '.join(title_parts) or 'Операция без пары')[:90],
-        'influence': 0.0,
-        'reason': 'Строка не объяснена экспертным анализом.',
-        'confidence': 'low',
-        'evidence': [{'side': row['side'], 'row_id': row['row_id']}],
-        'resolved_evidence': [{
-            'side': row['side'],
-            'row_id': row['row_id'],
-            'raw_row': row['raw_row'],
-            'date': row.get('date'),
-            'document': row.get('document'),
-            'amount': row.get('amount'),
-        }],
-        'clickable': True,
+        'version': '2',
+        'conclusion': text,
+        'confidence': 'high',
+        'pair_verdicts': [],
+        'unmatched_verdicts': [],
+        'cross_matches': [],
     }
 
 
@@ -752,99 +852,57 @@ def run_independent_expert_analysis(
 ) -> dict:
     if client is None:
         return {'status': 'failed', 'error': 'api_key_required'}
-    payload, row_index = build_expert_payload(df1, df2, settings)
-    scope = payload['analysis_scope']
-    total_usage = {'input_tokens': 0, 'output_tokens': 0}
-
-    def _request(request_payload: dict, system_suffix: str = '') -> tuple[dict | None, str | None]:
-        message = client.messages.create(
-            model=model,
-            max_tokens=8000,
-            temperature=0,
-            system=EXPERT_SYSTEM_PROMPT + _expert_scope_instruction(scope) + system_suffix,
-            messages=[{
-                'role': 'user',
-                'content': json.dumps(
-                    request_payload, ensure_ascii=False, separators=(',', ':'),
-                ),
-            }],
-            output_config={
-                'format': {
-                    'type': 'json_schema',
-                    'schema': CLAUDE_EXPERT_REPORT_SCHEMA,
-                },
-            },
-        )
-        usage = getattr(message, 'usage', None)
-        total_usage['input_tokens'] += int(getattr(usage, 'input_tokens', 0) or 0)
-        total_usage['output_tokens'] += int(getattr(usage, 'output_tokens', 0) or 0)
-        stop_reason = getattr(message, 'stop_reason', None)
-        if stop_reason in ('max_tokens', 'refusal'):
-            return None, stop_reason
-        text = ''.join(
-            getattr(block, 'text', '')
-            for block in getattr(message, 'content', [])
-            if getattr(block, 'text', '')
-        )
-        return json.loads(text), None
-
-    def _postprocess(report: dict) -> dict:
-        resolved, _ = resolve_expert_evidence(report, row_index)
-        if scope['find_date_diff']:
-            _downgrade_false_confirmed_missing(resolved['report'], row_index)
-        _apply_expert_guards(resolved['report'], scope)
-        _dedupe_expert_discrepancies(resolved['report'])
-        return resolved
-
+    state = build_expert_review_state(df1, df2, settings)
+    usage_payload = {'input_tokens': 0, 'output_tokens': 0}
     try:
-        report, error = _request(payload)
-        if report is None:
-            return {'status': 'failed', 'error': error, 'usage': dict(total_usage)}
-        report['balances'] = payload['balance_comparison']
-        report['totals'] = _derive_report_totals(report)
-        if not _validate_report_shape(report):
-            return {'status': 'failed', 'error': 'invalid_report_schema'}
-        resolved = _postprocess(report)
-
-        follow_ups = 0
-        while follow_ups < FOLLOW_UP_LIMIT:
-            missed, _, _ = _find_unexplained_rows(row_index, resolved['report'], scope)
-            if not missed:
-                break
-            follow_report, _follow_error = _request(
-                _follow_up_payload(payload, missed), FOLLOW_UP_NOTE,
+        if not state['pair_items'] and not state['unmatched_items']:
+            review = _auto_conclusion(state)
+        else:
+            message = client.messages.create(
+                model=model,
+                max_tokens=4000,
+                temperature=0,
+                system=EXPERT_SYSTEM_PROMPT,
+                messages=[{
+                    'role': 'user',
+                    'content': json.dumps(
+                        build_expert_review_request(state),
+                        ensure_ascii=False, separators=(',', ':'),
+                    ),
+                }],
+                output_config={
+                    'format': {
+                        'type': 'json_schema',
+                        'schema': CLAUDE_EXPERT_REVIEW_SCHEMA,
+                    },
+                },
             )
-            follow_ups += 1
-            if follow_report is None or not isinstance(
-                follow_report.get('discrepancies'), list,
-            ):
-                break
-            merged = resolved['report']
-            merged['discrepancies'] = (
-                (merged.get('discrepancies') or [])
-                + [
-                    item for item in follow_report['discrepancies']
-                    if isinstance(item, dict)
-                    and item.get('category') in EXPERT_CATEGORIES
-                ]
+            usage = getattr(message, 'usage', None)
+            usage_payload = {
+                'input_tokens': int(getattr(usage, 'input_tokens', 0) or 0),
+                'output_tokens': int(getattr(usage, 'output_tokens', 0) or 0),
+            }
+            stop_reason = getattr(message, 'stop_reason', None)
+            if stop_reason in ('max_tokens', 'refusal'):
+                return {
+                    'status': 'failed',
+                    'error': stop_reason,
+                    'usage': usage_payload,
+                }
+            text = ''.join(
+                getattr(block, 'text', '')
+                for block in getattr(message, 'content', [])
+                if getattr(block, 'text', '')
             )
-            resolved = _postprocess(merged)
-
-        missed, matched, referenced = _find_unexplained_rows(
-            row_index, resolved['report'], scope,
-        )
-        for row in missed:
-            resolved['report']['discrepancies'].append(_unexplained_placeholder(row))
-            referenced.add((row['side'], row['row_id']))
-        resolved['report']['completeness'] = {
-            'rows_total': len(row_index),
-            'rows_matched': len(matched),
-            'rows_in_findings': len(referenced),
-            'follow_up_requests': follow_ups,
+            review = json.loads(text)
+            if not _validate_review(review):
+                return {'status': 'failed', 'error': 'invalid_report_schema'}
+        report = _assemble_expert_report(state, review)
+        return {
+            'status': 'complete',
+            'report': report,
+            'warnings': [],
+            'usage': usage_payload,
         }
-        _sort_report_discrepancies(resolved['report'])
-        resolved['report']['totals'] = _derive_report_totals(resolved['report'])
-        resolved['usage'] = dict(total_usage)
-        return resolved
     except Exception as exc:
         return {'status': 'failed', 'error': type(exc).__name__}
