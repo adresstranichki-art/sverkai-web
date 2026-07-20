@@ -549,6 +549,51 @@ class ExpertReconciliationTests(unittest.TestCase):
             for entry in result['report']['guard_log']
         ))
 
+    def test_find_unexplained_rows_detects_missed_operations(self):
+        from expert_reconciliation import _find_unexplained_rows
+        df1, df2 = self._frames()
+        df1.loc[len(df1)] = {
+            'date': pd.Timestamp('2026-02-09'),
+            'date_str': '09.02.2026',
+            'document': 'Поставка 90',
+            'debit': 11845.0,
+            'credit': None,
+            'raw_row': 33,
+        }
+        _, row_index = build_expert_payload(df1, df2)
+        report = _valid_report()
+        report['discrepancies'][0]['resolved_evidence'] = [
+            {'side': 'doc1', 'row_id': 'd1:r11', 'amount': 7070.0},
+            {'side': 'doc2', 'row_id': 'd2:r22', 'amount': 7070.0},
+        ]
+        missed, matched, referenced = _find_unexplained_rows(
+            row_index, report, {'min_amount': 0.0},
+        )
+        self.assertEqual([row['row_id'] for row in missed], ['d1:r33'])
+        self.assertIn(('doc1', 'd1:r11'), matched)
+        self.assertIn(('doc2', 'd2:r22'), matched)
+        self.assertIn(('doc1', 'd1:r11'), referenced)
+
+    def test_find_unexplained_rows_respects_min_amount(self):
+        from expert_reconciliation import _find_unexplained_rows
+        df1, df2 = self._frames()
+        df1.loc[len(df1)] = {
+            'date': pd.Timestamp('2026-02-09'),
+            'date_str': '09.02.2026',
+            'document': 'Мелочь',
+            'debit': 3.0,
+            'credit': None,
+            'raw_row': 44,
+        }
+        _, row_index = build_expert_payload(df1, df2)
+        report = _valid_report()
+        report['discrepancies'][0]['resolved_evidence'] = [
+            {'side': 'doc1', 'row_id': 'd1:r11', 'amount': 7070.0},
+            {'side': 'doc2', 'row_id': 'd2:r22', 'amount': 7070.0},
+        ]
+        missed, _, _ = _find_unexplained_rows(row_index, report, {'min_amount': 100.0})
+        self.assertEqual(missed, [])
+
     def test_token_limit_returns_a_specific_failure(self):
         df1, df2 = self._frames()
 

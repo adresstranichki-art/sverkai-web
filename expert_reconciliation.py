@@ -608,6 +608,47 @@ def _downgrade_false_confirmed_missing(
         item['clickable'] = True
 
 
+def _find_unexplained_rows(
+    row_index: dict[tuple[str, str], dict],
+    report: dict,
+    scope: dict,
+) -> tuple[list[dict], set, set]:
+    referenced: set[tuple] = set()
+    for item in report.get('discrepancies') or []:
+        for row in item.get('resolved_evidence') or []:
+            referenced.add((row.get('side'), row.get('row_id')))
+    sides: dict[str, list[dict]] = {'doc1': [], 'doc2': []}
+    for (side, _), row in row_index.items():
+        if _number(row.get('amount')) is not None:
+            sides[side].append(row)
+    for side in sides:
+        sides[side].sort(key=lambda row: str(row['row_id']))
+    matched: set[tuple] = set()
+    used_doc2: set[str] = set()
+    for row1 in sides['doc1']:
+        amount1 = abs(_number(row1['amount']) or 0.0)
+        for row2 in sides['doc2']:
+            if row2['row_id'] in used_doc2:
+                continue
+            amount2 = abs(_number(row2['amount']) or 0.0)
+            if abs(amount1 - amount2) <= 0.01:
+                used_doc2.add(row2['row_id'])
+                matched.add(('doc1', row1['row_id']))
+                matched.add(('doc2', row2['row_id']))
+                break
+    min_amount = _number(scope.get('min_amount')) or 0.0
+    missed = []
+    for side in ('doc1', 'doc2'):
+        for row in sides[side]:
+            key = (side, row['row_id'])
+            if key in matched or key in referenced:
+                continue
+            if abs(_number(row['amount']) or 0.0) < min_amount:
+                continue
+            missed.append(row)
+    return missed, matched, referenced
+
+
 def _dedupe_expert_discrepancies(report: dict) -> None:
     priority = {
         category: index
