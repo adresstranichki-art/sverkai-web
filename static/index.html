@@ -443,11 +443,14 @@
   /* ── Discrepancies ── */
   .disc-filter { padding: 12px 12px; display: flex; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid rgba(210,216,209,.9); background: linear-gradient(180deg, #fbfbfa, #f7f8f6); align-items: center; }
   .disc-filter-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 4px; }
-  .filter-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: white; color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; transition: all .15s; }
+  .filter-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border); background: white; color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; transition: all .15s; user-select: none; }
+  .filter-btn[hidden] { display: none !important; }
   .filter-btn:hover { border-color: var(--text); color: var(--text); box-shadow: 0 6px 12px rgba(20,28,35,.04); }
+  .filter-btn:focus-within { outline: 2px solid rgba(31,122,67,.35); outline-offset: 2px; }
+  .filter-checkbox { width: 14px; height: 14px; margin: 0; accent-color: var(--green); flex: 0 0 auto; cursor: pointer; }
   .filter-btn.active { border-color: var(--green); color: var(--green-dk); background: var(--green-lt); }
-  .filter-btn-all { background: var(--black); color: white; border-color: var(--black); }
-  .filter-btn-all:hover { background: #26352d; border-color: #26352d; color: white; }
+  .filter-btn-all { color: var(--text); font-weight: 800; }
+  .filter-btn-all:hover { border-color: var(--green-dk); color: var(--green-dk); }
   .filter-btn-all.active { background: var(--green); border-color: var(--green); color: white; }
   .disc-wrap { overflow: auto; }
 
@@ -968,14 +971,14 @@
   <div class="tab-content" id="tab-discrepancies">
     <div class="disc-filter">
       <span class="disc-filter-label">Показать:</span>
-      <button class="filter-btn filter-btn-all active" id="fb-all" onclick="toggleFilter('all',this)">Все</button>
-      <button class="filter-btn" id="fb-missing_in_counterparty" onclick="toggleFilter('missing_in_counterparty',this)">Нет у контрагента</button>
-      <button class="filter-btn" id="fb-missing_in_company"      onclick="toggleFilter('missing_in_company',this)">Нет у организации</button>
-      <button class="filter-btn" id="fb-amount_diff"             onclick="toggleFilter('amount_diff',this)">Разница в суммах</button>
-      <button class="filter-btn" id="fb-sign_mismatch"           onclick="toggleFilter('sign_mismatch',this)">Зеркальный КСФ</button>
-      <button class="filter-btn" id="fb-date_diff"               onclick="toggleFilter('date_diff',this)">Разница в датах</button>
-      <button class="filter-btn expert-filter" id="fb-opening_balance_bridge" onclick="toggleFilter('opening_balance_bridge',this)" hidden>Связь с начальным сальдо</button>
-      <button class="filter-btn expert-filter" id="fb-ambiguous" onclick="toggleFilter('ambiguous',this)" hidden>Требуется проверка</button>
+      <label class="filter-btn filter-btn-all active" id="fb-all" data-filter-type="all"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('all',this.checked)"><span class="filter-label">Все</span></label>
+      <label class="filter-btn active" id="fb-missing_in_counterparty" data-filter-type="missing_in_counterparty"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('missing_in_counterparty',this.checked)"><span class="filter-label">Нет у контрагента</span></label>
+      <label class="filter-btn active" id="fb-missing_in_company" data-filter-type="missing_in_company"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('missing_in_company',this.checked)"><span class="filter-label">Нет у организации</span></label>
+      <label class="filter-btn active" id="fb-amount_diff" data-filter-type="amount_diff"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('amount_diff',this.checked)"><span class="filter-label">Разница в суммах</span></label>
+      <label class="filter-btn active" id="fb-sign_mismatch" data-filter-type="sign_mismatch"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('sign_mismatch',this.checked)"><span class="filter-label">Зеркальный КСФ</span></label>
+      <label class="filter-btn active" id="fb-date_diff" data-filter-type="date_diff"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('date_diff',this.checked)"><span class="filter-label">Разница в датах</span></label>
+      <label class="filter-btn expert-filter active" id="fb-opening_balance_bridge" data-filter-type="opening_balance_bridge" hidden><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('opening_balance_bridge',this.checked)"><span class="filter-label">Связь с начальным сальдо</span></label>
+      <label class="filter-btn expert-filter active" id="fb-ambiguous" data-filter-type="ambiguous" hidden><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('ambiguous',this.checked)"><span class="filter-label">Требуется проверка</span></label>
     </div>
     <div class="disc-suggest-banner" id="disc-window-suggest" style="display:none">
       <div class="disc-suggest-head">Рекомендуем расширить окна допусков</div>
@@ -1283,7 +1286,8 @@
 let file1=null,file2=null,lastResult=null,allDisc=[];
 let preview1=null,preview2=null,profile1=null,profile2=null;
 let wizNum=0,wizActiveStep=0,wizValues={};
-let activeFilters=new Set(['all']);
+const FILTER_TYPES=['missing_in_counterparty','missing_in_company','amount_diff','sign_mismatch','date_diff','opening_balance_bridge','ambiguous'];
+let activeFilters=new Set(FILTER_TYPES);
 let historyData=[];
 let loginMode='key'; // 'key' | 'guest'
 let abortController=null; // для отмены сверки
@@ -2024,25 +2028,40 @@ function renderTable(num,td,hl,rawRowsOverride){
 }
 
 // ── Multi-filter ──────────────────────────────────────────────────
-function toggleFilter(type,btn){
-  if(type==='all'){
-    activeFilters=new Set(['all']);
-    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-  }else{
-    activeFilters.delete('all');document.getElementById('fb-all').classList.remove('active');
-    if(btn.classList.contains('active')){btn.classList.remove('active');activeFilters.delete(type);if(activeFilters.size===0){activeFilters.add('all');document.getElementById('fb-all').classList.add('active');}}
-    else{btn.classList.add('active');activeFilters.add(type);}
-  }
+function nextFilterSelection(current,type,checked,available){
+  if(type==='all')return checked?new Set(available):new Set();
+  const next=new Set(current);
+  checked?next.add(type):next.delete(type);
+  return next;
+}
+function availableFilterTypes(){
+  return [...document.querySelectorAll('.filter-btn[data-filter-type]:not([hidden])')]
+    .map(control=>control.dataset.filterType)
+    .filter(type=>type!=='all');
+}
+function syncFilterControls(){
+  const available=availableFilterTypes();
+  document.querySelectorAll('.filter-btn[data-filter-type]').forEach(control=>{
+    const type=control.dataset.filterType;
+    const checked=type==='all'
+      ?available.length>0&&available.every(item=>activeFilters.has(item))
+      :activeFilters.has(type);
+    const checkbox=control.querySelector('.filter-checkbox');
+    if(checkbox)checkbox.checked=checked;
+    control.classList.toggle('active',checked);
+  });
+}
+function toggleFilter(type,checked){
+  activeFilters=nextFilterSelection(activeFilters,type,checked,availableFilterTypes());
+  syncFilterControls();
   applyDiscFilter();
 }
 function applyDiscFilter(){
-  document.querySelectorAll('#disc-body tr[data-type]').forEach(r=>r.style.display=(activeFilters.has('all')||activeFilters.has(r.dataset.type))?'':'none');
+  document.querySelectorAll('#disc-body tr[data-type]').forEach(r=>r.style.display=activeFilters.has(r.dataset.type)?'':'none');
 }
 function resetDiscFilters(){
-  activeFilters=new Set(['all']);
-  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('fb-all')?.classList.add('active');
+  activeFilters=new Set(FILTER_TYPES);
+  syncFilterControls();
 }
 
 // ── Reconcile ──────────────────────────────────────────────────────
@@ -2345,7 +2364,7 @@ function displayResults(data){
     data={...data,discrepancies:visibleDiscrepancies,summary:{...(data.summary||{}),total_discrepancies:visibleDiscrepancies.length}};
   }
   setExpertModeTabs(expertMode);
-  if(expertMode)resetDiscFilters();
+  resetDiscFilters();
   const expertDiscrepancies=independentMode
     ?buildIndependentExpertDiscrepancies(data.summary)
     :legacyExpertMode?buildExpertDiscrepancies(data.summary):[];
@@ -2425,21 +2444,16 @@ function syncExpertFilterButtons(discs=[]){
     if(!btn)return;
     btn.hidden=!available.has(type);
     if(btn.hidden){
-      btn.classList.remove('active');
       activeFilters.delete(type);
     }
   });
-  if(activeFilters.size===0){
-    activeFilters.add('all');
-    document.getElementById('fb-all')?.classList.add('active');
-  }
+  syncFilterControls();
 }
 function decorateTypeButtons(){
   Object.entries(TYPE_MAP).forEach(([type,meta])=>{
     const btn=document.getElementById(`fb-${type}`);
     if(btn&&!btn.dataset.iconified){
-      const label=btn.textContent.trim();
-      btn.innerHTML=`${typeIcon(meta[2])}<span>${esc(label)}</span>`;
+      btn.querySelector('.filter-label')?.insertAdjacentHTML('beforebegin',typeIcon(meta[2]));
       btn.dataset.iconified='1';
     }
   });

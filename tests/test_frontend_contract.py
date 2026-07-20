@@ -1,4 +1,6 @@
+import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -88,6 +90,75 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('Зеркальный КСФ', self.html)
         self.assertIn('Связь с начальным сальдо', self.html)
         self.assertIn("item.category==='opening_balance_bridge'?'expert'", self.html)
+
+    def test_discrepancy_filters_use_native_checkboxes(self):
+        filter_types = (
+            'all',
+            'missing_in_counterparty',
+            'missing_in_company',
+            'amount_diff',
+            'sign_mismatch',
+            'date_diff',
+            'opening_balance_bridge',
+            'ambiguous',
+        )
+        for filter_type in filter_types:
+            control = re.search(
+                rf'<label[^>]+data-filter-type="{filter_type}"[^>]*>'
+                rf'(?P<body>.*?)</label>',
+                self.html,
+                re.S,
+            )
+            self.assertIsNotNone(control, filter_type)
+            self.assertIn('type="checkbox"', control.group('body'))
+            self.assertIn(
+                f"onchange=\"toggleFilter('{filter_type}',this.checked)\"",
+                control.group('body'),
+            )
+
+    def test_filter_selection_supports_partial_clear_and_select_all(self):
+        function = re.search(
+            r'function nextFilterSelection\(current,type,checked,available\)\{.*?\n\}',
+            self.html,
+            re.S,
+        )
+        self.assertIsNotNone(function)
+        cases = [
+            {'current': ['a', 'b', 'c'], 'type': 'b', 'checked': False},
+            {'current': ['a', 'b'], 'type': 'all', 'checked': False},
+            {'current': ['b'], 'type': 'all', 'checked': True},
+        ]
+        script = (
+            function.group(0)
+            + '\nconst available=["a","b","c"];'
+            + f'const cases={json.dumps(cases)};'
+            + 'const result=cases.map(c=>[...nextFilterSelection('
+            + 'new Set(c.current),c.type,c.checked,available)]);'
+            + 'process.stdout.write(JSON.stringify(result));'
+        )
+        completed = subprocess.run(
+            ['node', '-e', script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            json.loads(completed.stdout),
+            [['a', 'c'], [], ['a', 'b', 'c']],
+        )
+
+    def test_hidden_expert_filter_controls_are_not_displayed(self):
+        self.assertIn(
+            '.filter-btn[hidden] { display: none !important; }',
+            self.html,
+        )
+
+    def test_new_result_resets_all_discrepancy_filters(self):
+        self.assertIn(
+            'setExpertModeTabs(expertMode);\n  resetDiscFilters();',
+            self.html,
+        )
+        self.assertNotIn('if(expertMode)resetDiscFilters();', self.html)
 
 
 if __name__ == '__main__':
