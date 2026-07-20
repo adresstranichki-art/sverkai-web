@@ -55,6 +55,51 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn('report.actions', self.html)
         self.assertNotIn('report.limitations', self.html)
 
+    def test_independent_expert_findings_use_document_influence_explanation_columns(self):
+        renderer = re.search(
+            r'function renderIndependentExpertRows\(items\)\{.*?\n\}',
+            self.html,
+            re.S,
+        )
+        self.assertIsNotNone(renderer)
+        self.assertIn('<div>Документ</div>', renderer.group(0))
+        self.assertIn('<div>Влияние</div>', renderer.group(0))
+        self.assertIn('<div>Пояснение</div>', renderer.group(0))
+        self.assertIn('expertDocumentLabel(item.source_documents)', renderer.group(0))
+        self.assertIn('item.reason', renderer.group(0))
+        self.assertIn('item.evidence_warning', renderer.group(0))
+        self.assertIn(
+            'source_documents:[...new Set(resolved.map(evidence=>evidence.document).filter(Boolean))]',
+            self.html,
+        )
+
+    def test_expert_document_label_handles_pairs_duplicates_and_missing_source(self):
+        function = re.search(
+            r'function expertDocumentLabel\(documents\)\{.*?\n\}',
+            self.html,
+            re.S,
+        )
+        self.assertIsNotNone(function)
+        script = (
+            function.group(0)
+            + '\nconst result=['
+            + 'expertDocumentLabel(["Акт 1"]),'
+            + 'expertDocumentLabel(["Акт 1","Акт 2","Акт 1"]),'
+            + 'expertDocumentLabel([])];'
+            + 'process.stdout.write(JSON.stringify(result));'
+        )
+        completed = subprocess.run(
+            ['node', '-e', script],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+        )
+        self.assertEqual(
+            json.loads(completed.stdout),
+            ['Акт 1', 'Акт 1 ↔ Акт 2', 'Документ не определён'],
+        )
+
     def test_legacy_expert_results_remain_supported(self):
         self.assertIn("result_mode==='balance_reason_analysis'", self.html)
         self.assertIn('balance_reason_analysis', self.html)

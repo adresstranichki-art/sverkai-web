@@ -2329,6 +2329,7 @@ function buildIndependentExpertDiscrepancies(summary){
       date:sourceDates.join(' ↔ ')||[item.doc1_date,item.doc2_date].filter(Boolean).join(' ↔ '),
       document_number:item.title||'Вывод экспертного анализа',
       description:item.reason||'',
+      source_documents:[...new Set(resolved.map(evidence=>evidence.document).filter(Boolean))],
       company_value:evidenceText('doc1')||(item.doc1_value===null||item.doc1_value===undefined?(doc1||'-'):`${doc1?`${doc1}: `:''}${fmtMoney(item.doc1_value)}`),
       supplier_value:evidenceText('doc2')||(item.doc2_value===null||item.doc2_value===undefined?(doc2||'-'):`${doc2?`${doc2}: `:''}${fmtMoney(item.doc2_value)}`),
       difference:fmtSignedMoney(item.influence),
@@ -2692,21 +2693,36 @@ function renderBalanceReasonRows(items,{expandRows=false,emptyText='Нет от�
   }).join('');
 }
 
+function expertDocumentLabel(documents){
+  return [...new Set((documents||[]).filter(Boolean))].join(' ↔ ')||'Документ не определён';
+}
+
+function renderIndependentExpertRows(items){
+  if(!items.length)return '<div class="balance-reason-check">Claude не выделил отдельных расхождений.</div>';
+  const header='<div class="balance-reason-row balance-reason-head"><div>Документ</div><div>Влияние</div><div>Пояснение</div></div>';
+  return header+items.map(item=>{
+    const details=[item.reason,item.evidence_warning].filter(Boolean).map(value=>esc(value)).join('<br>');
+    return `<div class="balance-reason-row">
+      <div class="balance-reason-title">${esc(expertDocumentLabel(item.source_documents))}</div>
+      <div class="balance-reason-money ${moneyClass(item.influence)}">${fmtSignedMoney(item.influence)}</div>
+      <div class="balance-reason-check">
+        <div class="balance-reason-title">${esc(item.title||'Вывод экспертного анализа')}</div>
+        ${details?`<div class="balance-examples">${details}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 function renderIndependentExpertGroups(items){
   const entries=sortedExpertEntries(items);
   const groups=EXPERT_DISPLAY_TYPE_ORDER.map(type=>({
     type,
-    items:entries.filter(({d})=>d.type===type).map(({d})=>({
-      title:d.title,
-      influence:d.influence,
-      check:'Проверить первичные документы и отражение операции в обоих актах.',
-      examples:[d.reason,d.evidence_warning].filter(Boolean),
-    })),
+    items:entries.filter(({d})=>d.type===type).map(({d})=>d),
   })).filter(group=>group.items.length);
   if(!groups.length)return '<div class="balance-reason-check">Claude не выделил отдельных расхождений.</div>';
   return groups.map(group=>`<section class="expert-group">
     <div class="expert-group-heading"><span>${esc(TYPE_MAP[group.type]?.[0]||group.type)}</span><span class="expert-group-count">${group.items.length}</span></div>
-    ${renderBalanceReasonRows(group.items)}
+    ${renderIndependentExpertRows(group.items)}
   </section>`).join('');
 }
 
