@@ -526,6 +526,12 @@ class RegressionReconcileTests(unittest.TestCase):
                 'result_mode': 'standard',
                 'total_discrepancies': 1,
                 'critical_count': 1,
+                'opening_balance_doc1': 1.0,
+                'opening_balance_doc2': 2.0,
+                'closing_balance_doc1': 3.0,
+                'closing_balance_doc2': 4.0,
+                'period_doc1': 'ошибка программы 1',
+                'period_doc2': 'ошибка программы 2',
             },
             'discrepancies': [{'type': 'missing_in_company'}],
             'missing_rows1': [],
@@ -538,6 +544,28 @@ class RegressionReconcileTests(unittest.TestCase):
             'report': {
                 'conclusion': 'Найдены четыре подтверждённых расхождения.',
                 'confidence': 'high',
+                'balances': {
+                    'doc1': {
+                        'period_from': '01.01.2026',
+                        'period_to': '31.03.2026',
+                        'opening_amount': 12972.0,
+                        'opening_side': 'credit',
+                        'closing_amount': 28052.0,
+                        'closing_side': 'credit',
+                    },
+                    'doc2': {
+                        'period_from': '01.01.2026',
+                        'period_to': '31.03.2026',
+                        'opening_amount': 9429.0,
+                        'opening_side': 'debit',
+                        'closing_amount': 4536.0,
+                        'closing_side': 'debit',
+                    },
+                    'opening_difference': 3543.0,
+                    'period_movement': 19973.0,
+                    'closing_difference': 23516.0,
+                    'formula': '3 543 + 19 973 = 23 516',
+                },
                 'totals': {
                     'confirmed_count': 4,
                     'confirmed_amount': 32588.0,
@@ -566,6 +594,13 @@ class RegressionReconcileTests(unittest.TestCase):
         self.assertEqual(result['discrepancies'][0]['category'], 'confirmed_missing')
         self.assertEqual(result['missing_rows1'], [11])
         self.assertNotIn('missing_in_company', json.dumps(result))
+        summary = result['summary']
+        self.assertEqual(summary['opening_balance_doc1'], 12972.0)
+        self.assertEqual(summary['opening_balance_doc2'], 9429.0)
+        self.assertEqual(summary['closing_balance_doc1'], 28052.0)
+        self.assertEqual(summary['closing_balance_doc2'], 4536.0)
+        self.assertEqual(summary['period_doc1'], '01.01.2026 – 31.03.2026')
+        self.assertEqual(summary['period_doc2'], '01.01.2026 – 31.03.2026')
 
     def test_expert_failure_preserves_standard_result(self):
         standard_result = {
@@ -1272,6 +1307,22 @@ class AuthKeyTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), data)
 
         asyncio.run(run())
+
+
+class ProductionPrivacyNoticeTests(unittest.TestCase):
+    def test_production_replaces_environment_badge_with_privacy_notice(self):
+        html = (
+            Path(__file__).resolve().parents[1] / 'static' / 'index.html'
+        ).read_text(encoding='utf-8')
+        notice = (
+            'Если загружаемые файлы содержат конфиденциальную информацию, '
+            'рекомендуем перед отправкой обезличить данные.'
+        )
+
+        self.assertIn(notice, html)
+        self.assertIn("env==='production'||env==='prod'", html)
+        self.assertIn('envBadge.style.display=\'block\'', html)
+        self.assertIn('Текущий стенд:', html)
 
 
 if __name__ == '__main__':

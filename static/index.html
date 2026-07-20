@@ -1558,9 +1558,14 @@ async function checkHealth(){
       const envLabel=env&&env!=='production'&&env!=='prod'?` • ${d.app_env}`:'';
       txt.textContent = (isLoggedIn() ? 'Готов • Личный доступ' : (d.api_key_set ? 'Готов • Гостевой режим' : 'Готов')) + envLabel;
       const envBadge=document.getElementById('env-badge');
-      if(envBadge&&env&&env!=='production'&&env!=='prod'){
-        envBadge.textContent=`Текущий стенд: ${d.app_env}${d.version?' • версия '+d.version:''}`;
-        envBadge.style.display='block';
+      if(envBadge){
+        if(env==='production'||env==='prod'){
+          envBadge.textContent='Если загружаемые файлы содержат конфиденциальную информацию, рекомендуем перед отправкой обезличить данные.';
+          envBadge.style.display='block';
+        }else if(env){
+          envBadge.textContent=`Текущий стенд: ${d.app_env}${d.version?' • версия '+d.version:''}`;
+          envBadge.style.display='block';
+        }
       }
       renderAdminStatus(d);
       renderAuthArea();
@@ -2839,7 +2844,7 @@ function renderExpertSuggestion(s){
     btn.onclick=null;
     return;
   }
-  text.textContent='Не согласны с обычной сверкой? Claude может независимо проверить все извлечённые операции и сформировать единую сводку с расхождениями.';
+  text.textContent='Не согласны с обычной сверкой? Claude может независимо проверить исходные документы целиком и сформировать единую сводку с расхождениями.';
   meta.textContent='Выводы обычного алгоритма не передаются Claude. Если AI-анализ не выполнится, текущий стандартный результат останется на экране.';
   btn.textContent='Воспользоваться экспертным режимом';
   btn.onclick=forceExpertAnalysis;

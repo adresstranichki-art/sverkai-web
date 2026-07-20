@@ -40,6 +40,13 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('сопоставлено', self.html)
         self.assertIn('в расхождениях', self.html)
 
+    def test_expert_suggestion_describes_original_document_analysis(self):
+        self.assertIn(
+            'Claude может независимо проверить исходные документы целиком',
+            self.html,
+        )
+        self.assertNotIn('проверить все извлечённые операции', self.html)
+
     def test_independent_expert_contract_is_rendered(self):
         self.assertIn("result_mode==='independent_expert'", self.html)
         self.assertIn('expert_report', self.html)

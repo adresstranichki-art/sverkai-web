@@ -2822,6 +2822,33 @@ def _apply_independent_expert_result(standard_result: dict, expert_result: dict)
 
     report = copy.deepcopy(expert_result['report'])
     discrepancies = report.get('discrepancies') or []
+    balances = report.get('balances') or {}
+    doc1_balances = balances.get('doc1') or {}
+    doc2_balances = balances.get('doc2') or {}
+
+    def _expert_period_text(document_balances: dict) -> Optional[str]:
+        period_from = document_balances.get('period_from')
+        period_to = document_balances.get('period_to')
+        if period_from and period_to:
+            return f'{period_from} – {period_to}'
+        return period_from or period_to or None
+
+    if doc1_balances and doc2_balances:
+        period1 = _expert_period_text(doc1_balances)
+        period2 = _expert_period_text(doc2_balances)
+        summary.update({
+            'opening_balance_doc1': doc1_balances.get('opening_amount'),
+            'opening_balance_doc2': doc2_balances.get('opening_amount'),
+            'closing_balance_doc1': doc1_balances.get('closing_amount'),
+            'closing_balance_doc2': doc2_balances.get('closing_amount'),
+            'period_doc1': period1,
+            'period_doc2': period2,
+            'period': period1 if period1 and period1 == period2 else None,
+            'period_mismatch': bool(period1 and period2 and period1 != period2),
+            'opening_balance_difference': balances.get('opening_difference'),
+            'transaction_net_difference': balances.get('period_movement'),
+            'closing_balance_difference': balances.get('closing_difference'),
+        })
     summary.update({
         'result_mode': 'independent_expert',
         'primary_tab': 'summary',
