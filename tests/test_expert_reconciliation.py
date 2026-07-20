@@ -508,6 +508,40 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertEqual(item['influence'], -11845.0)
         self.assertIn('missing_influence_fixed', result['report']['guard_log'])
 
+    def test_duplicate_rows_are_removed_after_reclassification(self):
+        df1, df2 = self._frames()
+        report = _valid_report()
+        # Claude вернул одну и ту же строку в двух категориях (случай 4 559 руб.)
+        report['discrepancies'] = [
+            {
+                'category': 'confirmed_missing',
+                'title': 'Нет у контрагента',
+                'influence': -7070.0,
+                'reason': 'Первый вывод.',
+                'confidence': 'high',
+                'evidence': [{'side': 'doc1', 'row_id': 'd1:r11'}],
+            },
+            {
+                'category': 'amount_difference',
+                'title': 'Разница в суммах',
+                'influence': -7070.0,
+                'reason': 'Второй вывод о той же строке.',
+                'confidence': 'medium',
+                'evidence': [{'side': 'doc1', 'row_id': 'd1:r11'}],
+            },
+        ]
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+        )
+        items = result['report']['discrepancies']
+        self.assertEqual(len(items), 1)
+        self.assertTrue(any(
+            entry.startswith('duplicates_removed')
+            for entry in result['report']['guard_log']
+        ))
+
     def test_token_limit_returns_a_specific_failure(self):
         df1, df2 = self._frames()
 

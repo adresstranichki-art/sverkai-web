@@ -606,6 +606,36 @@ def _downgrade_false_confirmed_missing(
         item['clickable'] = True
 
 
+def _dedupe_expert_discrepancies(report: dict) -> None:
+    priority = {
+        category: index
+        for index, category in enumerate(EXPERT_CATEGORY_ORDER)
+    }
+    items = report.get('discrepancies') or []
+    order = sorted(
+        range(len(items)),
+        key=lambda index: (
+            priority.get(items[index].get('category'), len(priority)),
+            -abs(_number(items[index].get('influence')) or 0.0),
+        ),
+    )
+    seen: set[tuple] = set()
+    keep: set[int] = set()
+    for index in order:
+        rows = items[index].get('resolved_evidence') or []
+        keys = {(row.get('side'), row.get('row_id')) for row in rows}
+        if keys and keys & seen:
+            continue
+        seen |= keys
+        keep.add(index)
+    removed = len(items) - len(keep)
+    if removed:
+        report.setdefault('guard_log', []).append(f'duplicates_removed:{removed}')
+        report['discrepancies'] = [
+            items[index] for index in range(len(items)) if index in keep
+        ]
+
+
 def run_independent_expert_analysis(
     df1: pd.DataFrame,
     df2: pd.DataFrame,
@@ -662,6 +692,7 @@ def run_independent_expert_analysis(
         if scope['find_date_diff']:
             _downgrade_false_confirmed_missing(resolved['report'], row_index)
         _apply_expert_guards(resolved['report'], scope)
+        _dedupe_expert_discrepancies(resolved['report'])
         _sort_report_discrepancies(resolved['report'])
         resolved['report']['totals'] = _derive_report_totals(resolved['report'])
         resolved['usage'] = usage_payload
