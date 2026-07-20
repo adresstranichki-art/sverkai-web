@@ -299,7 +299,7 @@ class ExpertReconciliationTests(unittest.TestCase):
                 'influence': influence,
                 'reason': category,
                 'confidence': 'high',
-                'evidence': [{'side': 'doc1', 'row_id': 'd1:r11'}],
+                'evidence': [{'side': 'doc1', 'row_id': f'd1:rx{influence}'}],
             }
             for category, influence in (
                 ('ambiguous', 100),
@@ -435,6 +435,78 @@ class ExpertReconciliationTests(unittest.TestCase):
             result['report']['discrepancies'][0]['category'],
             'confirmed_missing',
         )
+
+    def test_date_pair_influence_is_forced_to_zero(self):
+        df1, df2 = self._frames()
+        report = _valid_report()
+        report['discrepancies'][0]['influence'] = -7070.0
+        # даты 21.01 и 27.02 = 37 дней; окно должно позволять пару
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+            {'date_window_payment': 60, 'date_window_delivery': 60},
+        )
+        item = result['report']['discrepancies'][0]
+        self.assertEqual(item['category'], 'likely_date_pair')
+        self.assertEqual(item['influence'], 0.0)
+        self.assertIn('date_pair_influence_zeroed', result['report']['guard_log'])
+
+    def test_date_pair_beyond_window_becomes_ambiguous(self):
+        df1, df2 = self._frames()
+        report = _valid_report()
+        # окна по умолчанию 5/3 дня, разница 37 дней
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+        )
+        item = result['report']['discrepancies'][0]
+        self.assertEqual(item['category'], 'ambiguous')
+        self.assertEqual(item['influence'], 0.0)
+        self.assertIn('превышает допуск', item['reason'])
+        self.assertIn('date_window_exceeded', result['report']['guard_log'])
+
+    def test_date_pair_without_both_sides_becomes_ambiguous(self):
+        df1, df2 = self._frames()
+        report = _valid_report([{'side': 'doc1', 'row_id': 'd1:r11'}])
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+            {'date_window_payment': 60, 'date_window_delivery': 60},
+        )
+        item = result['report']['discrepancies'][0]
+        self.assertEqual(item['category'], 'ambiguous')
+        self.assertIn('date_pair_demoted', result['report']['guard_log'])
+
+    def test_confirmed_missing_influence_is_fixed_from_evidence(self):
+        df1, df2 = self._frames()
+        df1.loc[len(df1)] = {
+            'date': pd.Timestamp('2026-02-09'),
+            'date_str': '09.02.2026',
+            'document': 'Поставка 90',
+            'debit': 11845.0,
+            'credit': None,
+            'raw_row': 33,
+        }
+        report = _valid_report()
+        report['discrepancies'] = [{
+            'category': 'confirmed_missing',
+            'title': 'Нет у контрагента',
+            'influence': -999.0,
+            'reason': 'Нет зеркальной операции.',
+            'confidence': 'high',
+            'evidence': [{'side': 'doc1', 'row_id': 'd1:r33'}],
+        }]
+        result = run_independent_expert_analysis(
+            df1, df2,
+            types.SimpleNamespace(messages=_FakeMessages(report)),
+            'claude-sonnet-test',
+        )
+        item = result['report']['discrepancies'][0]
+        self.assertEqual(item['influence'], -11845.0)
+        self.assertIn('missing_influence_fixed', result['report']['guard_log'])
 
     def test_token_limit_returns_a_specific_failure(self):
         df1, df2 = self._frames()

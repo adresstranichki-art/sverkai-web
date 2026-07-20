@@ -484,6 +484,61 @@ def _date_distance_days(left: Any, right: Any) -> int | None:
         return None
 
 
+def _pair_window_days(scope: dict, family: str) -> int:
+    key = 'date_window_payment' if family == 'payment' else 'date_window_delivery'
+    try:
+        return max(0, int(scope.get(key, 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _guard_reason(item: dict, note: str) -> str:
+    base = str(item.get('reason') or '').strip()
+    note_text = f'Проверка: {note}.'
+    if not base:
+        return note_text
+    return f"{base[:100].rstrip('.')}. {note_text}"[:200]
+
+
+def _apply_expert_guards(report: dict, scope: dict) -> None:
+    log = report.setdefault('guard_log', [])
+    for item in report.get('discrepancies') or []:
+        rows = item.get('resolved_evidence') or []
+        category = item.get('category')
+        if category == 'likely_date_pair' and scope.get('find_date_diff'):
+            if item.get('server_reclassified'):
+                continue
+            sides = {row.get('side') for row in rows}
+            amounts = [abs(_number(row.get('amount')) or 0.0) for row in rows]
+            if not ({'doc1', 'doc2'} <= sides) or not amounts or max(amounts) - min(amounts) > 0.01:
+                item['category'] = 'ambiguous'
+                item['reason'] = _guard_reason(item, 'пара по датам не подтверждена данными актов')
+                log.append('date_pair_demoted')
+                continue
+            doc1_row = next(row for row in rows if row.get('side') == 'doc1')
+            doc2_row = next(row for row in rows if row.get('side') == 'doc2')
+            distance = _date_distance_days(doc1_row.get('date'), doc2_row.get('date'))
+            window = _pair_window_days(scope, _document_family(doc1_row.get('document')))
+            if distance is not None and window and distance > window:
+                item['influence'] = 0.0
+                item['category'] = 'ambiguous'
+                item['reason'] = _guard_reason(
+                    item, f'разница {distance} дн. превышает допуск {window} дн.',
+                )
+                log.append('date_window_exceeded')
+                continue
+            if (_number(item.get('influence')) or 0.0) != 0.0:
+                item['influence'] = 0.0
+                log.append('date_pair_influence_zeroed')
+        elif category == 'confirmed_missing' and rows:
+            expected = round(sum(abs(_number(row.get('amount')) or 0.0) for row in rows), 2)
+            influence = _number(item.get('influence')) or 0.0
+            if expected and abs(abs(influence) - expected) > 0.01:
+                sign = -1.0 if influence < 0 else 1.0
+                item['influence'] = round(sign * expected, 2)
+                log.append('missing_influence_fixed')
+
+
 def _mirror_row(source: dict, row_index: dict[tuple[str, str], dict]) -> dict | None:
     source_amount = _number(source.get('amount'))
     if source_amount is None:
@@ -544,6 +599,7 @@ def _downgrade_false_confirmed_missing(
             })
             existing.add(key)
         item['category'] = 'likely_date_pair'
+        item['server_reclassified'] = True
         item['influence'] = 0.0
         item['reason'] = 'Найдена зеркальная строка с той же суммой в другом документе.'
         item['resolved_evidence'] = sources
@@ -605,6 +661,7 @@ def run_independent_expert_analysis(
         resolved, _ = resolve_expert_evidence(report, row_index)
         if scope['find_date_diff']:
             _downgrade_false_confirmed_missing(resolved['report'], row_index)
+        _apply_expert_guards(resolved['report'], scope)
         _sort_report_discrepancies(resolved['report'])
         resolved['report']['totals'] = _derive_report_totals(resolved['report'])
         resolved['usage'] = usage_payload
