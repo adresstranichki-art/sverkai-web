@@ -4743,14 +4743,14 @@ async def export_report(payload: dict, request: Request):
         ]
         widths = [5, 28, 38, 14, 18, 14, 18, 18, 14, 52, 45]
     else:
-        headers = ['№','Тип','Дата','Документ',f'У организации ({f1_name})',f'У контрагента ({f2_name})','Разница','Уровень']
+        headers = ['№','Тип','Дата','Документ',f'У организации ({f1_name})',f'У контрагента ({f2_name})','Разница','Приоритет']
         widths  = [5,30,12,45,28,28,15,12]
     for col,(hdr,w) in enumerate(zip(headers,widths)):
         ws.write(0,col,hdr,h); ws.set_column(col,col,w)
     ws.set_row(0,35)
     TYPE_RU = {'missing_in_counterparty':'❌ Нет у контрагента','missing_in_company':'❌ Нет у организации',
                'amount_diff':'💰 Разница в суммах','date_diff':'📅 Разница в датах',
-               'sign_mismatch':'🔀 Зеркальная корректировка',
+               'sign_mismatch':'🔀 Односторонняя операция',
                'expert_reason':'Влияет на итог','expert_neutral':'Не влияет на итог'}
     SEV_RU = {'high':'Высокий','medium':'Средний','low':'Низкий','review':'К проверке','info':'Справочно'}
     if independent_export:

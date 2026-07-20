@@ -493,10 +493,7 @@
   .summary-pad { padding: 16px; }
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(210px,1fr)); gap: 12px; margin-bottom: 14px; }
   .summary-grid.expert-summary-host { display: block; }
-  .expert-summary-layout { display: grid; grid-template-columns: minmax(260px,.72fr) minmax(420px,1.8fr); gap: 14px; margin-bottom: 14px; }
-  .expert-summary-metrics { display: grid; gap: 10px; }
-  .expert-summary-metrics .stat-card { padding: 13px 16px; }
-  .expert-summary-metrics .stat-card .value.dark { font-size: 20px; }
+  .expert-summary-layout { display: block; margin-bottom: 14px; }
   .expert-summary-conclusion {
     display: flex;
     flex-direction: column;
@@ -592,7 +589,6 @@
   .expert-group-count { min-width: 24px; padding: 2px 8px; border-radius: 999px; background: var(--green-lt); text-align: center; }
   .disc-table tr.expert-group-heading td { padding: 9px 12px; border-top: 1px solid #cfe0d1; border-bottom: 1px solid #dce8dd; background: #f0f7f1 !important; color: var(--green-dk); font-size: 12px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
   @media (max-width: 760px) {
-    .expert-summary-layout { grid-template-columns: 1fr; }
     .balance-analysis-head { display: block; }
     .balance-reason-row { grid-template-columns: 1fr; gap: 5px; }
     .balance-reason-head { display: none; }
@@ -920,7 +916,7 @@
     <span class="settings-title">Настройки</span>
     <label><input type="checkbox" id="cfg-missing" checked> Отсутствующие <span class="tip">Документ есть у одной стороны, но отсутствует у другой</span></label>
     <label><input type="checkbox" id="cfg-amount" checked> Разница в суммах <span class="tip">Один документ у обеих сторон, но суммы не совпадают</span></label>
-    <label><input type="checkbox" id="cfg-sign" checked> Зеркальные КСФ <span class="tip">Показывать только зеркальные операции, которые влияют на сальдо; технические зеркала распознаются и скрываются</span></label>
+    <label><input type="checkbox" id="cfg-sign" checked> Односторонние операции <span class="tip">Операции, которые у обеих организаций отражены на одной стороне учёта: Дт–Дт или Кт–Кт.</span></label>
     <label><input type="checkbox" id="cfg-date" checked> Разница в датах <span class="tip">Документ совпадает по номеру/сумме, но даты отличаются (низкий приоритет)</span></label>
     <label>Окно оплат (дн): <span class="window-control"><input type="number" id="cfg-dw-pay" value="5" min="0" max="120"><small class="window-limit-error" id="cfg-dw-pay-error" aria-live="polite"></small></span> <span class="tip">Максимальный сдвиг дат при поиске пар оплат. Максимально допустимое окно — 120 дней</span></label>
     <label>Окно поставок (дн): <span class="window-control"><input type="number" id="cfg-dw-del" value="3" min="0" max="120"><small class="window-limit-error" id="cfg-dw-del-error" aria-live="polite"></small></span> <span class="tip">Максимальный сдвиг дат для накладных, продаж и корректировок. Максимально допустимое окно — 120 дней</span></label>
@@ -946,7 +942,7 @@
     <div class="legend">
       <span class="legend-item"><span class="legend-box" style="background:#ffc9c9"></span> Отсутствует</span>
       <span class="legend-item"><span class="legend-box" style="background:#ffe09a"></span> Разница в суммах</span>
-      <span class="legend-item"><span class="legend-box" style="background:#a8d4ff"></span> Зеркальный КСФ</span>
+      <span class="legend-item"><span class="legend-box" style="background:#a8d4ff"></span> Односторонние операции</span>
       <span class="legend-item"><span class="legend-box" style="background:#e0e0e0"></span> Разница в датах</span>
       <span class="legend-item"><span class="legend-box" style="background:#b9e2c5"></span> Связь с начальным сальдо</span>
     </div>
@@ -975,7 +971,7 @@
       <label class="filter-btn active" id="fb-missing_in_counterparty" data-filter-type="missing_in_counterparty"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('missing_in_counterparty',this.checked)"><span class="filter-label">Нет у контрагента</span></label>
       <label class="filter-btn active" id="fb-missing_in_company" data-filter-type="missing_in_company"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('missing_in_company',this.checked)"><span class="filter-label">Нет у организации</span></label>
       <label class="filter-btn active" id="fb-amount_diff" data-filter-type="amount_diff"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('amount_diff',this.checked)"><span class="filter-label">Разница в суммах</span></label>
-      <label class="filter-btn active" id="fb-sign_mismatch" data-filter-type="sign_mismatch"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('sign_mismatch',this.checked)"><span class="filter-label">Зеркальный КСФ</span></label>
+      <label class="filter-btn active" id="fb-sign_mismatch" data-filter-type="sign_mismatch"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('sign_mismatch',this.checked)"><span class="filter-label">Односторонние операции</span></label>
       <label class="filter-btn active" id="fb-date_diff" data-filter-type="date_diff"><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('date_diff',this.checked)"><span class="filter-label">Разница в датах</span></label>
       <label class="filter-btn expert-filter active" id="fb-opening_balance_bridge" data-filter-type="opening_balance_bridge" hidden><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('opening_balance_bridge',this.checked)"><span class="filter-label">Связь с начальным сальдо</span></label>
       <label class="filter-btn expert-filter active" id="fb-ambiguous" data-filter-type="ambiguous" hidden><input class="filter-checkbox" type="checkbox" checked onchange="toggleFilter('ambiguous',this.checked)"><span class="filter-label">Требуется проверка</span></label>
@@ -997,7 +993,7 @@
           <th style="width:180px" id="disc-col-org">У организации</th>
           <th style="width:180px" id="disc-col-ctr">У контрагента</th>
           <th style="width:110px">Разница</th>
-          <th style="width:90px">Уровень</th>
+          <th style="width:90px">Приоритет</th>
         </tr></thead>
         <tbody id="disc-body"><tr><td colspan="7" class="empty-state">Выполните сверку для просмотра расхождений</td></tr></tbody>
       </table>
@@ -1074,7 +1070,7 @@
             <li><strong>Нет у контрагента</strong> — документ есть в акте организации, но не найден у второй стороны.</li>
             <li><strong>Нет у организации</strong> — документ есть у контрагента, но не найден в вашем акте.</li>
             <li><strong>Разница в суммах</strong> — документ похож на один и тот же, но сумма отличается.</li>
-            <li><strong>Зеркальный КСФ</strong> — операция отражена противоположным знаком и влияет на сальдо.</li>
+            <li><strong>Односторонние операции</strong> — операции, которые у обеих организаций отражены на одной стороне учёта: Дт–Дт или Кт–Кт.</li>
             <li><strong>Разница в датах</strong> — документ совпал по смыслу, но проведен другой датой.</li>
           </ul>
         </div>
@@ -1269,7 +1265,7 @@
       <label><input type="checkbox" id="ex-missing_in_counterparty" checked> Нет у контрагента</label>
       <label><input type="checkbox" id="ex-missing_in_company" checked> Нет у организации</label>
       <label><input type="checkbox" id="ex-amount_diff" checked> Разница в суммах</label>
-      <label><input type="checkbox" id="ex-sign_mismatch" checked> Зеркальные КСФ</label>
+      <label><input type="checkbox" id="ex-sign_mismatch" checked> Односторонние операции</label>
       <label><input type="checkbox" id="ex-date_diff" checked> Разница в датах</label>
     </div>
     <div class="exp-footer">
@@ -2413,12 +2409,12 @@ const TYPE_ICONS={
   sign:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 5.2h8.6m0 0L9.7 3.3m1.9 1.9L9.7 7.1M13 10.8H4.4m0 0 1.9-1.9m-1.9 1.9 1.9 1.9" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   ok:`<svg class="type-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3.2 8.2 3.1 3.1 6.5-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 };
-const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Зеркальный КСФ','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok'],confirmed_missing:['Нет у контрагента / Нет у организации','badge-red','missing'],likely_date_pair:['Разница в датах','badge-blue','date'],opening_balance_bridge:['Связь с начальным сальдо','badge-green','amount'],amount_difference:['Разница в суммах','badge-yellow','amount'],sign_difference:['Зеркальный КСФ','badge-blue','sign'],ambiguous:['Требуется проверка','badge-gray','amount']};
+const TYPE_MAP={missing_in_counterparty:['Нет у контрагента','badge-red','missing'],missing_in_company:['Нет у организации','badge-red','missing'],amount_diff:['Разница в суммах','badge-yellow','amount'],date_diff:['Разница в датах','badge-gray','date'],sign_mismatch:['Односторонние операции','badge-blue','sign'],expert_reason:['Влияет на итог','badge-green','amount'],expert_neutral:['Не влияет на итог','badge-gray','ok'],confirmed_missing:['Нет у контрагента / Нет у организации','badge-red','missing'],likely_date_pair:['Разница в датах','badge-blue','date'],opening_balance_bridge:['Связь с начальным сальдо','badge-green','amount'],amount_difference:['Разница в суммах','badge-yellow','amount'],sign_difference:['Односторонние операции','badge-blue','sign'],ambiguous:['Требуется проверка','badge-gray','amount']};
 const EXPERT_CATEGORY_ORDER=['confirmed_missing','sign_difference','amount_difference','opening_balance_bridge','likely_date_pair','ambiguous'];
 const EXPERT_DISPLAY_TYPE_ORDER=['missing_in_counterparty','missing_in_company','sign_mismatch','amount_diff','opening_balance_bridge','date_diff','ambiguous'];
 const EXPERT_CATEGORY_LABELS={
   confirmed_missing:'Нет у контрагента / Нет у организации',
-  sign_difference:'Зеркальный КСФ',
+  sign_difference:'Односторонние операции',
   amount_difference:'Разница в суммах',
   opening_balance_bridge:'Связь с начальным сальдо',
   likely_date_pair:'Разница в датах',
@@ -2604,11 +2600,6 @@ function renderSummary(s,file1Name='',file2Name=''){
   summaryCards.classList.toggle('expert-summary-host',independent);
   summaryCards.innerHTML=independent?`
     <div class="expert-summary-layout">
-      <div class="expert-summary-metrics">
-        <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(balances.opening_difference)}">${fmtSignedMoney(balances.opening_difference)}</div></div>
-        <div class="stat-card"><div class="label">Движение периода</div><div class="value dark ${diffClass(balances.period_movement)}">${fmtSignedMoney(balances.period_movement)}</div></div>
-        <div class="stat-card"><div class="label">Разница конечного сальдо</div><div class="value dark ${diffClass(balances.closing_difference)}">${fmtSignedMoney(balances.closing_difference)}</div></div>
-      </div>
       <section class="expert-summary-conclusion" aria-label="Краткий вывод Claude">
         <div class="eyebrow">Краткий вывод Claude</div>
         <div class="conclusion-text">${esc(report.conclusion||'Claude не сформировал краткий вывод.')}</div>

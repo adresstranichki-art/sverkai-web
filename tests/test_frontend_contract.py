@@ -51,7 +51,7 @@ class FrontendContractTests(unittest.TestCase):
 
     def test_independent_summary_uses_compact_layout_and_grouped_findings(self):
         self.assertIn('class="expert-summary-layout"', self.html)
-        self.assertIn('class="expert-summary-metrics"', self.html)
+        self.assertNotIn('expert-summary-metrics', self.html)
         self.assertIn('class="expert-summary-conclusion"', self.html)
         self.assertIn('const EXPERT_CATEGORY_ORDER=', self.html)
         self.assertIn('expert-group-heading', self.html)
@@ -110,6 +110,10 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("result_mode==='balance_reason_analysis'", self.html)
         self.assertIn('balance_reason_analysis', self.html)
 
+    def test_discrepancy_table_uses_priority_column_label(self):
+        self.assertIn('>Приоритет</th>', self.html)
+        self.assertNotIn('>Уровень</th>', self.html)
+
     def test_discrepancy_table_has_no_document_column(self):
         header = re.search(
             r'<tr id="disc-thead-row">(?P<cells>.*?)</tr>',
@@ -138,7 +142,14 @@ class FrontendContractTests(unittest.TestCase):
 
     def test_sign_label_and_opening_balance_highlight_are_standardized(self):
         self.assertNotIn('Зеркальная КСФ', self.html)
-        self.assertIn('Зеркальный КСФ', self.html)
+        self.assertNotIn('Зеркальный КСФ', self.html)
+        self.assertNotIn('Зеркальные КСФ', self.html)
+        self.assertIn('Односторонние операции', self.html)
+        self.assertIn(
+            'операции, которые у обеих организаций отражены на одной стороне '
+            'учёта: Дт–Дт или Кт–Кт',
+            self.html,
+        )
         self.assertIn('Связь с начальным сальдо', self.html)
         self.assertIn("item.category==='opening_balance_bridge'?'expert'", self.html)
 
