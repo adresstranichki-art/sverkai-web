@@ -2613,6 +2613,7 @@ function renderSummary(s,file1Name='',file2Name=''){
         <div class="eyebrow">Краткий вывод Claude</div>
         <div class="conclusion-text">${esc(report.conclusion||'Claude не сформировал краткий вывод.')}</div>
         <div class="expert-summary-confidence">Уверенность: ${esc(expertConfidenceText(report.confidence))}</div>
+        ${report.completeness?`<div class="expert-summary-confidence">Проверено строк: ${report.completeness.rows_total} · сопоставлено: ${report.completeness.rows_matched} · в расхождениях: ${report.completeness.rows_in_findings}</div>`:''}
       </section>
     </div>`:expert?`
     <div class="stat-card"><div class="label">Разница начального сальдо</div><div class="value dark ${diffClass(analysis.opening_balance_difference)}">${fmtSignedMoney(analysis.opening_balance_difference)}</div></div>

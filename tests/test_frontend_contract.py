@@ -34,6 +34,12 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('input.value=MAX_RECON_WINDOW_DAYS', self.html)
         self.assertIn("input.addEventListener('input'", self.html)
 
+    def test_expert_summary_shows_completeness_line(self):
+        self.assertIn('report.completeness', self.html)
+        self.assertIn('Проверено строк', self.html)
+        self.assertIn('сопоставлено', self.html)
+        self.assertIn('в расхождениях', self.html)
+
     def test_independent_expert_contract_is_rendered(self):
         self.assertIn("result_mode==='independent_expert'", self.html)
         self.assertIn('expert_report', self.html)
