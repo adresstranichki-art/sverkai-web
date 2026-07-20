@@ -2357,6 +2357,15 @@ function buildIndependentExpertHighlight(summary){
   return h;
 }
 
+function expertAnalysisErrorText(code){
+  const messages={
+    pause_turn_limit:'Claude не успел завершить анализ после двух продолжений. Повторите позже или используйте обычную сверку.',
+    max_tokens:'Claude достиг лимита отчёта. Результат экспертного анализа не применён.',
+    refusal:'Claude отказался сформировать экспертный отчёт. Обычная сверка сохранена.',
+  };
+  return messages[code]||'Экспертный анализ не выполнен. Обычная сверка сохранена.';
+}
+
 function displayResults(data){
   const independentMode=isIndependentExpertSummary(data.summary);
   const legacyExpertMode=data.summary?.result_mode==='balance_reason_analysis';
@@ -2383,7 +2392,7 @@ function displayResults(data){
   const badge=document.getElementById('badge-disc');badge.textContent=cnt;badge.style.display=cnt?'inline':'none';
   if(independentMode&&data.summary?.expert_analysis_status==='complete_with_warnings')showToast('Экспертный анализ завершён с предупреждениями','warn');
   else if(independentMode)showToast('Независимый экспертный анализ выполнен','success');
-  else if(data.summary?.expert_analysis_status==='failed')showToast('Экспертный анализ не выполнен','error');
+  else if(data.summary?.expert_analysis_status==='failed')showToast(expertAnalysisErrorText(data.summary?.expert_analysis_error),'error');
   else if(legacyExpertMode)showToast('Сформирована сводка причин расхождения сальдо','warn');
   else if(cnt===0)showToast('Расхождений не обнаружено','success');
   else if(data.summary.window_suggestion?.candidate_pairs)showToast('Найдены вероятные совпадения с разницей по датам. Можно расширить окна и пересчитать.','warn');

@@ -47,6 +47,15 @@ class FrontendContractTests(unittest.TestCase):
         )
         self.assertNotIn('проверить все извлечённые операции', self.html)
 
+    def test_expert_failure_shows_actionable_pause_and_token_messages(self):
+        self.assertIn('function expertAnalysisErrorText(code)', self.html)
+        self.assertIn("pause_turn_limit:'Claude не успел завершить анализ", self.html)
+        self.assertIn("max_tokens:'Claude достиг лимита отчёта", self.html)
+        self.assertIn(
+            "expertAnalysisErrorText(data.summary?.expert_analysis_error)",
+            self.html,
+        )
+
     def test_independent_expert_contract_is_rendered(self):
         self.assertIn("result_mode==='independent_expert'", self.html)
         self.assertIn('expert_report', self.html)

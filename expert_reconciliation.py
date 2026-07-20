@@ -41,6 +41,7 @@ DEFAULT_EXPERT_SCOPE = {
     'min_amount': 0.0,
 }
 FILES_API_BETA = 'files-api-2025-04-14'
+MAX_PAUSE_CONTINUATIONS = 2
 CODE_EXECUTION_TOOL = {
     'type': 'code_execution_20250825',
     'name': 'code_execution',
@@ -884,30 +885,55 @@ def run_independent_expert_analysis(
             payload, ensure_ascii=False, separators=(',', ':'),
         )
         content[0]['text'] = serialized_payload
-        message = client.beta.messages.create(
-            model=model,
-            betas=[FILES_API_BETA],
-            max_tokens=16000,
-            temperature=0,
-            system=EXPERT_SYSTEM_PROMPT + _scope_instruction(
+        request_messages = [{'role': 'user', 'content': content}]
+        request_options = {
+            'model': model,
+            'betas': [FILES_API_BETA],
+            'max_tokens': 16000,
+            'temperature': 0,
+            'system': EXPERT_SYSTEM_PROMPT + _scope_instruction(
                 payload['analysis_scope'],
             ),
-            messages=[{'role': 'user', 'content': content}],
-            tools=[CODE_EXECUTION_TOOL],
-            output_config={
+            'tools': [CODE_EXECUTION_TOOL],
+            'output_config': {
                 'format': {
                     'type': 'json_schema',
                     'schema': CLAUDE_EXPERT_REPORT_SCHEMA,
                 },
             },
-        )
-        usage = getattr(message, 'usage', None)
-        usage_payload = {
-            'input_tokens': int(getattr(usage, 'input_tokens', 0) or 0),
-            'output_tokens': int(getattr(usage, 'output_tokens', 0) or 0),
         }
-        stop_reason = getattr(message, 'stop_reason', None)
-        if stop_reason in ('max_tokens', 'refusal'):
+        continuations = 0
+        while True:
+            message = client.beta.messages.create(
+                messages=request_messages,
+                **request_options,
+            )
+            usage = getattr(message, 'usage', None)
+            usage_payload['input_tokens'] += int(
+                getattr(usage, 'input_tokens', 0) or 0,
+            )
+            usage_payload['output_tokens'] += int(
+                getattr(usage, 'output_tokens', 0) or 0,
+            )
+            stop_reason = getattr(message, 'stop_reason', None)
+            if stop_reason != 'pause_turn':
+                break
+            if continuations >= MAX_PAUSE_CONTINUATIONS:
+                result = {
+                    'status': 'failed',
+                    'error': 'pause_turn_limit',
+                    'usage': usage_payload,
+                }
+                break
+            continuations += 1
+            request_messages.append({
+                'role': 'assistant',
+                'content': message.content,
+            })
+
+        if stop_reason == 'pause_turn':
+            pass
+        elif stop_reason in ('max_tokens', 'refusal'):
             result = {
                 'status': 'failed',
                 'error': stop_reason,
@@ -933,11 +959,13 @@ def run_independent_expert_analysis(
                     'warnings': warnings,
                     'usage': usage_payload,
                 }
+        result['continuations'] = continuations
     except Exception as exc:
         result = {
             'status': 'failed',
             'error': type(exc).__name__,
             'usage': usage_payload,
+            'continuations': locals().get('continuations', 0),
         }
     cleanup_warnings = _delete_uploaded_files(client, uploaded_file_ids)
     return _with_cleanup_warnings(result, cleanup_warnings)

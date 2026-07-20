@@ -81,6 +81,34 @@ class _FakeMessages:
         )
 
 
+def _message_response(report=None, *, stop_reason='end_turn',
+                      input_tokens=1500, output_tokens=700):
+    content = [types.SimpleNamespace(type='server_tool_use')]
+    if report is not None:
+        content.append(types.SimpleNamespace(
+            type='text',
+            text=json.dumps(report, ensure_ascii=False),
+        ))
+    return types.SimpleNamespace(
+        content=content,
+        usage=types.SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        ),
+        stop_reason=stop_reason,
+    )
+
+
+class _SequenceMessages:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.responses[len(self.calls) - 1]
+
+
 class _FakeFiles:
     def __init__(self, fail_upload_at=None, fail_delete=False):
         self.fail_upload_at = fail_upload_at
@@ -391,6 +419,84 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertEqual(result['status'], 'failed')
         self.assertEqual(result['error'], 'max_tokens')
         self.assertEqual(result['usage']['input_tokens'], 1500)
+        self.assertEqual(client.files.deleted, [
+            'file-secret-1', 'file-secret-2',
+        ])
+
+    def test_pause_turn_continues_same_analysis_without_reuploading(self):
+        client = _FakeClient()
+        messages = _SequenceMessages([
+            _message_response(
+                stop_reason='pause_turn',
+                input_tokens=1200,
+                output_tokens=400,
+            ),
+            _message_response(
+                _full_report(),
+                input_tokens=900,
+                output_tokens=300,
+            ),
+        ])
+        client.messages = messages
+        client.beta.messages = messages
+
+        result = run_independent_expert_analysis(
+            self.df1, self.df2, client, 'claude-sonnet-test',
+        )
+
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['continuations'], 1)
+        self.assertEqual(result['usage'], {
+            'input_tokens': 2100,
+            'output_tokens': 700,
+        })
+        self.assertEqual(len(messages.calls), 2)
+        self.assertEqual(len(client.files.uploads), 2)
+        continuation = messages.calls[1]
+        self.assertEqual(continuation['messages'][-1]['role'], 'assistant')
+        self.assertIs(
+            continuation['messages'][-1]['content'],
+            messages.responses[0].content,
+        )
+        self.assertEqual(client.files.deleted, [
+            'file-secret-1', 'file-secret-2',
+        ])
+
+    def test_repeated_pause_turn_stops_after_two_continuations(self):
+        client = _FakeClient()
+        messages = _SequenceMessages([
+            _message_response(
+                stop_reason='pause_turn',
+                input_tokens=100,
+                output_tokens=20,
+            ),
+            _message_response(
+                stop_reason='pause_turn',
+                input_tokens=80,
+                output_tokens=15,
+            ),
+            _message_response(
+                stop_reason='pause_turn',
+                input_tokens=60,
+                output_tokens=10,
+            ),
+        ])
+        client.messages = messages
+        client.beta.messages = messages
+
+        result = run_independent_expert_analysis(
+            self.df1, self.df2, client, 'claude-sonnet-test',
+        )
+
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['error'], 'pause_turn_limit')
+        self.assertEqual(result['continuations'], 2)
+        self.assertEqual(result['usage'], {
+            'input_tokens': 240,
+            'output_tokens': 45,
+        })
+        self.assertEqual(len(messages.calls), 3)
+        self.assertEqual(len(client.files.uploads), 2)
         self.assertEqual(client.files.deleted, [
             'file-secret-1', 'file-secret-2',
         ])
