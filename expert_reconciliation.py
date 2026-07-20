@@ -127,10 +127,12 @@ EXPERT_SYSTEM_PROMPT = (
     'confirmed_missing ставь только при высокой уверенности. '
     'Приход и продажа, корректировки прихода и продажи считай зеркальными типами; '
     'сначала исключи пары по модулю суммы и смыслу документа. '
-    'Группируй строго в порядке: confirmed_missing, sign_difference, amount_difference, '
-    'opening_balance_bridge, likely_date_pair, ambiguous. В группе сортируй по убыванию модуля influence. '
-    'Сначала перечисли все confirmed_missing; при лимите убирай ambiguous и likely_date_pair первыми. '
-    'Дай не более 8 расхождений: confirmed_missing не группируй, остальные группируй. '
+    'Перечисли каждое расхождение отдельной записью со своим evidence; не объединяй операции. '
+    'Перечисли все найденные расхождения без ограничения количества. '
+    'Сортируй в порядке: confirmed_missing, sign_difference, amount_difference, '
+    'opening_balance_bridge, likely_date_pair, ambiguous; внутри — по убыванию модуля influence. '
+    'В conclusion не перечисляй отдельные расхождения — только общий вывод: сошлись ли сальдо '
+    'и общий характер расхождений. '
     'Не выдумывай row_id: evidence содержит только id из входа. Без Markdown и повторов: '
     'conclusion — до 450 знаков; title — до 90, reason — до 140 знаков.'
 )
@@ -650,7 +652,7 @@ def run_independent_expert_analysis(
     try:
         message = client.messages.create(
             model=model,
-            max_tokens=2800,
+            max_tokens=8000,
             temperature=0,
             system=EXPERT_SYSTEM_PROMPT + _expert_scope_instruction(scope),
             messages=[{

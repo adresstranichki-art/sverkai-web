@@ -169,7 +169,7 @@ class ExpertReconciliationTests(unittest.TestCase):
         self.assertEqual(len(messages.calls), 1)
         call = messages.calls[0]
         self.assertEqual(call['model'], 'claude-sonnet-test')
-        self.assertEqual(call['max_tokens'], 2800)
+        self.assertEqual(call['max_tokens'], 8000)
         self.assertEqual(call['output_config']['format']['type'], 'json_schema')
         sent_payload = json.loads(call['messages'][0]['content'])
         self.assertNotIn('summary', sent_payload)
@@ -219,7 +219,7 @@ class ExpertReconciliationTests(unittest.TestCase):
             'doc1_value', 'doc2_value', 'action',
         ):
             self.assertNotIn(duplicate, item_properties)
-        self.assertIn('не более 8', messages.calls[0]['system'].lower())
+        self.assertIn('без ограничения количества', messages.calls[0]['system'].lower())
         self.assertIn('balance_comparison уже рассчитан', messages.calls[0]['system'].lower())
         self.assertIn(
             'opening_balance_bridge — только операция',
@@ -230,7 +230,7 @@ class ExpertReconciliationTests(unittest.TestCase):
             messages.calls[0]['system'].lower(),
         )
         self.assertIn(
-            'сначала перечисли все confirmed_missing',
+            'отдельной записью',
             messages.calls[0]['system'].lower(),
         )
         system = messages.calls[0]['system'].lower()
@@ -507,6 +507,13 @@ class ExpertReconciliationTests(unittest.TestCase):
         item = result['report']['discrepancies'][0]
         self.assertEqual(item['influence'], -11845.0)
         self.assertIn('missing_influence_fixed', result['report']['guard_log'])
+
+    def test_prompt_has_no_finding_limit_and_forbids_grouping(self):
+        from expert_reconciliation import EXPERT_SYSTEM_PROMPT
+        self.assertNotIn('не более 8', EXPERT_SYSTEM_PROMPT)
+        self.assertNotIn('группируй', EXPERT_SYSTEM_PROMPT.replace('Не группируй', ''))
+        self.assertIn('отдельной записью', EXPERT_SYSTEM_PROMPT)
+        self.assertIn('conclusion не перечисляй отдельные расхождения', EXPERT_SYSTEM_PROMPT)
 
     def test_duplicate_rows_are_removed_after_reclassification(self):
         df1, df2 = self._frames()
